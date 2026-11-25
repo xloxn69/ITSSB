@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="440" viewBox="0 0 480 440" role="img" aria-labelledby="title desc">
+  <title id="title">How ITSSB fits together</title>
+  <desc id="desc">The USB GPS feeds the Pi device service, which talks to the driver touchscreen and sends data over HTTPS to the Convex backend. The backend serves the staff and Android web app and the iOS app.</desc>
+  <style>
+    .bg { fill: #ffffff; }
+    .box { fill: #f6f8fa; stroke: #d0d7de; stroke-width: 1.5; }
+    .key { fill: #fff8e1; stroke: #f2b300; stroke-width: 2; }
+    .name { fill: #1f2328; font: 600 15px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+    .path { fill: #59636e; font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .label { fill: #59636e; font: 600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; letter-spacing: 0.5px; }
+    .line { stroke: #8c959f; stroke-width: 2; fill: none; }
+    .head { fill: #8c959f; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0d1117; }
+      .box { fill: #161b22; stroke: #3d444d; }
+      .key { fill: #2b2310; stroke: #ffc51a; }
+      .name { fill: #f0f6fc; }
+      .path, .label { fill: #9198a1; }
+      .line { stroke: #6e7681; }
+      .head { fill: #6e7681; }
+    }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="head" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="480" height="440" rx="12"/>
+
+  <!-- Row 1: GPS -->
+  <rect class="box" x="40" y="24" width="200" height="56" rx="10"/>
+  <text class="name" x="140" y="57" text-anchor="middle">USB GPS</text>
+
+  <!-- Row 2: Pi <-> driver touchscreen -->
+  <rect class="key" x="40" y="120" width="200" height="64" rx="10"/>
+  <text class="name" x="140" y="148" text-anchor="middle">Pi device service</text>
+  <text class="path" x="140" y="168" text-anchor="middle">apps/device</text>
+
+  <rect class="box" x="290" y="120" width="160" height="64" rx="10"/>
+  <text class="name" x="370" y="148" text-anchor="middle">Driver screen</text>
+  <text class="path" x="370" y="168" text-anchor="middle">apps/driver-ui</text>
+
+  <!-- Row 3: backend <-> web -->
+  <rect class="key" x="40" y="240" width="200" height="64" rx="10"/>
+  <text class="name" x="140" y="268" text-anchor="middle">Convex backend</text>
+  <text class="path" x="140" y="288" text-anchor="middle">apps/backend</text>
+
+  <rect class="box" x="290" y="240" width="160" height="64" rx="10"/>
+  <text class="name" x="370" y="268" text-anchor="middle">Staff / Android</text>
+  <text class="path" x="370" y="288" text-anchor="middle">apps/web</text>
+
+  <!-- Row 4: iOS -->
+  <rect class="box" x="40" y="352" width="200" height="64" rx="10"/>
+  <text class="name" x="140" y="380" text-anchor="middle">iOS app</text>
+  <text class="path" x="140" y="400" text-anchor="middle">apps/ios</text>
+
+  <!-- Connections -->
+  <line class="line" x1="140" y1="80" x2="140" y2="118" marker-end="url(#arrow)"/>
+  <line class="line" x1="242" y1="152" x2="288" y2="152" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <line class="line" x1="140" y1="184" x2="140" y2="238" marker-end="url(#arrow)"/>
+  <text class="label" x="152" y="215">HTTPS</text>
+  <line class="line" x1="242" y1="272" x2="288" y2="272" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <line class="line" x1="140" y1="306" x2="140" y2="350" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+</svg>

@@ -11,14 +11,9 @@ their bus is and how fresh that information is.
 
 ## How it fits together
 
-```mermaid
-flowchart LR
-    GPS["USB GPS"] --> PI["Pi device service<br/>(apps/device)"]
-    PI <--> UI["Driver touchscreen<br/>(apps/driver-ui)"]
-    PI -->|HTTPS| BE["Convex backend<br/>(apps/backend)"]
-    BE <--> IOS["iOS app<br/>(apps/ios)"]
-    BE <--> WEB["Staff / Android web<br/>(apps/web)"]
-```
+<p align="center">
+  <img src="docs/assets/architecture.svg" width="480" alt="USB GPS feeds the Pi device service, which talks to the driver touchscreen and sends data over HTTPS to the Convex backend. The backend serves the staff/Android web app and the iOS app.">
+</p>
 
 | Path | What it is | Stack |
 |---|---|---|
