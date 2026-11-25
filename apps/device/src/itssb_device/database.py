@@ -1,0 +1,150 @@
+"""Local SQLite state and outbox (docs/04 §7-8).
+
+A selected observation and its outbox row are written in ONE transaction, so
+an observation is either fully saved and queued, or not saved at all.
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
+
+from .models import Fix, TelemetryEvent
+
+MIGRATIONS: list[str] = [
+    # 1: runs, telemetry, outbox
+    """
+    CREATE TABLE local_runs (
+        run_id TEXT PRIMARY KEY,
+        state TEXT NOT NULL CHECK (state IN ('scheduled','active','completed','cancelled')),
+        next_run_sequence INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE telemetry_events (
+        event_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES local_runs(run_id),
+        run_sequence INTEGER NOT NULL,
+        captured_at_ms INTEGER NOT NULL,
+        UNIQUE (run_id, run_sequence)
+    );
+    CREATE TABLE outbox (
+        event_id TEXT PRIMARY KEY REFERENCES telemetry_events(event_id),
+        payload TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (status IN ('pending','acknowledged','rejected')),
+        attempts INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at_ms INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT
+    );
+    CREATE INDEX outbox_pending ON outbox(status, next_attempt_at_ms);
+    """,
+]
+
+
+class RunNotActive(Exception):
+    pass
+
+
+class Database:
+    def __init__(self, path: Path | str) -> None:
+        self.conn = sqlite3.connect(path, isolation_level=None, timeout=5.0)
+        self.conn.row_factory = sqlite3.Row
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA foreign_keys=ON")
+        self.conn.execute("PRAGMA synchronous=FULL")
+        self._migrate()
+
+    def close(self) -> None:
+        self.conn.close()
+
+    @contextmanager
+    def transaction(self) -> Iterator[sqlite3.Connection]:
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield self.conn
+        except BaseException:
+            self.conn.execute("ROLLBACK")
+            raise
+        self.conn.execute("COMMIT")
+
+    def _migrate(self) -> None:
+        current = self.conn.execute("PRAGMA user_version").fetchone()[0]
+        for version, sql in enumerate(MIGRATIONS[current:], start=current + 1):
+            with self.transaction() as tx:
+                for statement in filter(str.strip, sql.split(";")):
+                    tx.execute(statement)
+                tx.execute(f"PRAGMA user_version={version}")
+
+    # ── Runs ──────────────────────────────────────────────────────────
+
+    def save_run(self, run_id: str, state: str) -> None:
+        """Commits a server-issued run identity before normal operation continues."""
+        with self.transaction() as tx:
+            tx.execute(
+                "INSERT INTO local_runs(run_id, state) VALUES(?, ?) "
+                "ON CONFLICT(run_id) DO UPDATE SET state=excluded.state",
+                (run_id, state),
+            )
+
+    def active_run_id(self) -> str | None:
+        row = self.conn.execute("SELECT run_id FROM local_runs WHERE state='active'").fetchone()
+        return row["run_id"] if row else None
+
+    # ── Observations ──────────────────────────────────────────────────
+
+    def record_observation(
+        self, run_id: str, fix: Fix, boot_id: str, sequence: int
+    ) -> TelemetryEvent:
+        """Atomically: check the run is active, reserve runSequence, create the
+        eventId once, store the event, and queue its exact payload."""
+        with self.transaction() as tx:
+            row = tx.execute(
+                "SELECT next_run_sequence FROM local_runs WHERE run_id=? AND state='active'",
+                (run_id,),
+            ).fetchone()
+            if row is None:
+                raise RunNotActive(run_id)
+            run_sequence = row["next_run_sequence"]
+            event = TelemetryEvent(
+                event_id=str(uuid.uuid4()),
+                boot_id=boot_id,
+                sequence=sequence,
+                run_sequence=run_sequence,
+                run_id=run_id,
+                fix=fix,
+            )
+            tx.execute(
+                "INSERT INTO telemetry_events(event_id, run_id, run_sequence, captured_at_ms) "
+                "VALUES(?, ?, ?, ?)",
+                (event.event_id, run_id, run_sequence, fix.captured_at_ms),
+            )
+            tx.execute(
+                "INSERT INTO outbox(event_id, payload) VALUES(?, ?)",
+                (event.event_id, json.dumps(event.to_wire(), separators=(",", ":"))),
+            )
+            tx.execute(
+                "UPDATE local_runs SET next_run_sequence=? WHERE run_id=?",
+                (run_sequence + 1, run_id),
+            )
+        return event
+
+    # ── Outbox ────────────────────────────────────────────────────────
+
+    def pending_payloads(self, now_ms: int, limit: int = 50) -> list[dict]:
+        """Oldest-first pending payloads that are due. Payloads are byte-for-byte
+        what was saved, so retries reuse the same eventId."""
+        rows = self.conn.execute(
+            "SELECT payload FROM outbox WHERE status='pending' AND next_attempt_at_ms<=? "
+            "ORDER BY rowid LIMIT ?",
+            (now_ms, limit),
+        ).fetchall()
+        return [json.loads(r["payload"]) for r in rows]
+
+    def outbox_status(self, event_id: str) -> str | None:
+        row = self.conn.execute(
+            "SELECT status FROM outbox WHERE event_id=?", (event_id,)
+        ).fetchone()
+        return row["status"] if row else None

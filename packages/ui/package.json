@@ -1,0 +1,16 @@
+{
+  "name": "@itssb/ui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared web design tokens (mirrors the iOS design system).",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/tokens.ts"
+  },
+  "scripts": {
+    "lint": "oxlint src",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  }
+}

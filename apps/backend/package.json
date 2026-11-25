@@ -1,0 +1,25 @@
+{
+  "name": "@itssb/backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ITSSB shared backend: Convex schema, authorization, and device ingestion.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "convex dev",
+    "deploy": "convex deploy",
+    "codegen": "convex codegen",
+    "lint": "oxlint convex",
+    "typecheck": "tsc --noEmit -p convex",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@itssb/contracts": "workspace:*",
+    "convex": "^1.51.0"
+  },
+  "devDependencies": {
+    "@edge-runtime/vm": "^5.0.0",
+    "vite": "^8.3.8",
+    "convex-test": "^0.0.73"
+  }
+}

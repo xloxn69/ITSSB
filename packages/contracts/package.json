@@ -1,0 +1,17 @@
+{
+  "name": "@itssb/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared ITSSB wire types, validation, and fixtures (docs/08).",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./fixtures": "./src/fixtures.ts"
+  },
+  "scripts": {
+    "lint": "oxlint src",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  }
+}

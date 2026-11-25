@@ -1,0 +1,13 @@
+// Shared, non-secret build settings. Safe to commit.
+//
+// Personal or secret values (your Apple team ID, a real Convex URL) go in
+// Secrets.xcconfig, which is gitignored. Copy Secrets.example.xcconfig to start.
+
+ITSSB_BUNDLE_ID = org.itssb.app
+ITSSB_DEVELOPMENT_TEAM =
+
+// Placeholder that refuses connections instantly, so a missing config fails
+// fast instead of silently talking to someone else's backend.
+CONVEX_URL = http:/$()/127.0.0.1:1
+
+#include? "Secrets.xcconfig"

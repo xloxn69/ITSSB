@@ -1,0 +1,52 @@
+included:
+  - apps/ios/ITSSB
+  - apps/ios/ITSSBTests
+  - apps/ios/Packages/ITSSBDesignSystem/Sources
+  - apps/ios/Packages/ITSSBDesignSystem/Tests
+
+excluded:
+  - apps/ios/ITSSB.xcodeproj
+  - "**/.build"
+  - "**/DerivedData"
+
+opt_in_rules:
+  - empty_count
+  - explicit_init
+  - redundant_nil_coalescing
+  - vertical_whitespace_closing_braces
+  - first_where
+
+disabled_rules:
+  - multiple_closures_with_trailing_closure # idiomatic SwiftUI
+  - todo
+
+line_length:
+  warning: 120
+  error: 150
+  ignores_comments: true
+
+identifier_name:
+  excluded: [id, x, y, ms, xs, sm, md, lg, xl]
+
+# Design-system enforcement: spacing and radii come from AppSpacing / AppRadius,
+# colors from AppColors. A genuine exception gets
+# `// swiftlint:disable:next <rule>` with a reason.
+custom_rules:
+  no_hardcoded_padding:
+    name: "Use AppSpacing"
+    regex: '\.padding\(\s*(\.[a-zA-Z]+\s*,\s*)?[0-9]+(\.[0-9]+)?\s*\)'
+    message: "Use AppSpacing tokens instead of numeric padding."
+    severity: error
+    excluded: "Packages/ITSSBDesignSystem/"
+  no_hardcoded_corner_radius:
+    name: "Use AppRadius"
+    regex: 'cornerRadius:\s*[0-9]+'
+    message: "Use AppRadius tokens instead of numeric corner radii."
+    severity: error
+    excluded: "Packages/ITSSBDesignSystem/"
+  no_literal_colors:
+    name: "Use AppColors"
+    regex: 'Color\((red|hex|light):|Color\.(red|blue|green|yellow|orange|purple|pink|gray|black|white)\b'
+    message: "Use AppColors semantic tokens."
+    severity: error
+    excluded: "Packages/ITSSBDesignSystem/"

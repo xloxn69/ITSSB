@@ -1,0 +1,13 @@
+{
+  "name": "@itssb/ios",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Turbo wrapper for the SwiftUI app. Real tooling: XcodeGen, xcodebuild, SwiftLint. macOS only.",
+  "license": "MIT",
+  "scripts": {
+    "generate": "xcodegen",
+    "lint": "cd ../.. && swiftlint lint --strict",
+    "build": "xcodegen && xcodebuild build -project ITSSB.xcodeproj -scheme ITSSB -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO -quiet",
+    "test": "xcodegen && bash scripts/test.sh"
+  }
+}
