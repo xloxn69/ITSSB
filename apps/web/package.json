@@ -1,0 +1,20 @@
+{
+  "name": "@itssb/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Staff console and family web (Android). Not started yet; see docs/12.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "oxlint src",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@itssb/ui": "workspace:*"
+  },
+  "devDependencies": {
+    "vite": "^8.3.8"
+  }
+}

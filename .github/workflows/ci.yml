@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Least privilege: CI only reads the repo.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # TypeScript (contracts, ui, backend, driver-ui, web) + Python device service.
+  # GitHub-hosted runners only: this is a public repo, and a self-hosted runner
+  # would execute code from any fork's pull request on your machine.
+  check:
+    name: Lint, typecheck, test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          working-directory: apps/device
+
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install Python dependencies
+        working-directory: apps/device
+        run: uv sync --locked
+
+      - name: Lint, typecheck, test (everything except iOS)
+        run: bun run check
+
+  ios:
+    name: iOS build & test
+    runs-on: macos-latest
+    permissions:
+      contents: read
+      pull-requests: read # paths-filter reads the PR's changed files
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Only run when iOS files changed
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            ios:
+              - 'apps/ios/**'
+              - '.swiftlint.yml'
+              - '.github/workflows/ci.yml'
+
+      - name: Toolchain
+        if: steps.changes.outputs.ios == 'true' || github.event_name != 'pull_request'
+        run: |
+          xcodebuild -version
+          brew install xcodegen swiftlint
+
+      - name: SwiftLint
+        if: steps.changes.outputs.ios == 'true' || github.event_name != 'pull_request'
+        run: swiftlint lint --strict --reporter github-actions-logging
+
+      - name: Design system package tests
+        if: steps.changes.outputs.ios == 'true' || github.event_name != 'pull_request'
+        working-directory: apps/ios/Packages/ITSSBDesignSystem
+        run: swift test
+
+      - name: App unit tests (simulator, no signing)
+        if: steps.changes.outputs.ios == 'true' || github.event_name != 'pull_request'
+        working-directory: apps/ios
+        run: xcodegen && bash scripts/test.sh

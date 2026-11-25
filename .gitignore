@@ -1,0 +1,54 @@
+# ── Secrets (never commit real values; commit *.example files instead) ──
+.env
+.env.*
+!.env.example
+device.env
+*.p8
+*.p12
+*.mobileprovision
+apps/ios/Config/Secrets.xcconfig
+
+# ── JavaScript / Bun / Turbo ──
+node_modules/
+.turbo/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+.vercel/
+
+# Convex local deployment state
+.convex/
+
+# ── Python (apps/device) ──
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+# Local runtime data from development runs
+apps/device/var/
+
+# ── Xcode / Swift (apps/ios) ──
+xcuserdata/
+DerivedData/
+.build/
+.swiftpm/
+*.xcresult
+*.ipa
+*.dSYM
+*.dSYM.zip
+# Generated from apps/ios/project.yml by XcodeGen
+apps/ios/*.xcodeproj/
+
+# ── OS / editors ──
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+
+# ── Large binaries (publish via GitHub Releases instead) ──
+*.pdf
+*.zip

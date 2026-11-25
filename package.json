@@ -1,0 +1,26 @@
+{
+  "name": "itssb",
+  "private": true,
+  "description": "Intelligence Transportation System for School Buses",
+  "license": "MIT",
+  "packageManager": "bun@1.4.5",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build --filter=!@itssb/ios",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "check": "turbo run lint typecheck test --filter=!@itssb/ios",
+    "check:ios": "turbo run lint test --filter=@itssb/ios"
+  },
+  "devDependencies": {
+    "oxlint": "^1.94.0",
+    "turbo": "^2.11.13",
+    "typescript": "5.9.3",
+    "vitest": "^5.1.1"
+  }
+}

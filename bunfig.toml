@@ -1,0 +1,4 @@
+[install]
+# CI installs with `bun install --frozen-lockfile`; run `bun install` locally to update bun.lock.
+# Wait three days before adopting newly published package versions (supply-chain safety).
+minimumReleaseAge = 259200
