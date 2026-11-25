@@ -55,7 +55,7 @@ jobs:
 
       - name: Only run when iOS files changed
         id: changes
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             ios:
