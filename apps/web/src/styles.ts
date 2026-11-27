@@ -81,6 +81,7 @@ th, td { text-align: left; padding: var(--space-sm) var(--space-md); border-bott
 th { color: var(--color-text-secondary); font-weight: 600; font-size: 0.875rem; }
 .badge { display: inline-block; padding: var(--space-xxs) var(--space-sm); border-radius: var(--radius-sm);
   background: var(--color-surface-muted); font-size: 0.8125rem; font-weight: 600; }
+.env-badge { margin-left: var(--space-sm); letter-spacing: 0; }
 .row { display: flex; gap: var(--space-md); align-items: center; flex-wrap: wrap; }
 .spread { justify-content: space-between; }
 label { display: flex; flex-direction: column; gap: var(--space-xs); }
