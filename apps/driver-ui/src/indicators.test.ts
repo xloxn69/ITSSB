@@ -130,4 +130,10 @@ describe("environmentLabel (docs/14 §2)", () => {
     expect(environmentLabel(observed(snapshot()))).toBeNull();
     expect(environmentLabel({ ...observed(snapshot()), snapshot: null })).toBeNull();
   });
+
+  it("drops the label once the device stops answering, instead of showing a cached one", () => {
+    const dev = snapshot({ process: { version: "0.1.0", bootId: "b", uptimeS: 1, environment: "development" } });
+    expect(environmentLabel({ ...observed(dev), pollFailed: true })).toBeNull();
+    expect(environmentLabel(observed(dev, 60_000))).toBeNull();
+  });
 });

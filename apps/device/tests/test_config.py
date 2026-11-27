@@ -116,6 +116,19 @@ def test_example_file_parses_but_its_placeholders_are_refused():
 # ── Environment label (docs/14 §2) ───────────────────────────────────
 
 
+@pytest.mark.parametrize("value", ["", "   "])
+def test_environment_set_but_empty_is_refused(value, tmp_path):
+    with pytest.raises(ConfigError, match="ITSSB_ENVIRONMENT"):
+        load_config({"ITSSB_ENVIRONMENT": value}, env_file=tmp_path / "none.env")
+
+
+def test_environment_empty_in_the_env_file_is_refused(tmp_path):
+    env_file = tmp_path / "device.env"
+    env_file.write_text("ITSSB_ENVIRONMENT=\n")
+    with pytest.raises(ConfigError, match="ITSSB_ENVIRONMENT"):
+        load_config({}, env_file=env_file)
+
+
 def test_environment_defaults_to_development_never_production(tmp_path):
     assert load_config({}, env_file=tmp_path / "none.env").environment == "development"
 

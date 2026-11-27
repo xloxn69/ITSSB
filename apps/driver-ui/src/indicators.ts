@@ -188,10 +188,13 @@ export function allIndicators(o: Observed): Indicator[] {
 
 /**
  * A visible label for a non-production device (docs/14 §2), so a bench or
- * test Pi is never mistaken for a live bus. Null in production, and when the
- * device didn't say (older software or no answer): nothing is guessed.
+ * test Pi is never mistaken for a live bus. Null in production, when the
+ * device didn't say (older software), and when it isn't answering now:
+ * nothing is guessed.
  */
 export function environmentLabel(o: Observed): string | null {
+  // A cached answer from a device that stopped answering says nothing now.
+  if (!serviceAnswering(o)) return null;
   const env = o.snapshot?.process.environment;
   if (env === "development") return "Development device";
   if (env === "staging") return "Staging device";

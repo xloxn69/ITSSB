@@ -182,8 +182,10 @@ ENVIRONMENTS = ("development", "staging", "production")
 
 
 def _environment(raw: str | None) -> str:
-    """A typo is refused rather than guessed: "prod" must not pass as production."""
-    if raw is None or raw == "":
+    """Unset means development. A typo or an empty value is refused rather
+    than guessed: "prod" must not pass as production, and "" must not quietly
+    become development on a production Pi."""
+    if raw is None:
         return "development"
     if raw not in ENVIRONMENTS:
         raise ConfigError("ITSSB_ENVIRONMENT must be development, staging, or production")
