@@ -289,3 +289,84 @@ def test_restore_refuses_a_file_that_is_not_a_device_database(tmp_path):
     r = tool(tmp_path / "opt", "restore", "--db", str(db), "--from", str(junk))
     assert r.returncode != 0
     assert counts(db)["outbox"] == 2
+
+
+# ── Review fixes ───────────────────────────────────────────────────────
+
+
+def add_pending(db: Path, event_id: str) -> None:
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "INSERT INTO telemetry_events VALUES (?, 'run_fictional_1', ?, 1700000009999)",
+        (event_id, 900 + len(event_id)),
+    )
+    conn.execute("INSERT INTO outbox (event_id, payload) VALUES (?, '{}')", (event_id,))
+    conn.commit()
+    conn.close()
+
+
+def test_restore_refuses_to_drop_events_recorded_after_the_backup(tmp_path):
+    db = tmp_path / "device.sqlite3"
+    make_db(db, pending=2)
+    out = tmp_path / "b"
+    assert tool(tmp_path / "opt", "backup", "--db", str(db), "--out", str(out)).returncode == 0
+    [snapshot] = out.glob("device-*.sqlite3")
+    add_pending(db, "evt_after_backup")  # recorded offline after the backup
+
+    r = tool(tmp_path / "opt", "restore", "--db", str(db), "--from", str(snapshot))
+    assert r.returncode != 0
+    assert "1 unsent event" in r.stderr
+    assert counts(db)["outbox"] == 3  # nothing replaced
+
+    # Only an explicit decision discards them, and a copy is still kept.
+    r = tool(
+        tmp_path / "opt", "restore", "--db", str(db), "--from", str(snapshot), "--discard-unsent"
+    )
+    assert r.returncode == 0, r.stderr
+    assert counts(db)["outbox"] == 2
+    [kept] = tmp_path.glob("device.sqlite3.before-restore-*")
+    assert counts(kept)["outbox"] == 3
+
+
+def test_staging_leaves_no_bytecode_and_bytecode_added_later_is_refused(tmp_path):
+    root = tmp_path / "opt"
+    assert tool(root, "stage", str(fake_source(tmp_path, "a")), "--version", "v1").returncode == 0
+    release = root / "releases" / "v1"
+    assert not list(release.rglob("*.pyc"))
+    assert not list(release.rglob("__pycache__"))
+
+    cache = release / "src" / "itssb_device" / "__pycache__"
+    cache.mkdir()
+    (cache / "gps.cpython-313.pyc").write_bytes(b"not the reviewed code")
+    r = tool(root, "activate", "v1")
+    assert r.returncode != 0
+    assert "integrity" in r.stderr
+    assert not (root / "current").exists()
+
+
+def test_an_interrupted_switch_keeps_a_working_rollback(tmp_path, monkeypatch):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("itssb_release", TOOL)
+    release_tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(release_tool)
+
+    root = tmp_path / "opt"
+    for v in ("v1", "v2"):
+        assert tool(root, "stage", str(fake_source(tmp_path, v)), "--version", v).returncode == 0
+    assert tool(root, "activate", "v1").returncode == 0
+
+    real = release_tool.switch_link
+
+    def fail_on_current(link, version):
+        if link.name == "current":
+            raise OSError("simulated power loss")
+        real(link, version)
+
+    monkeypatch.setattr(release_tool, "switch_link", fail_on_current)
+    with pytest.raises(OSError):
+        release_tool.main(["--root", str(root), "--health-url", CLOSED_PORT_URL, "activate", "v2"])
+    # The new release never became current, and the release that is current
+    # can still be returned to.
+    assert (root / "current").resolve() == (root / "releases" / "v1").resolve()
+    assert (root / "previous").resolve() == (root / "releases" / "v1").resolve()

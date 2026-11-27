@@ -33,7 +33,7 @@ fail() { echo "CHECK FAIL: $*"; exit 1; }
 run() { echo "\$ itssb_release.py ${*}"; "${TOOL[@]}" "$@"; }
 hget() { curl -s --max-time 3 "$HEALTH" | "$PY" -c "import json,sys; h=json.load(sys.stdin); print($1)"; }
 cli() {  # the device CLI from the CURRENT release, against the rehearsal db
-  env -i PATH="$PATH" PYTHONPATH="$ROOT/current/src" ITSSB_ENV_FILE="$WORK/none.env" \
+  env -i PATH="$PATH" PYTHONPATH="$ROOT/current/src" PYTHONDONTWRITEBYTECODE=1 ITSSB_ENV_FILE="$WORK/none.env" \
     ITSSB_DATABASE_PATH="$DB" "$PY" -m itssb_device "$@"
 }
 start_service() {  # runs current/ exactly as the unit does (WorkingDirectory + PYTHONPATH)

@@ -79,11 +79,15 @@ def require_stopped(url: str) -> None:
 
 
 def tree_digest(release: Path) -> str:
-    """SHA-256 over every file's relative path and contents, RELEASE.json excluded."""
+    """SHA-256 over every file's relative path and contents, RELEASE.json excluded.
+
+    Bytecode is included like any file, so a cache added after staging fails
+    the check: Python would run it instead of the reviewed source.
+    """
     h = hashlib.sha256()
     for path in sorted(p for p in release.rglob("*") if p.is_file()):
         rel = path.relative_to(release).as_posix()
-        if rel == "RELEASE.json" or "__pycache__" in path.parts:
+        if rel == "RELEASE.json":
             continue
         h.update(rel.encode() + b"\0")
         h.update(hashlib.sha256(path.read_bytes()).digest())
@@ -98,7 +102,8 @@ def probe_release(src: Path) -> dict:
         "print(json.dumps({'packageVersion': p.__version__, 'dbSchemaVersion': len(d.MIGRATIONS)}))"
     )
     out = subprocess.run(  # noqa: S603 (fixed interpreter and code)
-        [sys.executable, "-I", "-c", code, str(src / "src")],
+        # -B: the probe must not leave bytecode in the release.
+        [sys.executable, "-I", "-B", "-c", code, str(src / "src")],
         capture_output=True,
         text=True,
         timeout=60,
@@ -175,6 +180,11 @@ def cmd_stage(args: argparse.Namespace) -> int:
         if (src / f).is_file():
             shutil.copy2(src / f, staging / f)
     probe = probe_release(staging)
+    for cache in [p for p in staging.rglob("*") if p.name == "__pycache__" or p.suffix == ".pyc"]:
+        if cache.is_dir():
+            shutil.rmtree(cache)
+        elif cache.exists():
+            cache.unlink()
     info = {
         "version": args.version,
         "sourceRevision": args.revision,
@@ -218,9 +228,11 @@ def activate(args: argparse.Namespace, version: str, verb: str) -> int:
     if before == version:
         print(f"{version} is already current; nothing changed")
         return 0
-    switch_link(current, version)
+    # `previous` first: if the switch is interrupted between the two links,
+    # `current` is unchanged and `previous` still names a working release.
     if before:
         switch_link(root / "previous", before)
+    switch_link(current, version)
     entry = {"atMs": time.time_ns() // 1_000_000, "action": verb, "from": before, "to": version}
     with (root / "activations.log").open("a") as log:
         log.write(json.dumps(entry) + "\n")
@@ -313,6 +325,19 @@ def check_device_db(path: Path) -> None:
         )
 
 
+def unsent_missing_from(db: Path, snapshot: Path) -> list[str]:
+    """Pending outbox event IDs in `db` that the snapshot does not have at all."""
+
+    def ids(path: Path, where: str) -> set[str]:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            return {r[0] for r in conn.execute(f"SELECT event_id FROM outbox {where}")}  # noqa: S608
+        finally:
+            conn.close()
+
+    return sorted(ids(db, "WHERE status = 'pending'") - ids(snapshot, ""))
+
+
 def sqlite_copy(source: Path, dest: Path) -> None:
     """Consistent copy through the online backup API, WAL content included."""
     src = sqlite3.connect(source, timeout=10)
@@ -357,6 +382,15 @@ def cmd_restore(args: argparse.Namespace) -> int:
     require_stopped(args.health_url)
     check_device_db(snapshot)
     if db.exists():
+        lost = unsent_missing_from(db, snapshot)
+        if lost and not args.discard_unsent:
+            raise Refused(
+                f"{len(lost)} unsent event(s) in {db} are not in the backup and would be lost "
+                "(recorded after it, never uploaded). Let them upload first, or pass "
+                "--discard-unsent only as a recorded incident decision"
+            )
+        if lost:
+            print(f"discarding {len(lost)} unsent event(s) by explicit decision; a copy is kept")
         keep = db.with_name(f"{db.name}.before-restore-{utc_stamp()}")
         old_umask = os.umask(0o077)
         try:
@@ -411,6 +445,11 @@ def parser() -> argparse.ArgumentParser:
     r = sub.add_parser("restore", help="replace the database from a backup (service stopped)")
     r.add_argument("--db", type=Path, default=DEFAULT_DB)
     r.add_argument("--from", dest="source", required=True)
+    r.add_argument(
+        "--discard-unsent",
+        action="store_true",
+        help="allow losing unsent events missing from the backup (incident decision only)",
+    )
     r.set_defaults(func=cmd_restore)
     return p
 
