@@ -10,8 +10,8 @@ const ready = myRunReady as Extract<MyRunResult, { status: "ready" }>;
 const eta = ready.run.eta!;
 const CAPTURED = ready.run.lastPosition!.capturedAtMs;
 
-function verifiedAt(serverNowMs: number, at: Instant): ServerClock {
-  const clock = verifiedClock(at, at, serverNowMs);
+function verifiedAt(serverNowMs: number, instant: Instant): ServerClock {
+  const clock = verifiedClock(instant, instant, serverNowMs);
   if (!clock) throw new Error("sample rejected");
   return clock;
 }
@@ -30,11 +30,11 @@ function at(offsetMs: number): { clock: ServerClock; now: Instant } {
 
 describe("ETA display (docs/08 §8, docs/10 §4)", () => {
   it("shows the estimate with the time it was made", () => {
-    const { clock, now } = at(5_000);
+    const { clock, now } = at(15_000);
     const view = etaView(runWith(), clock, now, "UTC");
     expect(view).not.toBeNull();
     expect(view!.headline).toBe("About 6 min");
-    expect(view!.madeText).toMatch(/^Estimate made \d+s ago$/);
+    expect(view!.madeText).toBe("Estimate made 14s ago");
     expect(view!.arrivalText).toBe(new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", timeZone: "UTC" }).format(eta.arrivalAtMs));
   });
 

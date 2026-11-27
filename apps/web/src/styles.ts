@@ -97,6 +97,8 @@ input, select, textarea { font: inherit; min-height: 44px; padding: var(--space-
 .code-display { font-family: ui-monospace, monospace; font-size: var(--font-size-headline);
   font-weight: var(--font-weight-semibold); letter-spacing: 0.05em; margin: 0; overflow-wrap: anywhere; }
 .flush { margin: 0; }
+.check-row { flex-direction: row; flex-wrap: nowrap; align-items: center; gap: var(--space-sm); }
+.check-row input { min-height: auto; width: auto; flex: none; padding: 0; }
 @media (max-width: 40rem) {
   .responsive-table thead { display: none; }
   .responsive-table tr { display: block; border-bottom: 1px solid var(--color-border); padding: var(--space-sm) 0; }

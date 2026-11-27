@@ -57,6 +57,16 @@ export interface AssignedStop extends Coordinate {
   status: StopStatus;
 }
 
+/** A server arrival estimate (docs/08 §8). Shown only through `etaView`, which ages it. */
+export interface RunEta {
+  arrivalAtMs: number;
+  generatedAtMs: number;
+  validUntilMs: number;
+  algorithmVersion: string;
+  /** The position it was computed from; must be the one on screen. */
+  sourceEventId: string;
+}
+
 export interface TrackedRun {
   runId: string;
   state: RunState;
@@ -67,6 +77,9 @@ export interface TrackedRun {
   /** Null when the bus has not reported, or its report failed validation. Never invented. */
   position: LivePosition | null;
   assignedStop: AssignedStop;
+  nextStopId: string | null;
+  /** Null when absent or malformed; never repaired or guessed. */
+  eta: RunEta | null;
 }
 
 export type RunSnapshot =
@@ -96,4 +109,29 @@ export interface AssignmentSummary {
 
 export type AssignmentsSnapshot =
   | { kind: "ready"; assignments: AssignmentSummary[] }
+  | { kind: "access_unavailable"; reason: AccessUnavailableReason };
+
+export interface AlertItem {
+  alertId: string;
+  assignmentId: string;
+  runId: string;
+  stopLabel: string;
+  createdAtMs: number;
+  predictedArrivalAtMs: number;
+  predictionGeneratedAtMs: number;
+}
+
+export type AlertsSnapshot =
+  | { kind: "ready"; alerts: AlertItem[] }
+  | { kind: "access_unavailable"; reason: AccessUnavailableReason };
+
+export interface Preference {
+  assignmentId: string;
+  approachingEnabled: boolean;
+  approachingMinutes: number;
+  updatedAtMs: number | null;
+}
+
+export type PreferenceSnapshot =
+  | { kind: "ready"; preference: Preference }
   | { kind: "access_unavailable"; reason: AccessUnavailableReason };

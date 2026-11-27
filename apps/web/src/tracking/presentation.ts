@@ -6,7 +6,7 @@
  */
 import { type GpsStatus, POSITION_STALE_AFTER_MS, type RunState } from "@itssb/contracts";
 import { ageClockMs, type Instant, type ServerClock } from "./clock";
-import { type Freshness, positionAgeMs, positionFreshness, type TrackedRun } from "./model";
+import { type AlertItem, type Freshness, positionAgeMs, positionFreshness, type TrackedRun } from "./model";
 
 export type LivePresentation =
   /** A recent position. `aging` means an update is overdue but not yet stale. */
@@ -148,4 +148,53 @@ export function statusCopy(
         tone: "unknown",
       };
   }
+}
+
+export interface EtaView {
+  /** "About 6 min" or "Less than a minute". */
+  headline: string;
+  /** Clock time of the estimate. */
+  arrivalText: string;
+  /** "Estimate made 8s ago": an estimate is never shown without its age. */
+  madeText: string;
+}
+
+/**
+ * The arrival estimate, or null whenever it cannot be trusted right now:
+ * time not verified, run not active, stop not upcoming, no position or a
+ * stale one, an estimate made from another position, or past `validUntilMs`
+ * on the server-aligned clock. Re-derived every second, so it disappears on
+ * its own when it expires (docs/08 §8).
+ */
+export function etaView(run: TrackedRun, clock: ServerClock, now: Instant, timeZone?: string): EtaView | null {
+  const e = run.eta;
+  if (!e || clock.kind !== "verified" || run.state !== "active") return null;
+  if (run.assignedStop.status !== "upcoming" || !run.position) return null;
+  if (e.sourceEventId !== run.position.eventId) return null;
+  if (positionFreshness(run.position, clock, now) === "stale") return null;
+  const serverNow = ageClockMs(clock, now);
+  if (serverNow >= e.validUntilMs) return null;
+  const minutes = Math.round((e.arrivalAtMs - serverNow) / 60_000);
+  const madeAgo = updatedText(Math.max(0, serverNow - e.generatedAtMs)).replace(/^Updated /, "");
+  return {
+    headline: minutes < 1 ? "Less than a minute" : `About ${minutes} min`,
+    arrivalText: capturedTime(e.arrivalAtMs, timeZone),
+    madeText: `Estimate made ${madeAgo}`,
+  };
+}
+
+/** Route progress the server inferred from GPS, for the assigned stop. */
+export function stopProgressText(run: TrackedRun): string | null {
+  if (run.state !== "active") return null;
+  if (run.assignedStop.status === "at_stop") return "The bus is at your stop.";
+  if (run.assignedStop.status === "passed") return "The bus has passed your stop.";
+  return null;
+}
+
+/** One inbox entry. It describes a past estimate, never the current one. */
+export function alertRow(alert: AlertItem, timeZone?: string): { title: string; detail: string } {
+  return {
+    title: `Bus approaching ${alert.stopLabel}`,
+    detail: `Estimated arrival ${capturedTime(alert.predictedArrivalAtMs, timeZone)}, from an estimate made at ${capturedTime(alert.predictionGeneratedAtMs, timeZone)}.`,
+  };
 }

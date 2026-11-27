@@ -27,6 +27,17 @@ export interface TrackingSource {
   route(assignmentId: string, onValue: (raw: unknown) => void, onError: (error: unknown) => void): Unsubscribe;
   /** `tracking:serverTime`: uncached `serverNowMs`. Rejects when unavailable. */
   serverTime(): Promise<number>;
+  /** `notifications:myAlerts`. Optional: a source without it shows no inbox. */
+  alerts?(onValue: (raw: unknown) => void, onError: (error: unknown) => void): Unsubscribe;
+  /** `notifications:myPreference`. */
+  preference?(assignmentId: string, onValue: (raw: unknown) => void, onError: (error: unknown) => void): Unsubscribe;
+  /** `notifications:setPreferences`; resolves with the raw result. */
+  setPreference?(args: {
+    requestId: string;
+    assignmentId: string;
+    approachingEnabled: boolean;
+    approachingMinutes: number;
+  }): Promise<unknown>;
   /**
    * Reports whether live updates can currently arrive. A disconnected client
    * keeps its last answers without an error, so the store must know.
@@ -94,7 +105,7 @@ export class TrackStore {
   private clockGeneration = 0;
 
   constructor(
-    private readonly source: TrackingSource,
+    readonly source: TrackingSource,
     private readonly now: () => Instant = readInstant,
   ) {}
 
