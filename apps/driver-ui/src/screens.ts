@@ -16,9 +16,12 @@ export type ScreenId =
   | "D08" // recording a route
   | "D09" // add or edit a stop
   | "D10" // review recorded route
+  | "D12" // start-trip preflight
   | "D13" // driving view (read-only)
   | "D21" // GPS and device diagnostics
-  | "D22"; // offline bus operation
+  | "D22" // offline bus operation
+  | "D23" // end-trip confirmation
+  | "D24"; // trip summary
 
 /** The four original dashboard actions, in their original order and wording. */
 export const ACTIONS = [
@@ -39,9 +42,9 @@ export interface Availability {
 /** Screens that stay reachable while the bus may be moving: short and read-only. */
 const MOVING_ALLOWED: ReadonlySet<ScreenId> = new Set(["D08", "D13", "D22"]);
 /** Screens that need an unlocked driver. */
-const NEEDS_DRIVER: ReadonlySet<ScreenId> = new Set(["D06", "D07", "D08", "D09", "D10"]);
+const NEEDS_DRIVER: ReadonlySet<ScreenId> = new Set(["D06", "D07", "D08", "D09", "D10", "D12", "D23", "D24"]);
 /** Screens that change a draft: parked only. D08 itself is fine while moving (read-only). */
-const NEEDS_PARKED: ReadonlySet<ScreenId> = new Set(["D07", "D09"]);
+const NEEDS_PARKED: ReadonlySet<ScreenId> = new Set(["D07", "D09", "D12", "D23"]);
 
 export function runActive(o: Observed): boolean {
   return o.snapshot?.run?.state === "active";
@@ -73,6 +76,8 @@ export function selectScreen(o: Observed, requested: ScreenId | null): ScreenId 
   if (NEEDS_DRIVER.has(requested) && !driverUnlocked(o)) return "D04";
   if (NEEDS_PARKED.has(requested) && !parked(o)) return recordingActive(o) ? "D08" : "D05";
   if (requested === "D07" && recordingActive(o)) return "D08";
+  if (requested === "D12" && runActive(o)) return "D05";
+  if (requested === "D23" && !runActive(o)) return o.snapshot?.lastEndedRun ? "D24" : "D05";
   return requested;
 }
 

@@ -51,6 +51,8 @@ class Config:
     log_level: str = "INFO"
     log_file: Path | None = None
     drivers_file: Path = DEFAULT_DRIVERS_FILE
+    # IANA zone the school's service dates are in (docs/08 §6 serviceTimezone).
+    service_timezone: str | None = None
     driver_ui_dir: Path = DEFAULT_DRIVER_UI_DIR
 
     @property
@@ -69,6 +71,7 @@ class Config:
             "deviceToken": "<set>" if self.device_token else "<missing>",
             "logFile": str(self.log_file) if self.log_file else None,
             "driversFile": str(self.drivers_file),
+            "serviceTimezone": self.service_timezone,
             "driverUiDir": str(self.driver_ui_dir),
         }
 
@@ -171,6 +174,20 @@ def _origin(raw: str | None) -> str | None:
     return f"{parts.scheme}://{parts.netloc}"
 
 
+def _timezone(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    try:
+        ZoneInfo(raw)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise ConfigError(
+            "ITSSB_SERVICE_TIMEZONE must be an IANA zone like America/New_York"
+        ) from exc
+    return raw
+
+
 def load_config(environ: Mapping[str, str] | None = None, env_file: Path | None = None) -> Config:
     """Builds and validates a Config. Process environment overrides the file."""
     environ = os.environ if environ is None else environ
@@ -208,5 +225,6 @@ def load_config(environ: Mapping[str, str] | None = None, env_file: Path | None 
         log_level=level,
         log_file=Path(log_file) if log_file else None,
         drivers_file=Path(env.get("ITSSB_DRIVERS_FILE") or DEFAULT_DRIVERS_FILE),
+        service_timezone=_timezone(env.get("ITSSB_SERVICE_TIMEZONE")),
         driver_ui_dir=Path(env.get("ITSSB_DRIVER_UI_DIR") or DEFAULT_DRIVER_UI_DIR),
     )

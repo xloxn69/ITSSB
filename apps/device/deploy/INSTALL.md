@@ -69,10 +69,18 @@ Then write the file, readable by the service but not editable by it:
 
 ```sh
 sudoedit /etc/itssb/drivers.json
-#   {"drivers": [{"driverId": "<id>", "displayName": "<name>", "pinHash": "scrypt$..."}]}
+#   {"drivers": [{"driverId": "<id>", "displayName": "<name>", "pinHash": "scrypt$...",
+#     "operatingGrant": "<grant>", "routeVersions": [{"routeVersionId": "<id>", "label": "<name>"}]}]}
 sudo chown root:itssb /etc/itssb/drivers.json
 sudo chmod 0640 /etc/itssb/drivers.json
 ```
+
+To let a driver start and end runs, issue a grant for this device, that
+driver and their route versions with the backend's internal
+`driverGrants:issue` (see apps/backend/README.md) and add `operatingGrant` and
+`routeVersions` as above. The grant is a secret: keep the file 0640 root:itssb.
+Also set `ITSSB_SERVICE_TIMEZONE` (for example `America/New_York`) in
+`/etc/itssb/device.env`.
 
 To reset a forgotten PIN, replace that driver's hash and restart the service.
 Without this file the screen works but nobody can unlock it.

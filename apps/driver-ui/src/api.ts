@@ -1,4 +1,4 @@
-import type { DeviceSnapshot, DraftDetail, DraftSummary, DraftStop } from "./snapshot.js";
+import type { DeviceSnapshot, DraftDetail, DraftStop, DraftSummary } from "./snapshot.js";
 
 /**
  * Local API client. Same origin as the page (the device serves both), so no
@@ -49,6 +49,8 @@ export interface SessionInfo {
   csrfToken: string;
   driver: { driverId: string; displayName: string } | null;
   drivers: { driverId: string; displayName: string }[];
+  /** Route versions the unlocked driver may start (empty when locked). */
+  routes?: { routeVersionId: string; label: string }[];
   lockoutRemainingS: number;
 }
 
@@ -133,6 +135,13 @@ export const api = {
   removeStop: (draftId: string, stopId: string) =>
     post<{ stops: DraftStop[] }>(`/api/recordings/${draftId}/stops/${stopId}`, { remove: true }),
   finish: (draftId: string) => post<DraftSummary>(`/api/recordings/${draftId}/finish`),
+  startRun: (requestId: string, routeVersionId: string) =>
+    post<{ status: "accepted" | "unknown"; runId?: string; message?: string }>("/api/runs/start", {
+      requestId,
+      routeVersionId,
+    }),
+  endRun: (runId: string, requestId: string) =>
+    post<{ completedLocally: boolean; endSync: string; message?: string }>(`/api/runs/${runId}/end`, { requestId }),
 };
 
 /**

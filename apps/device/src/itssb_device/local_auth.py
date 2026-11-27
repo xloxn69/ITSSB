@@ -26,12 +26,13 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import secrets
 import threading
 import time
 from collections import OrderedDict
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -130,10 +131,24 @@ def valid_pin_format(pin: object) -> bool:
 
 
 @dataclass(frozen=True, slots=True)
+class RouteChoice:
+    route_version_id: str
+    label: str
+
+
+GRANT_RE = re.compile(r"^[A-Za-z0-9_-]{32,512}$")
+
+
+@dataclass(frozen=True, slots=True)
 class Driver:
     driver_id: str
     display_name: str
-    pin_hash: str
+    pin_hash: str = field(repr=False)
+    # Server-issued driver operating grant (docs/08 §6), provisioned by an
+    # administrator until /device/v1/driver-session exists. Never sent to
+    # the browser.
+    operating_grant: str | None = field(default=None, repr=False)
+    route_versions: tuple[RouteChoice, ...] = ()
 
 
 def load_drivers(path: Path | None) -> dict[str, Driver]:
@@ -145,9 +160,22 @@ def load_drivers(path: Path | None) -> dict[str, Driver]:
         raw = json.loads(path.read_text())
         drivers = {}
         for d in raw["drivers"]:
-            driver = Driver(str(d["driverId"]), str(d["displayName"]), str(d["pinHash"]))
+            grant = d.get("operatingGrant")
+            routes = tuple(
+                RouteChoice(str(r["routeVersionId"]), str(r["label"]))
+                for r in d.get("routeVersions", [])
+            )
+            driver = Driver(
+                str(d["driverId"]),
+                str(d["displayName"]),
+                str(d["pinHash"]),
+                str(grant) if grant else None,
+                routes,
+            )
             if not driver.pin_hash.startswith("scrypt$"):
                 raise ValueError(f"driver {driver.driver_id}: pinHash must be an scrypt hash")
+            if driver.operating_grant and not GRANT_RE.match(driver.operating_grant):
+                raise ValueError(f"driver {driver.driver_id}: operatingGrant is not a grant")
             drivers[driver.driver_id] = driver
         return drivers
     except (OSError, ValueError, KeyError, TypeError) as exc:

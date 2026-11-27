@@ -21,14 +21,17 @@ import logging
 import mimetypes
 import re
 import time
+import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import datetime
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
+from zoneinfo import ZoneInfo
 
-from .database import Database, GuardRefused
+from .database import Database, GuardRefused, RunNotActive
 from .drafts import DraftError, Drafts
 from .gps_reader import LatestFixHolder
 from .local_auth import (
@@ -44,6 +47,7 @@ from .local_auth import (
 from .models import Fix
 from .motion import FIX_FRESH_S, MotionJudge
 from .status import StatusBoard
+from .trips import HttpRunStarter, HttpTripEvents, StartRunRequest, end_run, start_run_online
 
 log = logging.getLogger(__name__)
 
@@ -65,8 +69,19 @@ STATIC_TYPES = {
     ".json": "application/json",
 }
 
+SERVER_WORDS = {
+    "GRANT_NOT_AUTHORIZED": "The school server did not accept your driver authorization for this "
+    "route. Ask your transport office.",
+    "ACTIVE_RUN_CONFLICT": "The school server says this bus or route already has an active run.",
+    "SERVICE_DATE_OUT_OF_RANGE": "This device's date does not match the school server.",
+    "CLOCK_OUT_OF_RANGE": "This device's clock does not match the school server.",
+    "UNAUTHENTICATED": "The school server did not accept this device's credential.",
+    "REQUEST_ID_CONFLICT": "The school server saw this request before with different details.",
+    "RUN_NOT_AUTHORIZED": "The school server does not recognize this run for this device.",
+    "RUN_NOT_ACTIVE": "The school server says this run was already ended.",
+}
+
 NOT_YET = {
-    "startRoute": "Starting a run needs the school server's trip service on this device.",
     "showQr": "QR codes need the school server's QR service, which is not available yet.",
     "showStudents": "The roster comes from the school server, which does not provide it yet.",
 }
@@ -95,6 +110,7 @@ _DRAFT = re.compile(rf"^/api/recordings/({_UUID})$")
 _DRAFT_STOPS = re.compile(rf"^/api/recordings/({_UUID})/stops$")
 _DRAFT_STOP = re.compile(rf"^/api/recordings/({_UUID})/stops/({_UUID})$")
 _DRAFT_FINISH = re.compile(rf"^/api/recordings/({_UUID})/finish$")
+_RUN_END = re.compile(r"^/api/runs/([A-Za-z0-9_-]{1,128})/end$")
 
 
 class DriverApi:
@@ -109,7 +125,11 @@ class DriverApi:
         origins: frozenset[str],
         now_ms: Callable[[], int] = lambda: time.time_ns() // 1_000_000,
         monotonic: Callable[[], float] = time.monotonic,
+        trip_events: HttpTripEvents | None = None,
+        service_timezone: str | None = None,
     ) -> None:
+        self.trip_events = trip_events
+        self.service_timezone = service_timezone
         self.board = board
         self.sessions = sessions
         self.judge = judge
@@ -209,6 +229,10 @@ class DriverApi:
             {
                 "csrfToken": session.csrf,
                 "driver": self._driver_public(session),
+                "routes": [
+                    {"routeVersionId": r.route_version_id, "label": r.label}
+                    for r in (session.driver.route_versions if session.driver else ())
+                ],
                 "drivers": [
                     {"driverId": d.driver_id, "displayName": d.display_name}
                     for d in self.sessions.drivers.values()
@@ -228,6 +252,13 @@ class DriverApi:
         unlocked = session.driver is not None
         with self._db() as db:
             recording = Drafts(db).recording() if unlocked else None
+            pending = db.pending_start()
+            last_start = db.last_start_result()
+            last_ended = db.last_ended_run()
+            # The run and queue straight from SQLite: the board refreshes only
+            # every publish interval, and a just-ended run must not read as active.
+            run = db.active_run()
+            outbox = db.outbox_counts()
         snap.update(
             {
                 "motion": self.judge.snapshot(),
@@ -237,15 +268,39 @@ class DriverApi:
                 },
                 "capabilities": {
                     "recordRoute": {"available": True},
-                    "startRoute": {"available": False, "reason": NOT_YET["startRoute"]},
+                    "startRoute": self._start_capability(session),
                     "showQr": {"available": False, "reason": NOT_YET["showQr"]},
                     "showStudents": {"available": False, "reason": NOT_YET["showStudents"]},
                 },
                 # Only for an unlocked driver: route drafts are protected.
                 "recording": recording,
+                "runStart": {
+                    "pending": pending is not None,
+                    "routeVersionId": pending["payload"]["routeVersionId"] if pending else None,
+                    "lastStatus": last_start["status"] if last_start else None,
+                    "lastCode": last_start["code"] if last_start else None,
+                },
+                "lastEndedRun": last_ended,
+                "run": run,
+                "outbox": outbox,
             }
         )
         return snap
+
+    def _start_capability(self, session: KioskSession) -> dict[str, Any]:
+        def no(reason: str) -> dict[str, Any]:
+            return {"available": False, "reason": reason}
+
+        if self.trip_events is None:
+            return no("This device has no school server set up, so it cannot start runs.")
+        if self.service_timezone is None:
+            return no("This device's service time zone is not set, so it cannot start runs.")
+        d = session.driver
+        if d is not None and not d.operating_grant:
+            return no("Your transport office has not authorized you to start runs on this device.")
+        if d is not None and not d.route_versions:
+            return no("No approved routes are assigned to you on this device.")
+        return {"available": True}
 
     def _get(self, path: str, session: KioskSession) -> Response:
         if path == "/api/status":
@@ -312,6 +367,17 @@ class DriverApi:
                 )
             return _json(HTTPStatus.OK, {"motion": self.judge.snapshot()})
 
+        if path == "/api/runs/start" or _RUN_END.match(path):
+            if not self.judge.parked():
+                return _error(
+                    HTTPStatus.CONFLICT, "NOT_PARKED", "Stop safely and confirm parked first."
+                )
+            if path == "/api/runs/start":
+                return self._start_run(session, data)
+            m = _RUN_END.match(path)
+            assert m is not None  # noqa: S101 - matched above
+            return self._end_run(session, m.group(1), data)
+
         # Everything below edits a route draft: safely stopped only.
         if not self.judge.parked():
             return _error(
@@ -369,6 +435,115 @@ class DriverApi:
     def _require_parked(self) -> None:
         if not self.judge.parked():
             raise GuardRefused("NOT_PARKED", "The bus moved. Stop safely and confirm parked again.")
+
+    # ── Runs ─────────────────────────────────────────────────────────
+
+    def _start_run(self, session: KioskSession, data: dict[str, Any]) -> Response:
+        """Online start (docs/05 §5, docs/08 §6). The run exists only once the
+        server answers `accepted` with its runId; nothing is invented here."""
+        cap = self._start_capability(session)
+        driver = session.driver
+        if not cap["available"] or driver is None or not driver.operating_grant:
+            return _error(
+                HTTPStatus.CONFLICT, "START_UNAVAILABLE", cap.get("reason") or "Unavailable."
+            )
+        assert self.trip_events is not None and self.service_timezone is not None  # noqa: S101
+        route = data.get("routeVersionId")
+        if route not in {r.route_version_id for r in driver.route_versions}:
+            return _error(
+                HTTPStatus.BAD_REQUEST, "BAD_ROUTE", "Choose one of your approved routes."
+            )
+        now = self.now_ms()
+        with self._db() as db:
+            if db.active_run_id() is not None:
+                return _error(HTTPStatus.CONFLICT, "RUN_ACTIVE", "A run is already active.")
+            if Drafts(db).recording() is not None:
+                return _error(HTTPStatus.CONFLICT, "RECORDING", "Finish the route recording first.")
+            pending = db.pending_start()
+            if pending is not None:
+                # An earlier start got no answer: resend exactly that request
+                # (same requestId) instead of risking a second run.
+                if pending["payload"]["routeVersionId"] != route:
+                    return _error(
+                        HTTPStatus.CONFLICT,
+                        "START_PENDING",
+                        "An earlier start for another route is still waiting for an answer.",
+                    )
+                request = StartRunRequest(
+                    request_id=pending["requestId"],
+                    route_version_id=pending["payload"]["routeVersionId"],
+                    service_date=pending["payload"]["serviceDate"],
+                    service_timezone=pending["payload"]["serviceTimezone"],
+                    captured_at_ms=pending["payload"]["capturedAtMs"],
+                    driver_operating_grant=pending["payload"]["driverOperatingGrant"],
+                )
+            else:
+                try:
+                    rid = str(uuid.UUID(str(data.get("requestId"))))
+                except ValueError:
+                    return _error(
+                        HTTPStatus.BAD_REQUEST, "BAD_REQUEST_ID", "requestId must be a UUID."
+                    )
+                zone = ZoneInfo(self.service_timezone)
+                request = StartRunRequest(
+                    request_id=rid,
+                    route_version_id=route,
+                    service_date=datetime.fromtimestamp(now / 1000, zone).date().isoformat(),
+                    service_timezone=self.service_timezone,
+                    captured_at_ms=now,
+                    driver_operating_grant=driver.operating_grant,
+                )
+            result = start_run_online(db, HttpRunStarter(self.trip_events), request, now)
+        if result.status == "accepted":
+            return _json(HTTPStatus.OK, {"status": "accepted", "runId": result.run_id})
+        if result.status == "unknown":
+            return _json(
+                HTTPStatus.ACCEPTED,
+                {
+                    "status": "unknown",
+                    "message": "No answer from the school server. No run has started on this "
+                    "device. Tap Start again to resend the same request.",
+                },
+            )
+        words = SERVER_WORDS.get(
+            result.code or "", f"The school server refused the start ({result.code})."
+        )
+        return _error(HTTPStatus.CONFLICT, result.code or "REJECTED", words)
+
+    def _end_run(self, session: KioskSession, run_id: str, data: dict[str, Any]) -> Response:
+        driver = session.driver
+        if driver is None or not driver.operating_grant:
+            return _error(
+                HTTPStatus.FORBIDDEN,
+                "END_UNAVAILABLE",
+                "Your transport office has not authorized you to end runs on this device.",
+            )
+        try:
+            rid = str(uuid.UUID(str(data.get("requestId"))))
+        except ValueError:
+            return _error(HTTPStatus.BAD_REQUEST, "BAD_REQUEST_ID", "requestId must be a UUID.")
+        with self._db() as db:
+            try:
+                payload, result = end_run(
+                    db, self.trip_events, run_id, rid, driver.operating_grant, self.now_ms()
+                )
+            except RunNotActive:
+                return _error(
+                    HTTPStatus.CONFLICT, "RUN_NOT_ACTIVE", "That run is not active on this device."
+                )
+            summary = db.last_ended_run()
+        sync = "pending" if result is None or result.status == "unknown" else result.status
+        body: dict[str, Any] = {
+            "completedLocally": True,
+            "runId": payload["runId"],
+            "endSync": sync,
+            "summary": summary,
+        }
+        if result is not None and result.status == "rejected":
+            body["message"] = SERVER_WORDS.get(
+                result.code or "", f"The school server refused the end ({result.code})."
+            )
+        return _json(HTTPStatus.OK, body)
 
     def _db(self) -> _DbContext:
         return _DbContext(self.database_path)

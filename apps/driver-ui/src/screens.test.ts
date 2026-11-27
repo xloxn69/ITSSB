@@ -149,3 +149,22 @@ describe("route recording screens", () => {
     expect(actionAvailability(o, "startRoute").enabled).toBe(false);
   });
 });
+
+describe("run start and end screens", () => {
+  it("preflight and end confirmation need a parked, unlocked driver", () => {
+    expect(selectScreen(observed(ready()), "D12")).toBe("D12");
+    expect(selectScreen(observed(ready({ motion: { state: "stopped", parked: false } })), "D12")).toBe("D05");
+    expect(selectScreen(observed(ready({ session: { unlocked: false } })), "D12")).toBe("D04");
+    expect(selectScreen(observed(ready({ run: activeRun })), "D23")).toBe("D23");
+  });
+
+  it("no preflight while a run is active; no end confirmation without one", () => {
+    expect(selectScreen(observed(ready({ run: activeRun })), "D12")).toBe("D05");
+    expect(selectScreen(observed(ready()), "D23")).toBe("D05");
+  });
+
+  it("moving during an active run never shows the end confirmation", () => {
+    const o = observed(ready({ run: activeRun, motion: { state: "moving", parked: false } }));
+    expect(selectScreen(o, "D23")).toBe("D13");
+  });
+});
