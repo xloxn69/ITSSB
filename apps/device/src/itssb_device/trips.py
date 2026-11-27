@@ -11,23 +11,33 @@ The flow is fixed here; only the network call is pluggable:
    attempt resends the SAME requestId so the backend can return the same run.
 
 The backend implements `POST /device/v1/trip-events` (start and end, with
-a driver operating grant). The only starter shipped here is still
-`BackendNotReadyRunStarter`, which honestly reports that online start is
-unavailable and changes nothing; an HTTP `RunStarter` is the next device
-step, and the flow above stays the same. Wire shapes are checked against
+a driver operating grant). `HttpTripEvents` sends both with the device
+credential; `BackendNotReadyRunStarter` remains for devices with no backend
+configured. Wire shapes are checked against
 `packages/contracts/fixtures/tripEvent.*.json`.
+
+Ending (docs/08 §6): the run is completed locally FIRST, in one transaction
+with its frozen sequence boundary and the saved endRun command. Sending is
+retried with the same requestId until the server answers, so an ended run is
+never reactivated and the end is never lost or duplicated.
 
 Offline start of a NEW run is out of scope (`allow_new_offline_run=false`).
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import threading
+import time
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from typing import Literal, Protocol
+from pathlib import Path
+from typing import Any, Literal, Protocol
 
 from .database import Database
+from .uploader import HttpTransport, TransportError
 
 log = logging.getLogger(__name__)
 
@@ -121,3 +131,140 @@ def start_run_online(
         # Unknown outcome: keep the request pending and resend the same requestId.
         log.warning("run start outcome unknown requestId=%s; will reuse it", request.request_id)
     return result
+
+
+# ── HTTP trip events ─────────────────────────────────────────────────
+
+TRIP_EVENTS_PATH = "/device/v1/trip-events"
+
+
+@dataclass(frozen=True, slots=True)
+class TripEventResult:
+    """accepted / rejected (the server answered no) / unknown (no usable answer)."""
+
+    status: Literal["accepted", "rejected", "unknown"]
+    run_id: str | None = None
+    state: str | None = None
+    code: str | None = None
+    http_status: int | None = None
+
+
+class HttpTripEvents:
+    """Sends startRun/endRun with the device credential. The driver's grant is
+    inside the body (docs/08 §6); the device token never reaches the browser."""
+
+    def __init__(self, transport: HttpTransport, token: str) -> None:
+        self.transport = transport
+        self._token = token
+        self._lock = threading.Lock()  # one HTTP connection, several callers
+
+    def send(self, payload: dict[str, Any]) -> TripEventResult:
+        body = json.dumps(payload, separators=(",", ":")).encode()
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {self._token}",
+        }
+        try:
+            with self._lock:
+                resp = self.transport.post(TRIP_EVENTS_PATH, body, headers)
+        except TransportError as exc:
+            return TripEventResult("unknown", code=exc.reason)
+        try:
+            data = json.loads(resp.body)
+        except ValueError:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        if resp.status == 200:
+            if data.get("status") == "accepted" and isinstance(data.get("runId"), str):
+                return TripEventResult("accepted", data["runId"], data.get("state"), None, 200)
+            return TripEventResult("unknown", code="BAD_RESPONSE", http_status=200)
+        err = data.get("error")
+        code = err.get("code") if isinstance(err, dict) else None
+        if resp.status >= 500 or resp.status == 429:
+            return TripEventResult(
+                "unknown", code=code or f"HTTP_{resp.status}", http_status=resp.status
+            )
+        return TripEventResult(
+            "rejected", code=code or f"HTTP_{resp.status}", http_status=resp.status
+        )
+
+
+class HttpRunStarter:
+    def __init__(self, events: HttpTripEvents) -> None:
+        self.events = events
+
+    def start_run(self, request: StartRunRequest) -> StartRunResult:
+        r = self.events.send(request.to_wire())
+        if r.status == "accepted":
+            return StartRunResult("accepted", r.run_id, r.state, None)
+        return StartRunResult(r.status, code=r.code)
+
+
+def end_run(
+    db: Database,
+    events: HttpTripEvents | None,
+    run_id: str,
+    request_id: str,
+    grant: str,
+    now_ms: int,
+) -> tuple[dict[str, Any], TripEventResult | None]:
+    """Completes the run locally (durably), then tries to send the end once.
+    No answer leaves it pending for EndRetryThread."""
+    payload = db.end_run_locally(run_id, request_id, grant, now_ms)
+    if events is None:
+        return payload, None
+    return payload, send_end(db, events, payload, now_ms)
+
+
+def send_end(
+    db: Database, events: HttpTripEvents, payload: dict[str, Any], now_ms: int
+) -> TripEventResult:
+    r = events.send(payload)
+    if r.status == "accepted":
+        db.resolve_end_request(payload["requestId"], "accepted", None, now_ms)
+        log.info("run end accepted: runId=%s", payload["runId"])
+    elif r.status == "rejected":
+        # Kept with its reason for review; the local completion stands.
+        db.resolve_end_request(payload["requestId"], "rejected", r.code, now_ms)
+        log.error("run end rejected: runId=%s code=%s", payload["runId"], r.code)
+    else:
+        db.resolve_end_request(payload["requestId"], None, r.code, now_ms)
+        log.warning("run end not answered (%s); will resend the same requestId", r.code)
+    return r
+
+
+class EndRetryThread(threading.Thread):
+    """Resends saved endRun commands until the server answers."""
+
+    def __init__(
+        self,
+        database_path: Path | str,
+        events: HttpTripEvents,
+        stop: threading.Event,
+        interval_s: float = 15.0,
+        now_ms: Callable[[], int] | None = None,
+    ) -> None:
+        super().__init__(name="end-retry", daemon=True)
+        self.database_path, self.events, self.stop_event = database_path, events, stop
+        self.interval_s = interval_s
+        self.now_ms = now_ms or (lambda: time.time_ns() // 1_000_000)
+
+    def tick(self, db: Database) -> int:
+        sent = 0
+        for payload in db.pending_end_payloads():
+            send_end(db, self.events, payload, self.now_ms())
+            sent += 1
+        return sent
+
+    def run(self) -> None:
+        db = Database(self.database_path)
+        try:
+            while not self.stop_event.wait(self.interval_s):
+                try:
+                    self.tick(db)
+                except Exception:
+                    log.exception("end retry tick failed")
+        finally:
+            db.close()

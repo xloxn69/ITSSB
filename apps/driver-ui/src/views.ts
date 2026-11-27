@@ -133,7 +133,7 @@ export function dashboardView(o: Observed, nav: Nav, extra: (HTMLElement | null)
 }
 
 /** D13: driving view. Read-only; no complex control is rendered at all. */
-export function drivingView(o: Observed, nav: Nav): HTMLElement {
+export function drivingView(o: Observed, nav: Nav, extra: (HTMLElement | null)[] = []): HTMLElement {
   const inds = allIndicators(o);
   const pick = (k: Indicator["key"]) => inds.find((i) => i.key === k);
   const motion = o.snapshot?.motion?.state ?? "unknown";
@@ -154,18 +154,25 @@ export function drivingView(o: Observed, nav: Nav): HTMLElement {
       h(
         "div",
         { class: "card" },
-        h("h2", {}, motion === "moving" ? "Driving" : "Motion unknown"),
+        h("h2", {}, motion === "moving" ? "Driving" : motion === "stopped" ? "Stopped" : "Motion unknown"),
         h(
           "p",
           { class: "muted" },
           motion === "moving"
             ? "Controls are locked while the bus moves."
-            : "Controls stay locked until the bus is known to be stopped.",
+            : motion === "stopped"
+              ? "Controls stay locked until the driver confirms the bus is parked."
+              : "Controls stay locked until the bus is known to be stopped.",
         ),
       ),
     ),
     h("div", { class: "card" }, checkList([pick("gps"), pick("network"), pick("cloud"), pick("queue")].filter((i) => i !== undefined))),
-    offline ? h("div", { class: "row" }, h("button", { class: "btn", onclick: () => nav.go("D22") }, "Offline: what still works")) : null,
+    h(
+      "div",
+      { class: "row" },
+      ...extra,
+      offline ? h("button", { class: "btn", onclick: () => nav.go("D22") }, "Offline: what still works") : null,
+    ),
   );
 }
 

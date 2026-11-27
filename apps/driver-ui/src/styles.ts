@@ -108,6 +108,7 @@ svg.route .stop { fill: var(--color-brand); stroke: var(--color-on-brand); strok
 svg.route .stop-n { fill: var(--color-on-brand); font-size: var(--font-size-caption); font-weight: var(--font-weight-bold); }
 .stops { margin: 0; padding: 0; list-style: none; font-size: var(--font-size-callout); }
 .check-line { font-size: var(--font-size-callout); }
+.checks-1 { gap: var(--space-xs); }
 .banner.lv-ok { border-left-color: var(--color-status-fresh); }
 .banner.lv-warn { border-left-color: var(--color-status-aging); }
 `;

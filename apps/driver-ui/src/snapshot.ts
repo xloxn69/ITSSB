@@ -144,6 +144,23 @@ export interface DeviceSnapshot {
   capabilities?: CapabilitiesPart;
   /** The draft being recorded, shown only to an unlocked driver. */
   recording?: DraftSummary | null;
+  /** An online start still waiting for the server's answer, and the last outcome. */
+  runStart?: { pending: boolean; routeVersionId: string | null; lastStatus: string | null; lastCode: string | null };
+  /** The most recently ended run and whether the server has its end. */
+  lastEndedRun?: EndedRun | null;
+}
+
+export interface EndedRun {
+  runId: string;
+  endedAtMs: number;
+  endSync: "pending" | "accepted" | "rejected";
+  endError: string | null;
+  endAttempts: number;
+  positionsRecorded: number;
+  positionsWaiting: number;
+  /** Absent on older device software. */
+  positionsAccepted?: number;
+  positionsRejected?: number;
 }
 
 /**

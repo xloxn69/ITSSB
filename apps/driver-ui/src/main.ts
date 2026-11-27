@@ -2,15 +2,18 @@ import { ApiError, api, currentSession, fetchSession, fetchSnapshot, noAnswer, R
 import {
   type Controller,
   editStopsView,
+  endConfirmView,
   libraryView,
   newRecordingView,
   recordingView,
   reviewView,
   parkedControl,
+  preflightView,
+  summaryView,
   type UiState,
   unlockView,
 } from "./flows.js";
-import { type ActionId, type ScreenId, selectScreen } from "./screens.js";
+import { type ActionId, parked as parkedNow, type ScreenId, selectScreen } from "./screens.js";
 import type { DeviceSnapshot, DraftSummary, Observed } from "./snapshot.js";
 import { css } from "./styles.js";
 import { dashboardView, diagnosticsView, drivingView, type Nav, offlineView, startupView, statusBar } from "./views.js";
@@ -48,6 +51,7 @@ const ui: UiState = {
   confirmRemoveStopId: null,
   message: null,
   busy: false,
+  routeVersionId: null,
 };
 
 function observed(): Observed {
@@ -140,6 +144,13 @@ const ctl: Controller & Nav = {
     render();
   },
   action(id: ActionId) {
+    if (id === "startRoute") {
+      const routes = currentSession()?.routes ?? [];
+      ui.routeVersionId = snapshot?.runStart?.routeVersionId ?? (routes.length === 1 ? (routes[0]?.routeVersionId ?? null) : ui.routeVersionId);
+      void fetchSession().then(render, render);
+      this.go("D12");
+      return;
+    }
     if (id === "recordRoute") {
       const rec = snapshot?.recording;
       if (rec) this.openDraft(rec);
@@ -211,6 +222,29 @@ const ctl: Controller & Nav = {
     if (!id) return;
     void run(null, () => api.moveStop(id, stopId, position)).then(refreshDetail).then(render);
   },
+  startRun() {
+    const route = ui.routeVersionId;
+    if (!route) return;
+    void run("startRun", async () => {
+      const r = await api.startRun(ids.for("startRun"), route);
+      if (r.status !== "accepted") {
+        // No answer: keep this requestId; the device keeps the pending request too.
+        throw new ApiError(503, "SERVER_NO_ANSWER", r.message ?? "No answer from the school server.");
+      }
+    }, "Run started. The school server accepted it.").then((ok) => {
+      if (ok) ctl.go(null);
+    });
+  },
+  endRun() {
+    const runId = snapshot?.run?.runId;
+    if (!runId) return;
+    void run("endRun", async () => {
+      const r = await api.endRun(runId, ids.for("endRun"));
+      if (r.message) ui.message = { kind: "problem", text: r.message };
+    }).then((ok) => {
+      if (ok) ctl.go("D24");
+    });
+  },
   removeStop(stopId) {
     const id = ui.draftId;
     if (!id) return;
@@ -229,7 +263,23 @@ function dashboardControls(o: Observed): (HTMLElement | null)[] {
   lockBtn.className = s.unlocked ? "btn" : "btn primary";
   lockBtn.textContent = s.unlocked ? "Lock" : "Unlock driver";
   lockBtn.addEventListener("click", () => (s.unlocked ? ctl.lock() : ctl.go("D04")));
-  return [lockBtn, parkedControl(o, ctl, ui)];
+  const extra: (HTMLElement | null)[] = [lockBtn, parkedControl(o, ctl, ui)];
+  if (s.unlocked && o.snapshot?.run?.state === "active") {
+    const end = document.createElement("button");
+    end.className = "btn";
+    end.textContent = "End run";
+    end.disabled = !parkedNow(o);
+    end.addEventListener("click", () => ctl.go("D23"));
+    extra.push(end);
+  }
+  if (s.unlocked && o.snapshot?.lastEndedRun && !o.snapshot.run) {
+    const last = document.createElement("button");
+    last.className = "btn";
+    last.textContent = "Last trip";
+    last.addEventListener("click", () => ctl.go("D24"));
+    extra.push(last);
+  }
+  return extra;
 }
 
 function render(): void {
@@ -259,8 +309,14 @@ function render(): void {
         return editStopsView(o, ui, ctl);
       case "D10":
         return reviewView(o, ui, ctl);
+      case "D12":
+        return preflightView(o, currentSession(), ui, ctl);
       case "D13":
-        return drivingView(o, ctl);
+        return drivingView(o, ctl, [parkedControl(o, ctl, ui)]);
+      case "D23":
+        return endConfirmView(o, ui, ctl);
+      case "D24":
+        return summaryView(o, ui, ctl);
       case "D21":
         return diagnosticsView(o, ctl);
       case "D22":

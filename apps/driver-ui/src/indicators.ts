@@ -136,7 +136,7 @@ export function cloudIndicator(o: Observed): Indicator {
     return make("cloud", "ok", "Connected", `Last accepted ${formatAge(lastOk)}.`);
   }
   if (b.status === "unknown") {
-    return make("cloud", "unknown", "Not contacted yet", "Nothing has been sent to the school server since start.");
+    return make("cloud", "unknown", "No uploads yet", "No positions have been uploaded since the device started.");
   }
   const level: Level = b.status === "rate_limited" ? "warn" : "problem";
   const short = b.status === "credential_rejected" || b.status === "forbidden" ? "Not authorized" : "Not reachable";

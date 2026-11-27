@@ -33,7 +33,8 @@ from .local_auth import SessionManager, allowed_origins, load_drivers
 from .motion import MotionJudge, ObservedFixHolder
 from .recorder import Recorder, RecorderThread
 from .status import StatusBoard
-from .uploader import UploaderThread
+from .trips import EndRetryThread, HttpTripEvents
+from .uploader import HttpTransport, UploaderThread
 
 log = logging.getLogger("itssb_device")
 
@@ -97,6 +98,12 @@ class Service:
         self.board.outbox(counts)
         log.info("recovered run=%s outbox=%s", run, counts)
 
+        trip_events = None
+        if cfg.upload_enabled:
+            assert cfg.device_api_origin and cfg.device_token  # noqa: S101 - upload_enabled
+            trip_events = HttpTripEvents(
+                HttpTransport(cfg.device_api_origin, cfg.http_timeout_s), cfg.device_token
+            )
         drivers = load_drivers(cfg.drivers_file)
         log.info("driver unlock: %d driver(s) provisioned", len(drivers))
         driver_api = DriverApi(
@@ -107,6 +114,8 @@ class Service:
             cfg.database_path,
             cfg.driver_ui_dir,
             allowed_origins(cfg.local_api_port),
+            trip_events=trip_events,
+            service_timezone=cfg.service_timezone,
         )
         if not driver_api.serves_ui:
             log.warning("driver UI not found at %s; serving the status page", cfg.driver_ui_dir)
@@ -128,6 +137,8 @@ class Service:
             )
         )
         self._threads.append(DraftSamplerThread(cfg.database_path, self.latest, self.stop_event))
+        if trip_events is not None:
+            self._threads.append(EndRetryThread(cfg.database_path, trip_events, self.stop_event))
         if cfg.upload_enabled:
             self._threads.append(UploaderThread(cfg, self.board, self.stop_event))
         else:

@@ -1,9 +1,9 @@
 import type { SessionInfo } from "./api.js";
 import { formatAge, formatDuration } from "./format.js";
-import { gpsIndicator } from "./indicators.js";
+import { cloudIndicator, gpsIndicator, type Indicator, networkIndicator, storageIndicator } from "./indicators.js";
 import { routeSvg } from "./routeMap.js";
 import { editBlocked, parked, type ScreenId } from "./screens.js";
-import type { DraftDetail, DraftSummary, Observed } from "./snapshot.js";
+import type { DraftDetail, DraftSummary, EndedRun, Observed } from "./snapshot.js";
 import { h } from "./views.js";
 
 /**
@@ -23,6 +23,7 @@ export interface UiState {
   confirmRemoveStopId: string | null;
   message: { kind: "ok" | "problem" | "pending"; text: string } | null;
   busy: boolean;
+  routeVersionId: string | null;
 }
 
 export interface Controller {
@@ -38,6 +39,8 @@ export interface Controller {
   renameStop(stopId: string): void;
   moveStop(stopId: string, position: number): void;
   removeStop(stopId: string): void;
+  startRun(): void;
+  endRun(): void;
 }
 
 const DIRECTION_WORDS = { to_school: "To school", from_school: "From school" } as const;
@@ -385,4 +388,153 @@ export function reviewView(_o: Observed, ui: UiState, c: Controller): HTMLElemen
       ),
     ),
   );
+}
+
+// ── D12 start-trip preflight ────────────────────────────────────────
+
+function checkRow(label: string, level: string, text: string): HTMLElement {
+  return h(
+    "div",
+    { class: `check lv-${level}` },
+    h("span", { class: `dot lv-${level}` }),
+    h("span", { class: "k" }, label),
+    h("span", { class: "d" }, text),
+  );
+}
+
+function ind(i: Indicator, ok: string): [string, string] {
+  return [i.level === "ok" ? "ok" : i.level === "problem" ? "problem" : "warn", i.level === "ok" ? ok : i.detail];
+}
+
+export function preflightView(o: Observed, session: SessionInfo | null, ui: UiState, c: Controller): HTMLElement {
+  const routes = session?.routes ?? [];
+  const cap = o.snapshot?.capabilities?.startRoute;
+  const pending = o.snapshot?.runStart?.pending === true;
+  const gps = gpsIndicator(o);
+  const net = networkIndicator(o);
+  const cloud = cloudIndicator(o);
+  const storage = storageIndicator(o);
+  const blockers: string[] = [];
+  if (cap?.available !== true) blockers.push(cap?.reason ?? "This device cannot start runs.");
+  if (ui.routeVersionId === null) blockers.push("Choose a route.");
+  if (storage.level === "problem") blockers.push("This device is not saving positions.");
+  const [gl, gt] = ind(gps, "Current fix.");
+  const [nl, nt] = ind(net, "Online.");
+  const [cl, ct] = ind(cloud, "Reached recently.");
+  return h(
+    "main",
+    { class: "page" },
+    header("Start a run", () => c.go(null)),
+    message(ui),
+    pending
+      ? h("div", { class: "banner lv-warn" }, "An earlier start is still waiting for the school server's answer. Start resends that same request; it cannot create a second run.")
+      : null,
+    h(
+      "div",
+      { class: "split" },
+      h(
+        "div",
+        { class: "card" },
+        h("h2", {}, "Route"),
+        ...(routes.length === 0
+          ? [h("p", { class: "muted" }, "No approved routes are assigned to you on this device.")]
+          : routes.map((r) =>
+              h(
+                "button",
+                { class: `choice${ui.routeVersionId === r.routeVersionId ? " selected" : ""}`, onclick: () => c.set({ routeVersionId: r.routeVersionId }) },
+                r.label,
+              ),
+            )),
+        button(pending ? "Resend start" : "Start run", () => c.startRun(), { primary: true, disabled: ui.busy || blockers.length > 0 }),
+        blockers[0] ? h("span", { class: "muted" }, blockers[0]) : null,
+      ),
+      h(
+        "div",
+        { class: "card checks" },
+        checkRow("Driver", "ok", session?.driver?.displayName ?? "Unlocked"),
+        checkRow("Roster", "warn", "No roster on this device: the school server does not send one yet."),
+        checkRow("GPS", gl, gt),
+        checkRow("Internet", nl, nt),
+        checkRow("School server", cl, ct),
+        checkRow("Storage", storage.level === "problem" ? "problem" : "ok", storage.level === "problem" ? storage.detail : "Positions will save on this device."),
+      ),
+    ),
+    h("p", { class: "muted" }, "Starting needs the school server to answer. A new run never starts from this device alone."),
+  );
+}
+
+// ── D23 end-trip confirmation ───────────────────────────────────────
+
+export function endConfirmView(o: Observed, ui: UiState, c: Controller): HTMLElement {
+  const run = o.snapshot?.run;
+  const pending = o.snapshot?.outbox.pending ?? null;
+  return h(
+    "main",
+    { class: "page" },
+    header("End this run?", () => c.go(null)),
+    message(ui),
+    h(
+      "div",
+      { class: "card" },
+      h("h2", {}, run ? `Run ${run.runId}` : "No active run"),
+      h(
+        "p",
+        {},
+        pending === null
+          ? "The number of positions waiting to sync is unknown."
+          : pending === 0
+            ? "Every saved position has been accepted by the school server."
+            : `${pending} saved ${pending === 1 ? "position is" : "positions are"} still waiting to sync. They stay on this device and send after the end.`,
+      ),
+      h("p", { class: "muted" }, "Ending saves the completion on this device first, then sends it to the school server. Ending the digital run does not confirm that every student has left the bus."),
+      h(
+        "div",
+        { class: "row" },
+        button("End run", () => c.endRun(), { primary: true, disabled: ui.busy || !run }),
+        button("Cancel", () => c.go(null)),
+      ),
+    ),
+  );
+}
+
+// ── D24 trip summary ────────────────────────────────────────────────
+
+export function summaryView(o: Observed, ui: UiState, c: Controller): HTMLElement {
+  const e = o.snapshot?.lastEndedRun ?? null;
+  if (!e) return h("main", { class: "page" }, header("Trip summary", () => c.go(null)), h("p", {}, "No ended run on this device."));
+  const sync =
+    e.endSync === "accepted"
+      ? ["ok", "Accepted by the school server."]
+      : e.endSync === "rejected"
+        ? ["problem", `Rejected by the school server (${e.endError ?? "no reason given"}). Kept on this device for review.`]
+        : ["warn", `Waiting to sync. The device resends the same end until the server answers${e.endAttempts ? ` (${e.endAttempts} ${e.endAttempts === 1 ? "try" : "tries"} so far)` : ""}.`];
+  return h(
+    "main",
+    { class: "page" },
+    header("Trip summary", () => c.go(null)),
+    message(ui),
+    h(
+      "div",
+      { class: "card checks-1" },
+      h("h2", {}, `Run ${e.runId}`),
+      checkRow("Completed on this device", "ok", `Ended ${new Date(e.endedAtMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`),
+      checkRow("End synced", sync[0] ?? "warn", sync[1] ?? ""),
+      checkRow("Positions", positionsLevel(e), positionsText(e)),
+    ),
+  );
+}
+
+function positionsLevel(e: EndedRun): string {
+  if ((e.positionsRejected ?? 0) > 0) return "problem";
+  return e.positionsWaiting > 0 ? "warn" : "ok";
+}
+
+/** Rejected and waiting positions are named; "all accepted" only when it is true. */
+export function positionsText(e: EndedRun): string {
+  const parts = [`${e.positionsRecorded} recorded`];
+  if (e.positionsAccepted !== undefined) parts.push(`${e.positionsAccepted} accepted by the school server`);
+  if ((e.positionsRejected ?? 0) > 0) parts.push(`${e.positionsRejected} rejected by the school server and missing from the trip history`);
+  if (e.positionsWaiting > 0) parts.push(`${e.positionsWaiting} waiting to sync`);
+  if (e.positionsAccepted === undefined && (e.positionsRejected ?? 0) === 0 && e.positionsWaiting === 0) parts.push("none waiting to sync");
+  return `${parts.join("; ")}.`;
 }

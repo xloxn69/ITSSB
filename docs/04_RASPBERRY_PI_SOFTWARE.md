@@ -292,8 +292,8 @@ Local endpoints. Built ones are marked; the rest are still proposals:
 | `POST /api/recordings/{id}/stops` | Built. Mark a draft stop at the device's own fix while parked. |
 | `POST /api/recordings/{id}/stops/{stopId}` | Built. Rename, reorder, or remove a draft stop while parked. |
 | `POST /api/recordings/{id}/finish` | Built. Save the draft on the device (not a submission). |
-| `POST /api/runs/start` | Submit an idempotent online trip start. |
-| `POST /api/runs/{runId}/end` | Save and synchronize an end command. |
+| `POST /api/runs/start` | Built. Submit an idempotent online trip start with the unlocked driver's grant; a start with no answer is resent with its original `requestId`. |
+| `POST /api/runs/{runId}/end` | Built. Complete the run locally with its final sequence boundary, then send `endRun`; retried until the server answers. |
 | `POST /api/commands` | Submit a typed, validated driver operation. |
 
 These are proposed local route names; their cloud counterparts have separate authentication and contracts. Protected reads need session checks too.

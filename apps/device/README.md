@@ -14,7 +14,7 @@ Python service that runs on the bus Raspberry Pi. Spec:
 | `database.py` | SQLite (WAL, `synchronous=FULL`) with migrations; observation + outbox row in one transaction |
 | `sync.py` | Applies per-event upload results (`accepted`/`duplicate`/`rejected`/`retryable`) with capped backoff |
 | `uploader.py` | `POST /device/v1/telemetry`: bounded batches (50 events / 128 KiB), verified TLS, timeouts, per-event results, backoff + jitter, 401/403/413/429 handling, TCP network probe |
-| `trips.py` | Online run start flow behind a `RunStarter` interface; ships a stub because the backend has no `/device/v1/trip-events` yet |
+| `trips.py` | Online run start and end over `POST /device/v1/trip-events` with the driver's operating grant; end commands are saved with the local completion and retried |
 | `status.py` | Thread-safe health snapshot: GPS, network, backend, outbox, run kept separate |
 | `api.py` | Local API on `127.0.0.1:8765`: `GET /health` (JSON), the built driver UI (or a status page), and `/api/*` |
 | `driver_api.py` | Driver touchscreen routes: session, unlock, parked, route recording; static UI files |
@@ -25,8 +25,9 @@ Python service that runs on the bus Raspberry Pi. Spec:
 | `devtools/fake_gpsd.py` | Fake GPSD with **fictional** data for tests and indoor demos |
 | `devtools/fake_backend.py` | Local fake of the telemetry endpoint with outage modes (`down`, `drop_response`, `partial`, ...) |
 
-Still to build (see [roadmap](../../docs/15_BUILD_ROADMAP.md)): the HTTP
-`RunStarter` (needs the backend's trip-events endpoint).
+Still to build (see [roadmap](../../docs/15_BUILD_ROADMAP.md)): driver
+sign-in through `/device/v1/driver-session` (grants are provisioned by an
+administrator until then), route-draft submission, QR codes, and the roster.
 
 ## Driver touchscreen
 
@@ -49,6 +50,8 @@ Local API (all on `127.0.0.1:8765`, same origin as the UI):
 | `POST /api/recordings/{id}/stops` `{requestId, name?}` | driver + parked + fix | Marks a stop at the device's own fix (request coordinates are ignored) |
 | `POST /api/recordings/{id}/stops/{stopId}` `{name}` / `{position}` / `{remove: true}` | driver + parked | Renames, reorders, or removes a stop |
 | `POST /api/recordings/{id}/finish` | driver + parked | Saves the draft on this device. It is **not submitted**: the backend has no route-draft endpoint yet |
+| `POST /api/runs/start` `{requestId, routeVersionId}` | driver + parked, grant, server configured, service time zone | Online start; a start with no answer is resent with its first `requestId` |
+| `POST /api/runs/{runId}/end` `{requestId}` | driver + parked, grant | Completes the run on this device, then sends `endRun` (retried every 15 s until answered) |
 
 Every `POST` needs `Origin: http://127.0.0.1:8765` (or `localhost`), a JSON
 body, the `itssb_kiosk` cookie, and `X-ITSSB-CSRF`. Moving or unknown motion
@@ -58,8 +61,16 @@ Points keep recording while driving.
 Drivers come from `ITSSB_DRIVERS_FILE` (default `/etc/itssb/drivers.json`):
 
 ```json
-{"drivers": [{"driverId": "drv_demo", "displayName": "Demo Driver", "pinHash": "scrypt$16384$8$1$..."}]}
+{"drivers": [{
+  "driverId": "drv_demo", "displayName": "Demo Driver", "pinHash": "scrypt$16384$8$1$...",
+  "operatingGrant": "<grant from driverGrants:issue>",
+  "routeVersions": [{"routeVersionId": "<id>", "label": "Demo Route North (to school)"}]
+}]}
 ```
+
+`operatingGrant` and `routeVersions` are optional; without them the driver
+can record routes but not start runs. Starting also needs
+`ITSSB_SERVICE_TIMEZONE`. The grant never reaches the browser.
 
 No file means nobody can unlock. There is no default or override PIN.
 
