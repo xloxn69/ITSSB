@@ -64,6 +64,19 @@ final class PushRegistrar {
     @ObservationIgnored private var active = false
     /// Bumped by `deactivate`; work that started before it is dropped when it resumes.
     @ObservationIgnored private var epoch = 0
+    /// Server calls run one at a time in order, so sign-out's disable always lands
+    /// after any registration that was already on its way.
+    @ObservationIgnored private var queue: Task<Void, Never>?
+
+    private func enqueue(_ operation: @escaping @MainActor () async -> Void) async {
+        let previous = queue
+        let task = Task { @MainActor in
+            await previous?.value
+            await operation()
+        }
+        queue = task
+        await task.value
+    }
 
     init(source: any NotificationSource, authorizing: any PushAuthorizing,
          ids: any InstallationIdStoring = KeychainInstallationIdStore(),
@@ -104,16 +117,18 @@ final class PushRegistrar {
     func deactivate() async {
         guard active else { return }
         // Fence first: a token callback or refresh arriving while this awaits
-        // must not register again. Mutations from one client run in order, so
-        // anything already sent lands before this one.
+        // must not register again. The disable joins the call queue, so a
+        // registration already on its way finishes before it.
         active = false
         epoch += 1
         pushEnabled = false
-        do {
-            _ = try await source.registerDevice(installationId: installationId, token: nil,
-                                                environment: environment, permission: permission)
-        } catch {
-            registrationFailed = true
+        await enqueue { [self] in
+            do {
+                _ = try await source.registerDevice(installationId: installationId, token: nil,
+                                                    environment: environment, permission: permission)
+            } catch {
+                registrationFailed = true
+            }
         }
     }
 
@@ -141,16 +156,19 @@ final class PushRegistrar {
     private func sync() async {
         guard active else { return }
         let started = epoch
-        do {
-            let enabled = try await source.registerDevice(
-                installationId: installationId,
-                token: permission.allowsAlerts ? token : nil,
-                environment: environment, permission: permission)
-            // A sign-out that began meanwhile already turned this off.
-            if started == epoch { pushEnabled = enabled }
-            registrationFailed = false
-        } catch {
-            registrationFailed = true
+        await enqueue { [self] in
+            // A sign-out queued ahead of this turn already disabled the phone.
+            guard started == epoch else { return }
+            do {
+                let enabled = try await source.registerDevice(
+                    installationId: installationId,
+                    token: permission.allowsAlerts ? token : nil,
+                    environment: environment, permission: permission)
+                if started == epoch { pushEnabled = enabled }
+                registrationFailed = false
+            } catch {
+                registrationFailed = true
+            }
         }
     }
 }

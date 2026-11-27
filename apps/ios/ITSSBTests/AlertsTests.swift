@@ -201,6 +201,23 @@ final class AlertsTests: XCTestCase {
         XCTAssertFalse(registrar.pushEnabled)
     }
 
+    func testARegistrationAlreadyInFlightLandsBeforeTheSignOutDisable() async {
+        let source = SuspendingSource()
+        let registrar = PushRegistrar(source: source, authorizing: FixedPermission(value: .authorized),
+                                      ids: defaults(), environment: .sandbox) {}
+        await registrar.activate()
+        source.suspendNext = true
+        let register = Task { await registrar.didRegister(deviceToken: Data([0xab])) }
+        _ = await eventuallyTrue { source.suspended != nil } // the token call is on the network
+        let signOut = Task { await registrar.deactivate() }
+        for _ in 0..<50 { await Task.yield() }
+        source.resume()
+        await register.value
+        await signOut.value
+        XCTAssertEqual(source.tokens.suffix(2), ["ab", nil]) // the disable lands last
+        XCTAssertFalse(registrar.pushEnabled)
+    }
+
     func testNotificationTapCarriesOnlyTheAssignment() {
         XCTAssertEqual(NotificationRouter.assignmentId(from: ["itssb": ["type": "approaching",
                                                                          "assignmentId": "a1"]]), "a1")
