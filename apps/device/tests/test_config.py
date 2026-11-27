@@ -27,7 +27,7 @@ def test_token_is_never_in_repr_or_redacted_view():
     assert cfg.upload_enabled
 
 
-@pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.5", "example.com", "::"])  # noqa: S104
+@pytest.mark.parametrize("host", ["0.0.0.0", "192.0.2.5", "example.com", "::"])  # noqa: S104
 def test_local_api_must_be_loopback(host):
     with pytest.raises(ConfigError, match="loopback"):
         load_config({"ITSSB_LOCAL_API_HOST": host})

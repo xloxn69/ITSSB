@@ -18,7 +18,7 @@ from collections.abc import Callable
 
 from .database import Database, RunNotActive
 from .gps_reader import LatestFixHolder
-from .status import GPS_FRESH_S, StatusBoard
+from .status import GPS_FRESH_S, MAX_FUTURE_SKEW_MS, StatusBoard, wall_ms
 
 log = logging.getLogger(__name__)
 
@@ -31,9 +31,11 @@ class Recorder:
         latest: LatestFixHolder,
         boot_id: str,
         monotonic: Callable[[], float] = time.monotonic,
+        now_ms: Callable[[], int] = wall_ms,
     ) -> None:
         self.db, self.board, self.latest, self.boot_id = db, board, latest, boot_id
         self._mono = monotonic
+        self._now_ms = now_ms
         self.sequence = 0  # per bootId; resets only with a new bootId
         self._last_run: str | None = None
 
@@ -56,7 +58,10 @@ class Recorder:
         latest = self.latest.get()
         if latest is None or self._mono() - latest.received_mono > GPS_FRESH_S:
             return False
-        last = self.db.last_captured_at_ms(run_id)
+        now = self._now_ms()
+        if latest.fix.captured_at_ms > now + MAX_FUTURE_SKEW_MS:
+            return False  # never persist a future capture (it would block later ones)
+        last = self.db.last_captured_at_ms(run_id, at_most=now + MAX_FUTURE_SKEW_MS)
         if last is not None and latest.fix.captured_at_ms <= last:
             return False  # same measurement epoch (or older) already saved
         try:
@@ -88,7 +93,10 @@ class RecorderThread(threading.Thread):
             while not self.stop_event.is_set():
                 try:
                     recorder.tick()
-                except Exception:
+                    recorder.board.recorder_fault(None)
+                except Exception as exc:
+                    # e.g. disk full: observations are being lost; say so in health.
+                    recorder.board.recorder_fault(f"save failed: {type(exc).__name__}")
                     log.exception("recorder tick failed")
                 self.stop_event.wait(self.interval_s)
         finally:

@@ -77,3 +77,34 @@ def test_per_event_results(db):
 def test_backoff_is_capped():
     assert backoff_ms(1) == 2_000
     assert backoff_ms(100) == 5 * 60_000
+
+
+def test_restart_keeps_acknowledged_rejected_and_pending_meaning(tmp_path):
+    path = tmp_path / "device.db"
+    d = Database(path)
+    d.save_run("demo_run_001", "active")
+    a, r, p = (d.record_observation("demo_run_001", FIX, BOOT, i).event_id for i in range(3))
+    apply_results(
+        d,
+        [a, r, p],
+        [
+            {"eventId": a, "status": "accepted"},
+            {"eventId": r, "status": "rejected", "code": "INVALID_COORDINATES"},
+            {"eventId": p, "status": "retryable", "code": "TEMPORARILY_UNAVAILABLE"},
+        ],
+        now_ms=1000,
+    )
+    before = d.list_outbox()
+    d.close()
+
+    d = Database(path)  # simulated restart
+    assert d.list_outbox() == before
+    by_id = {row["eventId"]: row for row in d.list_outbox()}
+    assert by_id[a]["status"] == "acknowledged"
+    assert (by_id[r]["status"], by_id[r]["lastError"]) == ("rejected", "INVALID_COORDINATES")
+    assert (by_id[p]["status"], by_id[p]["attempts"]) == ("pending", 1)
+    assert by_id[p]["nextAttemptAtMs"] == 1000 + backoff_ms(1)
+    # Only the pending one is ever offered for upload again, and only once due.
+    assert d.pending_payloads(now_ms=1000) == []
+    assert [x["eventId"] for x in d.pending_payloads(now_ms=1000 + backoff_ms(1))] == [p]
+    d.close()

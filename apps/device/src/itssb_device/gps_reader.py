@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 from .gps import MAX_LINE_BYTES, WATCH_COMMAND, Rejected, fix_from_tpv, parse_line
 from .models import Fix
-from .status import StatusBoard
+from .status import MAX_CAPTURE_AGE_MS, MAX_FUTURE_SKEW_MS, StatusBoard, wall_ms
 
 log = logging.getLogger(__name__)
 
@@ -89,8 +89,10 @@ class GpsReader(threading.Thread):
         latest: LatestFixHolder,
         stop: threading.Event,
         monotonic: Callable[[], float] = time.monotonic,
+        now_ms: Callable[[], int] = wall_ms,
     ) -> None:
         super().__init__(name="gps-reader", daemon=True)
+        self._now_ms = now_ms
         self.host, self.port = host, port
         self.board, self.latest, self.stop_event = board, latest, stop
         self._mono = monotonic
@@ -158,9 +160,27 @@ class GpsReader(threading.Thread):
                 self.board.gps_rejected(str(reason))
                 self._note(str(reason))
                 return
+            reason = self._implausible(fix.captured_at_ms)
+            if reason:
+                self.board.gps_rejected(reason)
+                self._note(reason)
+                return
+            prev = self.latest.get()
+            if prev is not None and fix.captured_at_ms <= prev.fix.captured_at_ms:
+                # Same measurement epoch (GPSD can send several TPVs per epoch)
+                # or an older one: it must not refresh freshness.
+                return
             self.latest.set(fix, self._mono())
             self.board.gps_fix(fix.captured_at_ms, fix.fix_mode)
             self._note(None)
+
+    def _implausible(self, captured_at_ms: int) -> str | None:
+        now = self._now_ms()
+        if captured_at_ms > now + MAX_FUTURE_SKEW_MS:
+            return "capture time in the future"
+        if now - captured_at_ms > MAX_CAPTURE_AGE_MS:
+            return "capture time too old"
+        return None
 
     def _note(self, reason: str | None) -> None:
         """Logs GPS state transitions only, so a long no-fix period writes one

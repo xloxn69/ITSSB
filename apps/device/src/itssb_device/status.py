@@ -21,6 +21,10 @@ from . import __version__
 
 # A valid fix older than this (by local receipt time) no longer counts as `valid`.
 GPS_FRESH_S = 5.0
+# Capture-time plausibility against this device's clock. The future bound
+# matches the backend's MAX_FUTURE_SKEW_MS (packages/contracts validate.ts).
+MAX_FUTURE_SKEW_MS = 2 * 60 * 1000
+MAX_CAPTURE_AGE_MS = 30 * 1000
 
 
 def wall_ms() -> int:
@@ -74,7 +78,12 @@ class StatusBoard:
             "oldestPendingCapturedAtMs": None,
         }
         self._run: dict[str, Any] | None = None
-        self._recorder: dict[str, Any] = {"lastRecordedAtMs": None, "observationsThisBoot": 0}
+        self._recorder: dict[str, Any] = {
+            "lastRecordedAtMs": None,
+            "observationsThisBoot": 0,
+            "fault": None,
+            "faultSinceMs": None,
+        }
 
     # ── Writers (called from worker threads) ─────────────────────────
 
@@ -135,6 +144,17 @@ class StatusBoard:
         with self._lock:
             self._recorder["lastRecordedAtMs"] = captured_at_ms
             self._recorder["observationsThisBoot"] += 1
+
+    def recorder_fault(self, fault: str | None) -> None:
+        """A failed save is an operational fault, shown until a save succeeds."""
+        with self._lock:
+            r = self._recorder
+            if fault is None:
+                r["fault"], r["faultSinceMs"] = None, None
+            elif r["fault"] is None:
+                r["fault"], r["faultSinceMs"] = fault, self._now_ms()
+            else:
+                r["fault"] = fault
 
     # ── Reader ───────────────────────────────────────────────────────
 

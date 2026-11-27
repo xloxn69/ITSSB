@@ -16,6 +16,7 @@ runtime (`mode`) to simulate outages:
 - `rate_limited`    HTTP 429 with Retry-After: 1
 - `too_large`       HTTP 413 for batches over 1 event
 
+`GET /_stats` lists stored eventIds and every request's eventIds (test-only).
 Binds to 127.0.0.1 only. Never use it as a real backend.
 """
 
@@ -130,6 +131,15 @@ class _Handler(BaseHTTPRequestHandler):
             {"schemaVersion": 1, "error": {"code": code, "message": code, "retryable": retryable}},
             extra,
         )
+
+    def do_GET(self) -> None:
+        # Test-only inspection: which eventIds were sent, in which requests.
+        if self.path != "/_stats":
+            self._error(404, "NOT_FOUND")
+            return
+        with self.server.lock:
+            body = {"events": sorted(self.server.events), "requests": list(self.server.requests)}
+        self._json(200, body)
 
     def do_POST(self) -> None:
         srv = self.server

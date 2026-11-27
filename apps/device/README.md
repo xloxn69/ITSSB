@@ -22,7 +22,15 @@ Python service that runs on the bus Raspberry Pi. Spec:
 | `devtools/fake_backend.py` | Local fake of the telemetry endpoint with outage modes (`down`, `drop_response`, `partial`, ...) |
 
 Still to build (see [roadmap](../../docs/15_BUILD_ROADMAP.md)): the HTTP
-`RunStarter` (needs the backend's trip-events endpoint), systemd unit.
+`RunStarter` (needs the backend's trip-events endpoint).
+
+## Install on the Pi
+
+The owner installs the reviewed systemd unit
+[`deploy/itssb-device.service`](deploy/itssb-device.service) with sudo,
+following [`deploy/INSTALL.md`](deploy/INSTALL.md). `scripts/pi_proof.sh` re-runs
+the Phase 2 proof (real GPSD, GPSD stopped/started, kill -9 recovery) without
+sudo.
 
 ## Commands
 
@@ -78,6 +86,12 @@ curl -s http://127.0.0.1:8765/health
 | `backend.status` | `unconfigured`, `unknown`, `ok`, ... | Outcome of the last authenticated backend request |
 | `outbox` | counts + `oldestPendingCapturedAtMs` | Work the backend has not acknowledged |
 | `run` | `{runId, state, nextRunSequence}` or `null` | Recovered from SQLite; never invented |
+| `recorder.fault` | `null` or e.g. `save failed: OperationalError` | Observations are not being saved (disk full, ...); cleared after a successful save |
+
+A fix only counts as `valid` if its GPS time is a new measurement epoch, no
+more than 30 s old and no more than 2 min ahead of this device's clock (the
+backend's limit). After an outage the uploader sends the newest observation
+first, then drains history oldest-first.
 
 Every attribute carries its own timestamp or age. Health never includes
 coordinates, tokens, or student data.
