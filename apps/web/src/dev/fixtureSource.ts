@@ -29,6 +29,8 @@ export const FIXTURE_SCENARIOS = [
   "error",
   "loading",
   "two-students",
+  "offline-no-run",
+  "offline-live",
 ] as const;
 export type FixtureScenario = (typeof FIXTURE_SCENARIOS)[number];
 
@@ -45,7 +47,7 @@ const AGE_MS: Partial<Record<FixtureScenario, number>> = {
 
 function runFor(scenario: FixtureScenario, assignmentId: string): unknown {
   const now = Date.now();
-  if (scenario === "no-run") {
+  if (scenario === "no-run" || scenario === "offline-no-run") {
     return { schemaVersion: 1, status: "no_active_run", serverNowMs: now, assignmentId, routeVersionId: readyRun.routeVersionId, run: null };
   }
   if (scenario === "no-access") {
@@ -112,5 +114,10 @@ export function fixtureSource(scenario: FixtureScenario): TrackingSource {
       return () => clearTimeout(t);
     },
     serverTime: async () => Date.now(),
+    connection(onChange) {
+      if (!scenario.startsWith("offline")) return () => {};
+      const t = setTimeout(() => onChange(false), 50);
+      return () => clearTimeout(t);
+    },
   };
 }

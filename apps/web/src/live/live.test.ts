@@ -1,8 +1,8 @@
-import { myAssignmentsReady, myRunReady } from "@itssb/contracts/fixtures";
+import { myAssignmentsReady, myRunNoActiveRun, myRunReady } from "@itssb/contracts/fixtures";
 import { getFunctionName } from "convex/server";
 import { ConvexError } from "convex/values";
 import { describe, expect, it, vi } from "vitest";
-import { SessionExpiredError, TrackStore } from "../tracking/store";
+import { connectionNotice, SessionExpiredError, TrackStore } from "../tracking/store";
 import { liveConfig } from "./config";
 import { convexSource, type LiveClient, mapError } from "./convexSource";
 
@@ -13,7 +13,14 @@ function fakeClient() {
   const results = new Map<string, { value?: unknown; error?: unknown }>();
   const listeners = new Map<string, Set<() => void>>();
   const mutation = vi.fn<(name: string) => Promise<unknown>>();
+  let conn = { isWebSocketConnected: true, hasEverConnected: true };
+  const connListeners = new Set<(s: typeof conn) => void>();
   const client = {
+    connectionState: () => conn,
+    subscribeToConnectionState: (cb: (s: typeof conn) => void) => {
+      connListeners.add(cb);
+      return () => connListeners.delete(cb);
+    },
     watchQuery: (q: unknown, args: unknown) => {
       const k = key(getFunctionName(q as never), args ?? {});
       return {
@@ -36,7 +43,11 @@ function fakeClient() {
     results.set(key(name, args), r);
     for (const cb of listeners.get(key(name, args)) ?? []) cb();
   };
-  return { client, push, mutation, listeners };
+  const setConnected = (isWebSocketConnected: boolean) => {
+    conn = { isWebSocketConnected, hasEverConnected: true };
+    for (const cb of connListeners) cb(conn);
+  };
+  return { client, push, mutation, listeners, setConnected };
 }
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -83,6 +94,28 @@ describe("convexSource", () => {
     store.stop();
     const remaining = [...listeners.values()].reduce((n, s) => n + s.size, 0);
     expect(remaining).toBe(0);
+  });
+});
+
+describe("connection loss (no error from the SDK)", () => {
+  it("a remembered no-trip answer is not shown as no trip while disconnected", () => {
+    const { client, push, setConnected } = fakeClient();
+    const store = new TrackStore(convexSource(client));
+    store.start();
+    push("tracking:myAssignments", {}, { value: myAssignmentsReady });
+    push("tracking:myRun", { assignmentId: "demo_assignment_001" }, { value: myRunNoActiveRun });
+    expect(connectionNotice(store.state, store.connectionLost)).toBeNull();
+    setConnected(false);
+    expect(store.state.kind).toBe("no_active_run");
+    expect(connectionNotice(store.state, store.connectionLost)).toBe("replace");
+    setConnected(true);
+    expect(connectionNotice(store.state, store.connectionLost)).toBeNull();
+  });
+
+  it("a tracking view gets a banner; loading before the first connection is not doubted", () => {
+    expect(connectionNotice({ kind: "tracking" } as never, true)).toBe("banner");
+    expect(connectionNotice({ kind: "access_unavailable" }, true)).toBe("replace");
+    expect(connectionNotice({ kind: "failed", message: "x" }, true)).toBeNull();
   });
 });
 

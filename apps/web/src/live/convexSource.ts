@@ -19,7 +19,8 @@ const ref = {
 };
 
 /** The part of `ConvexReactClient` this source uses, so tests can fake it. */
-export type LiveClient = Pick<ConvexReactClient, "watchQuery" | "mutation">;
+export type LiveClient = Pick<ConvexReactClient, "watchQuery" | "mutation"> &
+  Partial<Pick<ConvexReactClient, "connectionState" | "subscribeToConnectionState">>;
 
 /** Maps the SDK's typed auth failure to the signed-out state; anything else stays a transport error. */
 export function mapError(error: unknown): unknown {
@@ -64,6 +65,14 @@ export function convexSource(client: LiveClient): TrackingSource {
     assignments: (onValue, onError) => watch(ref.myAssignments, {}, onValue, onError),
     run: (assignmentId, onValue, onError) => watch(ref.myRun, { assignmentId }, onValue, onError),
     route: (assignmentId, onValue, onError) => watch(ref.myRoute, { assignmentId }, onValue, onError),
+    connection(onChange) {
+      if (!client.subscribeToConnectionState || !client.connectionState) return () => {};
+      // Before the first connection, queries are still loading; nothing to doubt yet.
+      const report = (s: { isWebSocketConnected: boolean; hasEverConnected: boolean }) =>
+        onChange(s.isWebSocketConnected || !s.hasEverConnected);
+      report(client.connectionState());
+      return client.subscribeToConnectionState(report);
+    },
     async serverTime() {
       const result = (await client.mutation(ref.serverTime, {})) as { schemaVersion?: unknown; serverNowMs?: unknown };
       if (result?.schemaVersion !== 1 || typeof result.serverNowMs !== "number" || !Number.isFinite(result.serverNowMs)) {
