@@ -10,15 +10,17 @@ const ISSUER = "https://example-name-00.clerk.accounts.dev";
 /** What Convex derives from a verified Clerk token: `issuer|subject`. */
 const CLERK_IDENTITY = { issuer: ISSUER, subject: "user_fictional01", tokenIdentifier: `${ISSUER}|user_fictional01` };
 
+/** How Convex's auth-config evaluator reacts to reading an unset variable. */
+const throwing = () => {
+  throw new Error("AuthConfigMissingEnvironmentVariable: CLERK_JWT_ISSUER_DOMAIN");
+};
+
 describe("auth.config", () => {
   it("trusts Clerk tokens for the `convex` audience from the configured issuer", () => {
     expect(clerkProviders(` ${ISSUER} `)).toEqual([{ domain: ISSUER, applicationID: "convex" }]);
   });
 
   it("an unset variable that throws on read (as Convex's evaluator does) means no provider, not a failed push", () => {
-    const throwing = () => {
-      throw new Error("AuthConfigMissingEnvironmentVariable: CLERK_JWT_ISSUER_DOMAIN");
-    };
     expect(readIssuer(throwing)).toBeUndefined();
     expect(clerkProviders(readIssuer(throwing))).toEqual([]);
     expect(readIssuer(() => ISSUER)).toBe(ISSUER);
