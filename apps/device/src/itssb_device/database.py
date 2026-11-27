@@ -93,6 +93,26 @@ class Database:
         row = self.conn.execute("SELECT run_id FROM local_runs WHERE state='active'").fetchone()
         return row["run_id"] if row else None
 
+    def active_run(self) -> dict | None:
+        """The persisted active run, if any. Restart recovery reads this; it is
+        never created implicitly."""
+        row = self.conn.execute(
+            "SELECT run_id, state, next_run_sequence FROM local_runs WHERE state='active'"
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "runId": row["run_id"],
+            "state": row["state"],
+            "nextRunSequence": row["next_run_sequence"],
+        }
+
+    def last_captured_at_ms(self, run_id: str) -> int | None:
+        row = self.conn.execute(
+            "SELECT MAX(captured_at_ms) AS m FROM telemetry_events WHERE run_id=?", (run_id,)
+        ).fetchone()
+        return row["m"]
+
     # ── Observations ──────────────────────────────────────────────────
 
     def record_observation(
@@ -142,6 +162,38 @@ class Database:
             (now_ms, limit),
         ).fetchall()
         return [json.loads(r["payload"]) for r in rows]
+
+    def outbox_counts(self) -> dict:
+        counts = {"pending": 0, "acknowledged": 0, "rejected": 0}
+        for row in self.conn.execute("SELECT status, COUNT(*) AS n FROM outbox GROUP BY status"):
+            counts[row["status"]] = row["n"]
+        row = self.conn.execute(
+            "SELECT MIN(t.captured_at_ms) AS m FROM outbox o "
+            "JOIN telemetry_events t ON t.event_id = o.event_id WHERE o.status='pending'"
+        ).fetchone()
+        return {**counts, "oldestPendingCapturedAtMs": row["m"]}
+
+    def list_outbox(self, limit: int = 100) -> list[dict]:
+        """Oldest-first outbox rows for diagnostics (no coordinates)."""
+        rows = self.conn.execute(
+            "SELECT o.event_id, o.status, o.attempts, o.next_attempt_at_ms, o.last_error, "
+            "t.run_id, t.run_sequence, t.captured_at_ms FROM outbox o "
+            "JOIN telemetry_events t ON t.event_id = o.event_id ORDER BY o.rowid LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [
+            {
+                "eventId": r["event_id"],
+                "status": r["status"],
+                "attempts": r["attempts"],
+                "nextAttemptAtMs": r["next_attempt_at_ms"],
+                "lastError": r["last_error"],
+                "runId": r["run_id"],
+                "runSequence": r["run_sequence"],
+                "capturedAtMs": r["captured_at_ms"],
+            }
+            for r in rows
+        ]
 
     def outbox_status(self, event_id: str) -> str | None:
         row = self.conn.execute(
