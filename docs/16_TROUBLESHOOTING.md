@@ -273,6 +273,8 @@ Check the boundaries in order:
 
 Do not add continuous student location permission to fix remote bus tracking. Those are different sources of location.
 
+"Bus GPS unavailable" comes from the Pi's 30-second health heartbeat (`POST /device/v1/health`), not from a missing position. If families never see it while the driver screen shows No fix, check the device log for `health: HTTP 404`: the backend was deployed without the health route. Clients stop believing a reported GPS problem two minutes after the bus's last contact, and the backend expires it after the same interval.
+
 A connected phone can correctly show Bus GPS unavailable or an aging bus position. The interface should not turn every problem into the generic text “You are offline.”
 
 ## 14. QR or notification problems

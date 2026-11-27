@@ -278,3 +278,34 @@ def test_a_probe_does_not_end_a_pause_the_server_asked_for(db, backend):
     assert up.upload_once() == "credential_rejected"
     up.probe_network()  # network is fine; the credential is still wrong
     assert up.upload_once() == "paused"
+
+
+def test_d08_backend_unreachable_then_back_resumes_on_first_successful_connect(db, backend):
+    """A link that refuses connections (no route through the bus router,
+    a proxy down) is "could not connect" too: once a probe connects again,
+    uploads resume instead of waiting out a backoff of up to 5 minutes."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        dead = f"http://127.0.0.1:{s.getsockname()[1]}"
+    add(db, 3)
+    up, board, clock = make(db, dead)
+    for _ in range(10):
+        clock.t = max(clock.t, up.pause_until_ms) + 1
+        assert up.upload_once() == "transport_error"
+    assert board.snapshot()["backend"]["status"] == "unreachable"
+    up.probe_network()  # still refused: the pause stays
+    assert up.upload_once() == "paused"
+
+    live = HttpTransport(backend.origin, 2.0)
+    up.transport = live  # the link is back
+    up.probe_network()
+    assert up.upload_once() == "ok"
+
+
+def test_a_backend_that_answers_badly_keeps_its_backoff(db, backend):
+    add(db, 1)
+    up, _, _ = make(db, backend.origin)
+    backend.mode = "drop_response"  # connects, then no answer
+    assert up.upload_once() == "transport_error"
+    up.probe_network()  # TCP connects fine, but the server is the problem
+    assert up.upload_once() == "paused"
