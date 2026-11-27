@@ -9,7 +9,8 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint src",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@itssb/ui": "workspace:*"
