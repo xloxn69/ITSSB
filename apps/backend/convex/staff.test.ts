@@ -3,7 +3,7 @@ import { convexTest } from "convex-test";
 import { describe, expect, it } from "vitest";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { approvedVersionForNewRun } from "./lib/routeVersions";
+import { approvedVersionForNewRun, isApprovedForNewRuns } from "./lib/routeVersions";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -184,6 +184,12 @@ describe("route review and approval", () => {
       next: await approvedVersionForNewRun(ctx, v1.routeId as Id<"routes">),
     }));
     expect(after.run?.routeVersionId).toBe(v1.routeVersionId);
+    const allowed = await t.run(async (ctx) => ({
+      v1: await isApprovedForNewRuns(ctx, v1.routeVersionId as Id<"routeVersions">),
+      v2: await isApprovedForNewRuns(ctx, v2.routeVersionId as Id<"routeVersions">),
+      legacy: await isApprovedForNewRuns(ctx, await ctx.db.insert("routeVersions", { label: "Old", path: PATH })),
+    }));
+    expect(allowed).toEqual({ v1: false, v2: true, legacy: true });
     expect(after.v1?.path).toEqual(PATH);
     expect(after.v1Stops).toHaveLength(1);
     expect(after.next).toBe(v2.routeVersionId);
