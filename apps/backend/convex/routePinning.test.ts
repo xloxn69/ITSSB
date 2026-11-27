@@ -22,9 +22,9 @@ const TZ = "America/New_York";
 const HOUR = 60 * 60 * 1000;
 const PATH = [
   { latitude: 34.1, longitude: -83.98 },
-  { latitude: 34.1009, longitude: -83.98 },
+  { latitude: 34.1005, longitude: -83.98 },
 ];
-const STOPS = [{ label: "Oak & Pine", latitude: 34.1009, longitude: -83.98 }];
+const STOPS = [{ label: "Oak & Pine", latitude: 34.1005, longitude: -83.98 }];
 
 async function setup() {
   const t = convexTest(schema, modules);
@@ -102,7 +102,7 @@ describe("approval pins the version a new run uses", () => {
       routeId: v1.routeId as Id<"routes">,
       label: "Route 17 Morning",
       direction: "to_school",
-      path: [...PATH, { latitude: 34.1018, longitude: -83.98 }],
+      path: [...PATH, { latitude: 34.101, longitude: -83.98 }],
       stops: STOPS,
     });
     const v2 = await staff.mutation(api.routes.approveDraft, { draftId: revision });

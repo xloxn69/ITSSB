@@ -15,18 +15,18 @@
       "eventId": "5fe2a60d-7c11-45b9-995d-f50192adea42",
       "capturedAtMs": 1795609085000,
       "receivedAtMs": 1795609085400,
-      "latitude": 34.1,
-      "longitude": -83.98,
+      "latitude": 34.112587,
+      "longitude": -83.99113,
       "speedMps": 7.2,
-      "headingDegrees": 95,
+      "headingDegrees": 130,
       "horizontalAccuracyM": null
     },
     "nextStopId": "demo_stop_003",
     "assignedStop": {
       "stopId": "demo_stop_003",
       "label": "Oak & Pine",
-      "latitude": 34.105,
-      "longitude": -83.975,
+      "latitude": 34.105971,
+      "longitude": -83.977736,
       "status": "upcoming"
     },
     "eta": {

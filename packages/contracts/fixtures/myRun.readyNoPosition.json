@@ -16,8 +16,8 @@
     "assignedStop": {
       "stopId": "demo_stop_003",
       "label": "Oak & Pine",
-      "latitude": 34.105,
-      "longitude": -83.975,
+      "latitude": 34.105971,
+      "longitude": -83.977736,
       "status": "unknown"
     },
     "eta": null

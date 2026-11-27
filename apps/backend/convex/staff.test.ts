@@ -13,13 +13,13 @@ const STAFF = "test|staff";
 const DRIVER = "test|driver";
 const FAMILY = "test|family";
 
-/** Fictional path, about 100 m between points, with a stop on it. */
+/** Fictional path, about 55 m between points (under the 100 m gap warning), with a stop on it. */
 const PATH = [
   { latitude: 34.1, longitude: -83.98 },
-  { latitude: 34.1009, longitude: -83.98 },
-  { latitude: 34.1018, longitude: -83.98 },
+  { latitude: 34.1005, longitude: -83.98 },
+  { latitude: 34.101, longitude: -83.98 },
 ];
-const STOPS = [{ label: "Oak & Pine", latitude: 34.1018, longitude: -83.98, instructions: "North corner" }];
+const STOPS = [{ label: "Oak & Pine", latitude: 34.101, longitude: -83.98, instructions: "North corner" }];
 
 async function setup() {
   const t = convexTest(schema, modules);
@@ -168,8 +168,8 @@ describe("route review and approval", () => {
       routeId: v1.routeId as Id<"routes">,
       label: "Route 17 Morning",
       direction: "to_school",
-      path: [...PATH, { latitude: 34.1027, longitude: -83.98 }],
-      stops: [...STOPS, { label: "Maple & 3rd", latitude: 34.1027, longitude: -83.98 }],
+      path: [...PATH, { latitude: 34.1015, longitude: -83.98 }],
+      stops: [...STOPS, { label: "Maple & 3rd", latitude: 34.1015, longitude: -83.98 }],
     });
     const v2 = await staff.mutation(api.routes.approveDraft, { draftId: revised });
     expect(v2).toMatchObject({ status: "approved", routeId: v1.routeId, versionNumber: 2 });
@@ -286,6 +286,22 @@ describe("route review and approval", () => {
           { code: "stop_off_path", severity: "warning" },
         ],
       },
+    });
+  });
+
+  it("flags a 150 m gap: a map would draw it as a straight line across the blocks", async () => {
+    const { t } = await setup();
+    const draftId = await t.mutation(internal.routes.recordDraft, {
+      label: "Route 7",
+      direction: "to_school",
+      // 0.00135 degrees of latitude is about 150 m.
+      path: [PATH[0]!, { latitude: 34.10135, longitude: -83.98 }],
+      stops: [{ label: "Near stop", latitude: 34.10135, longitude: -83.98 }],
+    });
+    const result = await t.withIdentity({ tokenIdentifier: STAFF }).query(api.routes.getDraft, { draftId });
+    expect(result).toMatchObject({
+      status: "ready",
+      draft: { checks: [{ code: "path_gap", severity: "warning", message: "1 gap longer than 100 m in the recording." }] },
     });
   });
 

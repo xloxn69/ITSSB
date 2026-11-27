@@ -16,7 +16,7 @@ export const DRAFT_STATUSES = ["submitted", "approved", "rejected"] as const;
 export type DraftStatus = (typeof DRAFT_STATUSES)[number];
 
 /** Consecutive recorded points farther apart than this are flagged as a gap. */
-export const ROUTE_GAP_WARNING_M = 500;
+export const ROUTE_GAP_WARNING_M = 100;
 /** A stop farther than this from every path point is flagged. */
 export const STOP_OFF_PATH_WARNING_M = 150;
 

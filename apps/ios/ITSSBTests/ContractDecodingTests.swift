@@ -26,15 +26,15 @@ final class ContractDecodingTests: XCTestCase {
         XCTAssertEqual(run.gpsStatus, .valid)
         XCTAssertEqual(run.assignedStop.label, "Oak & Pine")
         XCTAssertEqual(run.assignedStop.status, .upcoming)
-        XCTAssertEqual(run.assignedStop.coordinate, Coordinate(latitude: 34.105, longitude: -83.975))
+        XCTAssertEqual(run.assignedStop.coordinate, Coordinate(latitude: 34.105971, longitude: -83.977736))
         XCTAssertEqual(clock.serverNow.timeIntervalSince1970, 1_795_609_085.5, accuracy: 0.000_1)
 
         let position = try XCTUnwrap(run.position)
         XCTAssertEqual(position.eventId, "5fe2a60d-7c11-45b9-995d-f50192adea42")
-        XCTAssertEqual(position.latitude, 34.1)
-        XCTAssertEqual(position.longitude, -83.98)
+        XCTAssertEqual(position.latitude, 34.112587)
+        XCTAssertEqual(position.longitude, -83.99113)
         XCTAssertEqual(position.speedMps, 7.2)
-        XCTAssertEqual(position.headingDegrees, 95)
+        XCTAssertEqual(position.headingDegrees, 130)
         XCTAssertNil(position.horizontalAccuracyM, "explicit null decodes as nil")
     }
 
@@ -71,8 +71,11 @@ final class ContractDecodingTests: XCTestCase {
             from: ContractFixture.decode(MyRouteDTO.self, "myRoute.ready")) else { return XCTFail("expected ready") }
         XCTAssertEqual(route.routeVersionId, "demo_route_version_003")
         XCTAssertEqual(route.routeLabel, "Route 17 Morning")
-        XCTAssertEqual(route.path.count, 5)
-        XCTAssertEqual(route.path.first, Coordinate(latitude: 34.092, longitude: -83.995))
+        XCTAssertEqual(route.path.count, 373)
+        XCTAssertEqual(route.path.first, Coordinate(latitude: 34.093164, longitude: -83.998823))
+        // Previews draw the same road-following line as the shared fixture.
+        XCTAssertEqual(route.path, PreviewFixtures.route.path)
+        XCTAssertEqual(route.assignedStop.coordinate, PreviewFixtures.stop.coordinate)
         XCTAssertEqual(route.assignedStop.stopId, "demo_stop_003")
     }
 
