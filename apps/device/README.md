@@ -22,13 +22,14 @@ Python service that runs on the bus Raspberry Pi. Spec:
 | `motion.py` | Moving / stopped / unknown from fresh fixes; the driver-confirmed **Parked** state |
 | `drafts.py` | Route recording into a local draft: a point every ≤ 25 m and at every turn over 20°, none while stopped, gap flags, ≤ 2,000 points (straight runs thinned, corners kept), service-ordered stops |
 | `route_geometry.py` | Distance, bearing, and corner-preserving Douglas-Peucker thinning |
+| `students.py` | QR codes, the cached roster, and driver roster actions queued in SQLite and resent with the same `requestId` until the backend answers (`/device/v1/qr-codes`, `/roster`, `/roster-actions`) |
 | `service.py` | One process, one writer per thread, SIGTERM/SIGINT clean shutdown, bounded logs |
 | `devtools/fake_gpsd.py` | Fake GPSD with **fictional** data for tests and indoor demos |
-| `devtools/fake_backend.py` | Local fake of the telemetry endpoint with outage modes (`down`, `drop_response`, `partial`, ...) |
+| `devtools/fake_backend.py` | Local fake of the telemetry, trip-event, QR, roster and roster-action endpoints with outage modes (`down`, `drop_response`, `partial`, ...) and fictional students |
 
 Still to build (see [roadmap](../../docs/15_BUILD_ROADMAP.md)): driver
 sign-in through `/device/v1/driver-session` (grants are provisioned by an
-administrator until then), route-draft submission, QR codes, and the roster.
+administrator until then) and route-draft submission.
 
 ## Driver touchscreen
 
@@ -53,6 +54,9 @@ Local API (all on `127.0.0.1:8765`, same origin as the UI):
 | `POST /api/recordings/{id}/finish` | driver + parked | Saves the draft on this device. It is **not submitted**: the backend has no route-draft endpoint yet |
 | `POST /api/runs/start` `{requestId, routeVersionId}` | driver + parked, grant, server configured, service time zone | Online start; a start with no answer is resent with its first `requestId` |
 | `POST /api/runs/{runId}/end` `{requestId}` | driver + parked, grant | Completes the run on this device, then sends `endRun` (retried every 15 s until answered) |
+| `POST /api/qr-codes` `{purpose}` | driver + parked, grant, active run | `trip_check_in` (the run) or `route_enrollment` (the run's route version): token, `expiresAtMs`, `remainingMs`. Reused until 2 min before expiry, then refreshed; offline, only an unexpired code; refused or expired, none |
+| `GET /api/roster` | driver + parked, grant, active run | The run's students in stop order and this device's queued changes; served `stale: true` with its `fetchedAtMs` when the server does not answer; deleted on a 401/403 |
+| `POST /api/roster-actions` `{requestId, type, assignmentId, ...}` | driver + parked, grant, active run, student on the cached roster | Saves the change with its capture time, answers `sync: "pending"`, and the sync thread sends it; `synced` or `rejected` (with `code` and `problem`) once the server answers |
 
 Every `POST` needs `Origin: http://127.0.0.1:8765` (or `localhost`), a JSON
 body, the `itssb_kiosk` cookie, and `X-ITSSB-CSRF`. Moving or unknown motion

@@ -14,7 +14,8 @@
     "build:device": "vite build --outDir ../device/src/itssb_device/static --emptyOutDir"
   },
   "dependencies": {
-    "@itssb/ui": "workspace:*"
+    "@itssb/ui": "workspace:*",
+    "qrcode-generator": "2.0.4"
   },
   "devDependencies": {
     "vite": "^8.3.8"

@@ -1,4 +1,5 @@
 import type { DeviceSnapshot, DraftDetail, DraftStop, DraftSummary } from "./snapshot.js";
+import type { DeviceQrCode, QrPurpose, RosterAction, RosterResponse } from "./students.js";
 
 /**
  * Local API client. Same origin as the page (the device serves both), so no
@@ -114,7 +115,7 @@ async function post<T>(path: string, body: Record<string, unknown> = {}): Promis
 async function get<T>(path: string): Promise<T> {
   const res = await call(path);
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!res.ok) throw new ApiError(res.status, String(data["error"] ?? "ERROR"), String(data["message"] ?? "Failed."));
+  if (!res.ok) throw new ApiError(res.status, String(data["error"] ?? "ERROR"), String(data["message"] ?? "Failed."), data);
   return data as T;
 }
 
@@ -140,6 +141,9 @@ export const api = {
       requestId,
       routeVersionId,
     }),
+  qrCode: (purpose: QrPurpose) => post<DeviceQrCode>("/api/qr-codes", { purpose }),
+  roster: () => get<RosterResponse>("/api/roster"),
+  rosterAction: (body: Record<string, unknown>) => post<{ action: RosterAction }>("/api/roster-actions", body),
   endRun: (runId: string, requestId: string) =>
     post<{ completedLocally: boolean; endSync: string; message?: string }>(`/api/runs/${runId}/end`, { requestId }),
 };

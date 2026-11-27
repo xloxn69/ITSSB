@@ -251,7 +251,7 @@ class FakeBackend(ThreadingHTTPServer):
                 "serverNowMs": now,
             }
 
-    def roster_action(self, raw: bytes, body: dict[str, Any]) -> dict[str, Any]:
+    def roster_action(self, body: dict[str, Any]) -> dict[str, Any]:
         now = int(time.time() * 1000)
         rid = str(body.get("requestId"))
         content = {k: v for k, v in body.items() if k != "driverOperatingGrant"}
@@ -263,7 +263,6 @@ class FakeBackend(ThreadingHTTPServer):
             return r
 
         with self.lock:
-            self.action_bodies.setdefault(rid, []).append(raw)
             if rid in self.action_receipts:
                 old, stored = self.action_receipts[rid]
                 if old != fingerprint:
@@ -355,6 +354,14 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _grant_request(self, raw: bytes) -> None:
         srv = self.server
+        if self.path == "/device/v1/roster-actions":
+            # Every body that reached the server, even one it then failed on.
+            with srv.lock:
+                try:
+                    rid = str(json.loads(raw).get("requestId"))
+                except (ValueError, AttributeError):
+                    rid = ""
+                srv.action_bodies.setdefault(rid, []).append(raw)
         if srv.mode == "down":
             self._error(503, "TEMPORARILY_UNAVAILABLE")
             return
@@ -369,7 +376,7 @@ class _Handler(BaseHTTPRequestHandler):
         elif self.path == "/device/v1/roster":
             status, result = srv.roster(body)
         else:
-            status, result = 200, srv.roster_action(raw, body)
+            status, result = 200, srv.roster_action(body)
         if srv.mode == "drop_response":
             self.close_connection = True
             with contextlib.suppress(OSError):

@@ -196,15 +196,17 @@ describe("QR encoder", () => {
   });
 });
 
+function ready(over: Partial<DeviceSnapshot> = {}): DeviceSnapshot {
+  return snapshot({
+    capabilities: { showQr: { available: true }, showStudents: { available: true } },
+    session: { unlocked: true, driverName: "Demo Driver" },
+    motion: { state: "stopped", parked: true },
+    run: { runId: RUN, state: "active" },
+    ...over,
+  });
+}
+
 describe("student screens", () => {
-  const ready = (over: Partial<DeviceSnapshot> = {}) =>
-    snapshot({
-      capabilities: { showQr: { available: true }, showStudents: { available: true } },
-      session: { unlocked: true, driverName: "Demo Driver" },
-      motion: { state: "stopped", parked: true },
-      run: { runId: RUN, state: "active" },
-      ...over,
-    });
 
   it("opens for an unlocked, parked driver during an active run", () => {
     for (const s of ["D15", "D16", "D17", "D18", "D19"] as const) expect(selectScreen(observed(ready()), s)).toBe(s);
