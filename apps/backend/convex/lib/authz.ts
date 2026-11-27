@@ -17,6 +17,16 @@ export async function getUser(ctx: QueryCtx | MutationCtx): Promise<Doc<"users">
     .unique();
 }
 
+/**
+ * Why a caller with no `users` row is denied (docs/08 §8): `unauthenticated`
+ * when there is no verified identity at all (sign in), `not_permitted` when
+ * the identity is verified but not yet linked to an approved person. Telling
+ * an already signed-in person to "sign in again" would loop.
+ */
+export async function missingUserReason(ctx: QueryCtx | MutationCtx): Promise<"unauthenticated" | "not_permitted"> {
+  return (await ctx.auth.getUserIdentity()) ? "not_permitted" : "unauthenticated";
+}
+
 export async function requireUser(ctx: QueryCtx | MutationCtx): Promise<Doc<"users">> {
   const user = await getUser(ctx);
   if (!user) throw new ConvexError({ code: "UNAUTHENTICATED" });

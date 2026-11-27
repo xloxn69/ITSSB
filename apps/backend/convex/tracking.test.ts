@@ -179,6 +179,27 @@ describe("tracking.myRun", () => {
   });
 });
 
+describe("a signed-in identity not linked to any person", () => {
+  const UNLINKED = "test|signed-in-but-unlinked";
+
+  it("is not_permitted on every family query, not unauthenticated", async () => {
+    const { t, assignmentId } = await setup();
+    const caller = t.withIdentity({ tokenIdentifier: UNLINKED });
+    for (const r of [
+      await caller.query(api.tracking.myAssignments, {}),
+      await caller.query(api.tracking.myRun, { assignmentId }),
+      await caller.query(api.tracking.myRoute, { assignmentId }),
+    ]) {
+      expect(r).toEqual({
+        schemaVersion: 1,
+        status: "access_unavailable",
+        serverNowMs: expect.any(Number),
+        reason: "not_permitted",
+      });
+    }
+  });
+});
+
 describe("tracking.serverTime", () => {
   it("returns the current server time without sign-in", async () => {
     const t = convexTest(schema, modules);

@@ -2,7 +2,7 @@ import { type AccessUnavailable, type AccessUnavailableReason, SCHEMA_VERSION } 
 import { v } from "convex/values";
 import type { Doc } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
-import { getUser } from "./authz";
+import { getUser, missingUserReason } from "./authz";
 
 /**
  * Staff console access (docs/12 §1, docs/08 §11). Every staff function calls
@@ -15,7 +15,7 @@ export async function staffCaller(
   ctx: QueryCtx | MutationCtx,
 ): Promise<{ ok: true; user: Doc<"users"> } | { ok: false; reason: AccessUnavailableReason; user: Doc<"users"> | null }> {
   const user = await getUser(ctx);
-  if (!user) return { ok: false, reason: "unauthenticated", user: null };
+  if (!user) return { ok: false, reason: await missingUserReason(ctx), user: null };
   if (user.role !== "staff") return { ok: false, reason: "not_permitted", user };
   return { ok: true, user };
 }
