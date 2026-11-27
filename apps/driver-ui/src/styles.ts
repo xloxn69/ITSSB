@@ -58,7 +58,7 @@ p { margin: 0; }
 .card { background: var(--color-surface); border-radius: var(--radius-card); padding: var(--space-lg) var(--space-xl);
   border: var(--space-xxs) solid var(--color-border); display: grid; gap: var(--space-sm); align-content: start; }
 .checks { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-sm) var(--space-xl); }
-.check { display: grid; grid-template-columns: auto 1fr; gap: var(--space-xs) var(--space-md); align-items: start; padding: var(--space-xs) 0; }
+.check { display: grid; grid-template-columns: auto 1fr; gap: var(--space-xs) var(--space-md); align-items: start; align-content: start; padding: var(--space-xs) 0; }
 .check .dot { margin-top: var(--space-xs); }
 .check .k { font-weight: var(--font-weight-semibold); }
 .check .d { grid-column: 2; font-size: var(--font-size-callout); color: var(--color-text-secondary); }
