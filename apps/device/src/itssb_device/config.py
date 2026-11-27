@@ -53,6 +53,9 @@ class Config:
     drivers_file: Path = DEFAULT_DRIVERS_FILE
     # IANA zone the school's service dates are in (docs/08 §6 serviceTimezone).
     service_timezone: str | None = None
+    # docs/14 §2: which deployment this Pi belongs to; shown on the kiosk
+    # unless "production". Missing means development, never production.
+    environment: str = "development"
     driver_ui_dir: Path = DEFAULT_DRIVER_UI_DIR
 
     @property
@@ -72,6 +75,7 @@ class Config:
             "logFile": str(self.log_file) if self.log_file else None,
             "driversFile": str(self.drivers_file),
             "serviceTimezone": self.service_timezone,
+            "environment": self.environment,
             "driverUiDir": str(self.driver_ui_dir),
         }
 
@@ -174,6 +178,18 @@ def _origin(raw: str | None) -> str | None:
     return f"{parts.scheme}://{parts.netloc}"
 
 
+ENVIRONMENTS = ("development", "staging", "production")
+
+
+def _environment(raw: str | None) -> str:
+    """A typo is refused rather than guessed: "prod" must not pass as production."""
+    if raw is None or raw == "":
+        return "development"
+    if raw not in ENVIRONMENTS:
+        raise ConfigError("ITSSB_ENVIRONMENT must be development, staging, or production")
+    return raw
+
+
 def _timezone(raw: str | None) -> str | None:
     if not raw:
         return None
@@ -226,5 +242,6 @@ def load_config(environ: Mapping[str, str] | None = None, env_file: Path | None 
         log_file=Path(log_file) if log_file else None,
         drivers_file=Path(env.get("ITSSB_DRIVERS_FILE") or DEFAULT_DRIVERS_FILE),
         service_timezone=_timezone(env.get("ITSSB_SERVICE_TIMEZONE")),
+        environment=_environment(env.get("ITSSB_ENVIRONMENT")),
         driver_ui_dir=Path(env.get("ITSSB_DRIVER_UI_DIR") or DEFAULT_DRIVER_UI_DIR),
     )

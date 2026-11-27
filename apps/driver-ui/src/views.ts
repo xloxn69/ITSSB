@@ -1,5 +1,5 @@
 import { formatAge } from "./format.js";
-import { allIndicators, type Indicator } from "./indicators.js";
+import { allIndicators, environmentLabel, type Indicator } from "./indicators.js";
 import { ACTIONS, type ActionId, actionAvailability, parked, type ScreenId } from "./screens.js";
 import { ageNow, ageOfTimestamp, type Observed, serviceAnswering } from "./snapshot.js";
 
@@ -50,7 +50,12 @@ export function statusBar(o: Observed, nav: Nav): HTMLElement {
     h(
       "div",
       { class: "who" },
-      h("div", { class: "title" }, "ITSSB Driver"),
+      h(
+        "div",
+        { class: "title" },
+        "ITSSB Driver",
+        environmentLabel(o) ? h("span", { class: "env" }, environmentLabel(o)) : null,
+      ),
       h("div", { class: "sub" }, `${runLabel(o)} · ${driver}${parked(o) ? " · Parked" : ""}`),
     ),
     service && service.level !== "ok" ? chip(service, () => nav.go("D01")) : null,

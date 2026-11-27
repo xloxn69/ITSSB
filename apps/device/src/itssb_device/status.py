@@ -62,7 +62,9 @@ class StatusBoard:
         upload_enabled: bool,
         monotonic: Callable[[], float] = time.monotonic,
         now_ms: Callable[[], int] = wall_ms,
+        environment: str = "development",
     ) -> None:
+        self.environment = environment
         self._lock = threading.Lock()
         self._mono = monotonic
         self._now_ms = now_ms
@@ -182,6 +184,8 @@ class StatusBoard:
                     "version": __version__,
                     # Installed release (RELEASE.json), or null for a checkout.
                     "release": load_release(),
+                    # development | staging | production (docs/14 §2).
+                    "environment": self.environment,
                     "bootId": self.boot_id,
                     "startedAtMs": self._started_ms,
                     "uptimeS": int(self._mono() - self._started_mono),

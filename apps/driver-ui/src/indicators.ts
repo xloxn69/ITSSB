@@ -185,3 +185,15 @@ export function allIndicators(o: Observed): Indicator[] {
     storageIndicator(o),
   ];
 }
+
+/**
+ * A visible label for a non-production device (docs/14 §2), so a bench or
+ * test Pi is never mistaken for a live bus. Null in production, and when the
+ * device didn't say (older software or no answer): nothing is guessed.
+ */
+export function environmentLabel(o: Observed): string | null {
+  const env = o.snapshot?.process.environment;
+  if (env === "development") return "Development device";
+  if (env === "staging") return "Staging device";
+  return null;
+}

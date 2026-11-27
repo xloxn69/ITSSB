@@ -17,6 +17,9 @@ button:focus-visible { outline: var(--space-xs) solid var(--color-brand); outlin
   background: var(--color-surface); border-bottom: var(--space-xxs) solid var(--color-border); }
 .bar .who { flex: 1; min-width: 0; }
 .bar .title { font-size: var(--font-size-headline); font-weight: var(--font-weight-bold); }
+.bar .env { margin-left: var(--space-md); padding: var(--space-xxs) var(--space-sm); border-radius: var(--radius-sm);
+  font-size: var(--font-size-caption); vertical-align: middle; background: var(--color-surface-muted); color: var(--color-text-primary);
+  border: var(--space-xxs) solid var(--color-status-aging); }
 .bar .sub { font-size: var(--font-size-caption); color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chips { display: flex; gap: var(--space-sm); }
 .chip { display: flex; align-items: center; gap: var(--space-sm); min-height: var(--touch-driver);
