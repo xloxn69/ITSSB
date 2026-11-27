@@ -241,7 +241,8 @@ final class TrackViewModelTests: XCTestCase {
         _ = await eventually { source.connectionSubscriptionCount == 1 }
         source.setConnected(true)
         source.setConnected(false)
-        _ = await eventually { model.connectionLost }
+        let lost = await eventually { model.connectionLost }
+        XCTAssertTrue(lost)
         model.stop()
         XCTAssertFalse(model.connectionLost)
     }
