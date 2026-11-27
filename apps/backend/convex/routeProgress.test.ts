@@ -170,3 +170,41 @@ describe("independent review cases", () => {
     expect(stopStatus(hairpin, next, "back")).toBe("upcoming");
   });
 });
+
+describe("independent re-review cases", () => {
+  const outAndBack = [at(0), at(1000), at(0)];
+
+  it("an out-and-back on two long segments puts the return stop on the return leg", () => {
+    const route = prepareRoute(outAndBack, [stop("out", 0, 500), stop("back", 1, 500)])!;
+    expect(route.stops.map((s) => Math.round(s.alongM))).toEqual([500, 1500]);
+  });
+
+  it("a first stop at the start of a loop stays at the start", () => {
+    const route = prepareRoute(outAndBack, [stop("start", 0, 0), stop("far", 1, 900)])!;
+    expect(route.stops.map((s) => Math.round(s.alongM))).toEqual([0, 900]);
+  });
+
+  it("a biased, low-accuracy fix from a parallel street never changes stop outcomes", () => {
+    const route = prepareRoute(densePath(5000), [stop("a", 0, 1000), stop("b", 1, 3000)])!;
+    let state = initialProgress(route, T0);
+    let t = T0;
+    for (let d = 50; d <= 900; d += 50) state = advance(route, state, fix(d, 0, (t += 5000)));
+    // 35 m away, reported 10 m toward the route, with 10 m accuracy.
+    for (let d = 950; d <= 1300; d += 50) {
+      state = advance(route, state, { ...at(d, 25), horizontalAccuracyM: 10, capturedAtMs: (t += 5000) });
+    }
+    expect(stopStatus(route, state, "a")).toBe("upcoming");
+  });
+});
+
+describe("fixes without reported accuracy", () => {
+  it("still serve stops when they are on the path", () => {
+    const route = prepareRoute(densePath(3000), [stop("a", 0, 1000)])!;
+    let state = initialProgress(route, T0);
+    let t = T0;
+    for (let d = 50; d <= 1200; d += 50) {
+      state = advance(route, state, { ...at(d, 6), horizontalAccuracyM: null, capturedAtMs: (t += 5000) });
+    }
+    expect(stopStatus(route, state, "a")).toBe("passed");
+  });
+});

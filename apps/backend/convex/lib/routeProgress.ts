@@ -19,8 +19,18 @@ import type { RoutePoint, StopStatus } from "@itssb/contracts";
 export const MATCH_LATERAL_M = 25;
 /** Worst reported GPS accuracy added to the lateral tolerance. */
 export const MAX_ACCURACY_ALLOWANCE_M = 25;
-/** A fix this close to the path (plus up to 10 m of accuracy) may change stop outcomes. */
-export const CONFIDENT_LATERAL_M = 20;
+/**
+ * A fix may change stop outcomes only if its distance from the path plus its
+ * reported accuracy is within this: the whole error circle must support being
+ * on the route, so a biased fix from a parallel street cannot serve a stop.
+ */
+export const CONFIDENT_LATERAL_M = 30;
+/**
+ * Accuracy assumed for the confidence gate when a fix reports none (GPSD
+ * often omits it). Typical for a consumer receiver in open sky; a provisional
+ * tuning value like the others.
+ */
+export const UNREPORTED_ACCURACY_M = 10;
 /** How far from the path a recorded stop may be and still be placed on it. */
 export const STOP_PLACEMENT_LATERAL_M = 40;
 /** An arrival also needs the fix itself this close to the stop (plus up to 20 m of accuracy). */
@@ -147,6 +157,7 @@ export function prepareRoute(path: RoutePoint[], stops: RouteStopInput[]): Prepa
     // one (a loop's return leg) lands on the later pass.
     const passes: { alongM: number; lateralM: number }[] = [];
     let inPass = false;
+    let lastAlong = 0;
     let nearest: { alongM: number; lateralM: number } | null = null;
     for (let i = 0; i < path.length - 1; i++) {
       if (cumM[i + 1]! < minAlong) continue;
@@ -160,15 +171,21 @@ export function prepareRoute(path: RoutePoint[], stops: RouteStopInput[]): Prepa
         inPass = false;
         continue;
       }
+      // One pass is one stretch of path near the stop. Adjacent segments whose
+      // closest points are far apart along the path (the two long legs of an
+      // out-and-back) are separate passes.
       const current = passes[passes.length - 1];
-      if (inPass && current) {
+      if (inPass && current && Math.abs(proj.alongM - lastAlong) <= 2 * STOP_PLACEMENT_LATERAL_M) {
         if (proj.lateralM < current.lateralM) passes[passes.length - 1] = proj;
       } else {
         passes.push(proj);
         inPass = true;
       }
+      lastAlong = proj.alongM;
     }
-    const chosen = passes.find((p) => p.alongM > minAlong + 0.5) ?? (placed.length === 0 ? passes[0] : undefined);
+    // The first stop takes the first pass (it may sit at the very start);
+    // each later stop the first pass past the previous stop.
+    const chosen = placed.length === 0 ? passes[0] : passes.find((p) => p.alongM > minAlong + 0.5);
     const alongM = chosen?.alongM ?? nearest?.alongM ?? minAlong;
     placed.push({ stopId: s.stopId, sequence: s.sequence!, alongM });
     minAlong = alongM;
@@ -236,9 +253,9 @@ export function advance(route: PreparedRoute, prev: ProgressState, fix: Fix): Pr
   const located = locate(route, prev, fix);
   if (located.status !== "on_route") return { ...prev, lastStatus: located.status };
   const alongM = Math.max(prev.alongM, located.alongM);
-  const accuracy = fix.horizontalAccuracyM ?? MAX_ACCURACY_ALLOWANCE_M;
+  const accuracy = fix.horizontalAccuracyM ?? UNREPORTED_ACCURACY_M;
   // A loosely matched fix moves progress but never changes a stop outcome.
-  const confident = located.lateralM <= CONFIDENT_LATERAL_M + Math.min(accuracy, 10);
+  const confident = located.lateralM + Math.min(accuracy, MAX_ACCURACY_ALLOWANCE_M) <= CONFIDENT_LATERAL_M;
   const stops = prev.stops.map((outcome, i) => {
     const stop = route.stops[i]!;
     let { arrivedAtMs, departedAtMs } = outcome;
