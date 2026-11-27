@@ -1,7 +1,7 @@
-import { ClerkProvider, SignIn, useAuth, useClerk } from "@clerk/react";
+import { ClerkProvider, useAuth, useClerk, useSignIn, useSignUp } from "@clerk/react";
 import { ConvexReactClient, useConvexAuth } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FamilyApp } from "../family/FamilyApp";
 import { convexFamilySource } from "../family/familySource";
 import { TrackPage } from "../family/TrackPage";
@@ -11,9 +11,12 @@ import { StaffApp } from "../staff/StaffApp";
 import { TrackStore } from "../tracking/store";
 import type { LiveConfig } from "./config";
 import { convexSource } from "./convexSource";
+import { SignInFlow, type SignInLike, type SignUpLike } from "./signInFlow";
+import { SignInScreen } from "./SignInScreen";
 
 /**
- * Signed-in app: Clerk handles sign-in (docs/17), Convex verifies the token
+ * Signed-in app: Clerk proves identity through our own sign-in screen
+ * (docs/17 §8; no Clerk prebuilt components), Convex verifies the token
  * on the server, and every query re-derives access from that identity.
  * Nothing protected is requested until Convex reports an authenticated
  * session.
@@ -31,6 +34,7 @@ export function LiveApp({ config }: { config: LiveConfig }) {
 
 function AuthGate({ client }: { client: ConvexReactClient }) {
   const { isLoading, isAuthenticated } = useConvexAuth();
+  const { isSignedIn } = useAuth();
   const clerk = useClerk();
   if (isLoading) {
     return (
@@ -41,17 +45,35 @@ function AuthGate({ client }: { client: ConvexReactClient }) {
       </Shell>
     );
   }
-  if (!isAuthenticated) {
+  const signOut = () => void clerk.signOut();
+  if (!isAuthenticated && isSignedIn) {
+    // Clerk has a session but Convex refused its token (for example, the
+    // `convex` JWT template or issuer is not set up). Say so; never show data.
     return (
-      <Shell>
-        <div className="stack" style={{ alignItems: "center" }}>
-          <h1>Sign in to see your bus</h1>
-          <SignIn routing="hash" />
-        </div>
+      <Shell
+        right={
+          <button type="button" className="btn" onClick={signOut}>
+            Sign out
+          </button>
+        }
+      >
+        <section className="card message" role="alert">
+          <h2>Signed in, but not accepted yet</h2>
+          <p className="muted">
+            The tracking service didn't accept this sign-in. Your school's setup may not be finished. Sign out and try
+            again later.
+          </p>
+        </section>
       </Shell>
     );
   }
-  const signOut = () => void clerk.signOut();
+  if (!isAuthenticated) {
+    return (
+      <Shell>
+        <ClerkSignIn />
+      </Shell>
+    );
+  }
   return (
     <Shell
       right={
@@ -63,6 +85,25 @@ function AuthGate({ client }: { client: ConvexReactClient }) {
       <SignedIn client={client} onSignIn={signOut} />
     </Shell>
   );
+}
+
+/**
+ * Connects our sign-in screen to Clerk's headless hooks. The flow reads the
+ * latest resources through refs, because Clerk replaces them as an attempt
+ * moves on.
+ */
+function ClerkSignIn() {
+  const { signIn } = useSignIn();
+  const { signUp } = useSignUp();
+  const signInRef = useRef<SignInLike>(signIn);
+  const signUpRef = useRef<SignUpLike>(signUp);
+  signInRef.current = signIn;
+  signUpRef.current = signUp;
+  const flow = useMemo(
+    () => new SignInFlow({ signIn: () => signInRef.current, signUp: () => signUpRef.current }),
+    [],
+  );
+  return <SignInScreen flow={flow} />;
 }
 
 /** `#/staff/…` opens the staff console; the server still checks the staff role on every call. */

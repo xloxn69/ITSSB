@@ -98,6 +98,13 @@ input, select, textarea { font: inherit; min-height: 44px; padding: var(--space-
 .code-display { font-family: ui-monospace, monospace; font-size: var(--font-size-headline);
   font-weight: var(--font-weight-semibold); letter-spacing: 0.05em; margin: 0; overflow-wrap: anywhere; }
 .flush { margin: 0; }
+/* Our own email-code sign-in (live/SignInScreen.tsx); no Clerk prebuilt UI. */
+.sign-in { max-width: 28rem; margin: var(--space-xl) auto 0; }
+.stack-sm { display: flex; flex-direction: column; gap: var(--space-sm); }
+.code-input { font-family: ui-monospace, monospace; font-size: var(--font-size-headline);
+  letter-spacing: 0.3em; font-variant-numeric: tabular-nums; }
+.btn-link { border-color: transparent; background: transparent; padding-left: 0; padding-right: 0;
+  text-decoration: underline; }
 .check-row { flex-direction: row; flex-wrap: nowrap; align-items: center; gap: var(--space-sm); }
 .check-row input { min-height: auto; width: auto; flex: none; padding: 0; }
 /* A radio or checkbox with its text on one line, left aligned, 44px tall. */

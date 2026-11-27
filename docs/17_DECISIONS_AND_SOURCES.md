@@ -166,10 +166,10 @@ For a material implementation decision, add a short record with: date, decision,
 - **Decision:** Clerk is the identity provider for people (students, guardians, drivers, staff).
 - **Reason:** it has a native Swift SDK and a web SDK, supports email one-time codes (no school-issued passwords to manage), and has documented Convex support: Convex verifies Clerk's JWTs itself, so functions see a verified identity through `ctx.auth`.
 - **Alternatives considered:** Convex Auth (no first-party native Swift SDK), Auth0 (heavier configuration for the same result), a custom password system (rejected by docs/11 §1).
-- **Affected:** `apps/backend/convex/auth.config.ts` (issuer from the `CLERK_JWT_ISSUER_DOMAIN` deployment variable, audience `convex`), `users.linkIdentity`, and later the iOS and web sign-in screens.
+- **Affected:** `apps/backend/convex/auth.config.ts` (issuer from the `CLERK_JWT_ISSUER_DOMAIN` deployment variable, audience `convex`), `users.linkIdentity`, and the iOS and web sign-in screens. Both clients use our own email-code screens on Clerk's headless SDKs (iOS: the ClerkKit product only; web: `useSignIn`/`useSignUp`), never Clerk's prebuilt screens. A first sign-in for an unknown address creates the Clerk identity (sign-up); the only Clerk-drawn element is its bot-check widget, shown inside our web screen when Clerk asks for one.
 - **Rule kept:** signing in proves identity only. Access still comes from a staff-approved `users` row, assignments and guardian links, checked on the server in every function. An unset issuer means nobody can sign in, which fails closed.
 - **Migration:** none; no one could sign in before.
-- **Verification:** backend tests with a Clerk-shaped identity (`issuer|subject`). Not yet run against a real Clerk application or Convex deployment; the owner creates those (apps/backend/README.md).
+- **Verification:** backend tests with a Clerk-shaped identity (`issuer|subject`); web sign-in flow tests with a fake Clerk (sign-in, sign-up fallback, wrong code, resend). 27 November 2026: the web app signed in live against the Clerk development application and a development Convex deployment with Clerk test addresses, on both the sign-up and the sign-in path; Convex accepted the `convex` token (an authenticated query answered `ready`, the same query without it `unauthenticated`), and with no approved `users` row the screen showed "Tracking not available". Sign in with Apple is not tested (no Apple Developer account).
 - **Responsible:** the owner holds the Clerk application and its keys.
 
 ### Record: enrollment and guardian linking (26 November 2026)
@@ -180,6 +180,6 @@ For a material implementation decision, add a short record with: date, decision,
 - **Stop eligibility:** there is no geocoder yet (extra spending). The eligible stops are the approved stops of the invitation route's current version; the server rechecks the chosen stop on request and again at approval. "None of these fit" sends the request to manual review with no stop; no stop is ever created from an address.
 - **Alternatives considered:** a pending `users` row (rejected: `getUser` would start treating unapproved people as provisioned), name-matching for guardians (rejected by docs/09 §5).
 - **Affected:** docs/08 §9, `packages/contracts/src/enrollment.ts`, `apps/backend/convex/{enrollment,guardianLinks,students,audit}.ts`.
-- **Verification:** backend tests with fictional identities; live sign-in not run (no Clerk application yet).
+- **Verification:** backend tests with fictional identities. Live sign-in now works (identity record above), but enrollment and guardian linking have not been run against a deployment.
 
 Keep documented plans, executed checks, and measured outcomes separate. A finished Markdown guide is useful implementation work; it is not a substitute for the application and pilot evidence defined in [13_TESTING_AND_ACCEPTANCE.md](13_TESTING_AND_ACCEPTANCE.md).

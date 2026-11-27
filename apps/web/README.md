@@ -19,11 +19,15 @@ production build contains none and never shows an invented position.
 2. Copy `.env.example` to `.env.local` and set `VITE_CONVEX_URL` and
    `VITE_CLERK_PUBLISHABLE_KEY`. Both are public values; never put a secret key
    in a `VITE_` variable.
-3. `bun run dev` and sign in. Without both values the site shows "Sign-in isn't
-   set up", which fails closed.
+3. `bun run dev` and sign in with an email code. The sign-in screen is ours
+   (`src/live/SignInScreen.tsx`) on Clerk's headless hooks, not a Clerk
+   prebuilt screen. In a Clerk development instance, an address containing
+   `+clerk_test` (for example `someone+clerk_test@example.com`) accepts the
+   code `424242` without sending email. Without both values the site shows
+   "Sign-in isn't set up", which fails closed.
 
 ## Checks
 
-`bun run test` covers state mapping, freshness and clocks, and the live
-source. `bun run screenshots [dir]` captures every screen at phone and desktop
+`bun run test` covers state mapping, freshness and clocks, the live source,
+and the email-code sign-in flow (with a fake Clerk). `bun run screenshots [dir]` captures every screen at phone and desktop
 width, light and dark (CI uploads them as the `web-screenshots` artifact).
