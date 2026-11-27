@@ -29,6 +29,9 @@ from itssb_device.uploader import HttpTransport
 PIN = "482916"  # fictional
 GRANT = "fictional_grant_" + "x" * 24
 ROUTE = "demo_route_version_003"
+OTHER_PIN = "731406"  # fictional
+OTHER_GRANT = "fictional_grant_" + "y" * 24
+OTHER_ROUTE = "demo_route_version_099"
 T0 = 1_795_608_000_000
 TOKEN = "fake-dev-token"  # noqa: S105 - the fake backend's fictional token
 
@@ -85,6 +88,7 @@ class Env:
         self.backend = backend
         self.now = T0
         self.mono = 1000.0
+        self.elapsed_ms = 0  # monotonic time for code lifetimes; never steps back
         self.db_path = db_path or tmp_path / "d.sqlite3"
         self.pin_hash = pin_hash
         Database(self.db_path).close()
@@ -105,10 +109,23 @@ class Env:
             GRANT,
             (RouteChoice(ROUTE, "Demo Route North"),),
         )
-        self.desk = StudentDesk(self.db_path, client_for(self.backend), now_ms=lambda: self.now)
+        # A second fictional driver authorized for a different route only.
+        other = Driver(
+            "drv_other",
+            "Other Driver",
+            self.pin_hash,
+            OTHER_GRANT,
+            (RouteChoice(OTHER_ROUTE, "Demo Route South"),),
+        )
+        self.desk = StudentDesk(
+            self.db_path,
+            client_for(self.backend),
+            now_ms=lambda: self.now,
+            mono_ms=lambda: self.elapsed_ms,
+        )
         self.api = DriverApi(
             StatusBoard("3cd44c56-c96b-4b83-a970-5414990bc25a", upload_enabled=True),
-            SessionManager({"drv_demo": driver}),
+            SessionManager({"drv_demo": driver, "drv_other": other}),
             self.judge,
             self.latest,
             self.db_path,
@@ -139,6 +156,7 @@ class Env:
     def advance(self, ms):
         """Device time moves; the bus stays parked (fresh, still fix)."""
         self.now += ms
+        self.elapsed_ms += ms
         self.park()
 
     def post(self, path, data=None):
@@ -723,3 +741,50 @@ def test_a_rejection_after_the_run_ended_is_still_shown(tmp_path, pin_hash, back
     assert env.actions()[request_id]["sync"] == "rejected"
     env.post("/api/session/lock")
     assert env.status()["studentChanges"] is None  # no names behind the lock
+
+
+# ── Independent review findings ──────────────────────────────────────
+
+
+def test_a_driver_for_another_route_never_sees_the_cached_roster(tmp_path, pin_hash, backend):
+    env = Env(tmp_path, pin_hash, backend)
+    assert env.roster()[0] == 200  # driver A caches the run's roster
+    backend.mode = "down"  # offline: only the cache could answer
+    env.post("/api/session/lock")
+    env.post("/api/session/unlock", {"driverId": "drv_other", "pin": PIN})
+    env.post("/api/motion/parked")
+    code, body = env.roster()
+    assert (code, body["error"]) == (403, "NOT_YOUR_ROUTE")
+    assert "Example" not in env.last_raw.decode()
+    code, body = env.post("/api/qr-codes", {"purpose": "trip_check_in"})
+    assert (code, body["error"]) == (403, "NOT_YOUR_ROUTE")
+    code, body = env.action(type="recordAttendance", assignmentId="demo_assignment_002", status="boarded")
+    assert (code, body["error"]) == (403, "NOT_YOUR_ROUTE")
+
+
+def test_a_clock_stepping_back_does_not_extend_a_code(tmp_path, pin_hash, backend):
+    env = Env(tmp_path, pin_hash, backend)
+    first = env.post("/api/qr-codes", {"purpose": "trip_check_in"})[1]
+    backend.mode = "rate_limited"  # refresh certainly not applied: cache would be kept
+    env.advance(590_000)
+    env.now -= 3_600_000  # the wall clock steps back an hour; elapsed time does not
+    env.advance(20_000)  # 610 s since issue: past the 600 s lifetime
+    code, body = env.post("/api/qr-codes", {"purpose": "trip_check_in"})
+    assert code == 503 and first["token"] not in json.dumps(body)
+
+
+def test_a_record_synced_before_the_roster_refreshed_can_be_corrected(tmp_path, pin_hash, backend):
+    env = Env(tmp_path, pin_hash, backend)
+    env.roster()
+    code, _ = env.action(type="recordAttendance", assignmentId="demo_assignment_002", status="boarded")
+    assert code == 200
+    env.tick()  # accepted; the cached roster still has no record for this student
+    backend.mode = "down"  # so the roster can't refresh
+    code, body = env.action(
+        type="correctAttendance",
+        assignmentId="demo_assignment_002",
+        status="not_boarded",
+        reason="Stayed home",
+    )
+    assert code == 200, body
+    assert body["sync"] == "pending"
