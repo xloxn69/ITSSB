@@ -29,8 +29,11 @@ APP="build/DerivedData/Build/Products/Debug-iphonesimulator/ITSSB.app"
 BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")"
 xcrun simctl install "$UDID" "$APP"
 
+# ITSSB_SCREENSHOT_FILTER (a substring of the name) and ITSSB_APPEARANCES
+# ("light dark" by default) limit a rerun to some screens.
 shoot() { # name, then launch arguments
   local name="$1"; shift
+  [[ "$name" == *"${ITSSB_SCREENSHOT_FILTER:-}"* ]] || return 0
   xcrun simctl terminate "$UDID" "$BUNDLE_ID" 2>/dev/null || true
   xcrun simctl launch "$UDID" "$BUNDLE_ID" "$@" >/dev/null
   sleep "${ITSSB_SCREENSHOT_WAIT:-8}" # let map tiles load
@@ -38,7 +41,7 @@ shoot() { # name, then launch arguments
   echo "  $name ($APPEARANCE)"
 }
 
-for APPEARANCE in light dark; do
+for APPEARANCE in ${ITSSB_APPEARANCES:-light dark}; do
   xcrun simctl ui "$UDID" appearance "$APPEARANCE"
   for scenario in live eta atStop passed aging stale awaitingPosition gpsUnavailable noActiveRun loading \
                   accessUnavailable sessionExpired failed; do
@@ -51,6 +54,16 @@ for APPEARANCE in light dark; do
               trackingRejected account; do
     shoot "auth-$auth" -ITSSBAuthScenario "$auth"
   done
+  for screen in join joinForm joinExpired joinSent joinRefused link linkSent checkIn checkInRoute \
+                checkInAccepted requests; do
+    shoot "enroll-$screen" -ITSSBEnrollmentScreen "$screen"
+  done
+  shoot enroll-joinUnconfirmed -ITSSBEnrollmentScreen joinUnconfirmed -ITSSBEnrollmentVariant offline
+  shoot enroll-checkInDone -ITSSBEnrollmentScreen checkInRoute -ITSSBEnrollmentVariant recorded
+  shoot enroll-checkInNoTrip -ITSSBEnrollmentScreen checkInRoute -ITSSBEnrollmentVariant noTrip
+  shoot enroll-checkInGuardian -ITSSBEnrollmentScreen checkIn -ITSSBEnrollmentVariant guardian
+  shoot enroll-requestsEmpty -ITSSBEnrollmentScreen requests -ITSSBEnrollmentVariant empty
+  shoot enroll-home -ITSSBEnrollmentScreen home
   # The real build with no Clerk key: sign-in isn't set up.
   shoot signInUnavailable
 done

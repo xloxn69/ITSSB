@@ -75,3 +75,74 @@ struct PreviewEnrollmentSource: EnrollmentSource {
     }
 }
 #endif
+
+#if DEBUG
+import SwiftUI
+
+/// DEBUG-only screen states for `-ITSSBEnrollmentScreen` screenshots: each
+/// builds the real view and drives its real view model with fictional input.
+@MainActor
+enum PreviewScreens {
+    @ViewBuilder
+    static func view(_ screen: FamilyScreen, source: any EnrollmentSource) -> some View {
+        switch screen {
+        case .joinForm: JoinRouteView(model: join(source, code: "DEMX-7K2M-9QXR-4TVW-8ZPN"))
+        case .joinExpired: JoinRouteView(model: join(source, code: "EXPX-7K2M-9QXR-4TVW-8ZPN"))
+        case .joinSent, .joinUnconfirmed:
+            DrivenJoin(model: join(source, code: "DEMX-7K2M-9QXR-4TVW-8ZPN"), name: "Alex Fictional")
+        case .joinRefused: DrivenJoin(model: join(source, code: "DEMX-7K2M-9QXR-4TVW-8ZPN"), name: "Refuse Example")
+        case .linkSent: DrivenLink(model: LinkStudentViewModel(source: source, initialCode: "MMMM-NNNN-PPPP-QQQQ-RRRR"))
+        case .checkInRoute:
+            CheckInView(model: CheckInViewModel(source: source,
+                                                assignment: OwnAssignment(id: "demo_assignment_001",
+                                                                          routeLabel: "Route 17 Morning")))
+        case .checkInAccepted:
+            DrivenCheckIn(model: CheckInViewModel(source: source,
+                                                  assignment: OwnAssignment(id: "demo_assignment_001",
+                                                                            routeLabel: "Route 17 Morning")))
+        default: EmptyView()
+        }
+    }
+
+    private static func join(_ source: any EnrollmentSource, code: String) -> JoinRouteViewModel {
+        JoinRouteViewModel(source: source, initialCode: code)
+    }
+}
+
+private struct DrivenJoin: View {
+    @State var model: JoinRouteViewModel
+    let name: String
+
+    var body: some View {
+        JoinRouteView(model: model).task {
+            await model.checkCode()
+            model.studentName = name
+            model.address = "12 Fictional Lane"
+            model.stop = .stop("demo_stop_002")
+            await model.send()
+        }
+    }
+}
+
+private struct DrivenLink: View {
+    @State var model: LinkStudentViewModel
+
+    var body: some View {
+        LinkStudentView(model: model).task {
+            model.guardianName = "Jordan Guardian"
+            await model.send()
+        }
+    }
+}
+
+private struct DrivenCheckIn: View {
+    @State var model: CheckInViewModel
+
+    var body: some View {
+        CheckInView(model: model).task {
+            try? await Task.sleep(for: .milliseconds(300))
+            await model.submit(scanned: "AAAA-BBBB-CCCC-DDDD-EEEE")
+        }
+    }
+}
+#endif

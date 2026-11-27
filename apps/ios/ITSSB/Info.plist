@@ -28,6 +28,8 @@
 	<string>$(ITSSB_ENVIRONMENT)</string>
 	<key>ITSSBSourceRevision</key>
 	<string>$(ITSSB_SOURCE_REVISION)</string>
+	<key>NSCameraUsageDescription</key>
+	<string>ITSSB uses the camera to scan the check-in code shown on your bus.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

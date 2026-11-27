@@ -9,6 +9,8 @@ struct AppRootView: View {
     let notifications: any NotificationSource
     var registrar: PushRegistrar?
     var initialTab: AppTab = .track
+    var enrollment: (any EnrollmentSource)?
+    var enrollmentScreen: FamilyScreen?
 
     var body: some View {
         Group {
@@ -27,7 +29,8 @@ struct AppRootView: View {
             case .signedIn:
                 // "Sign in again" from Track ends the rejected session and returns to sign-in.
                 SignedInTabs(source: source, notifications: notifications, registrar: registrar,
-                             session: session, initialTab: initialTab) {
+                             session: session, initialTab: initialTab,
+                             enrollment: enrollment, enrollmentScreen: enrollmentScreen) {
                     Task { await session.signOut() }
                 }
             }
@@ -53,15 +56,21 @@ struct SignedInTabs: View {
     @State private var tab: AppTab
     @State private var router = NotificationRouter.shared
     @Environment(\.scenePhase) private var scenePhase
+    let enrollment: (any EnrollmentSource)?
+    let enrollmentScreen: FamilyScreen?
     let onSignIn: () -> Void
 
     init(source: any LiveRunSource, notifications: any NotificationSource, registrar: PushRegistrar?,
-         session: SessionStore, initialTab: AppTab = .track, onSignIn: @escaping () -> Void) {
+         session: SessionStore, initialTab: AppTab = .track,
+         enrollment: (any EnrollmentSource)? = nil, enrollmentScreen: FamilyScreen? = nil,
+         onSignIn: @escaping () -> Void) {
         self.source = source
         self.notifications = notifications
         self.registrar = registrar
         self.session = session
         _tab = State(initialValue: initialTab)
+        self.enrollment = enrollment
+        self.enrollmentScreen = enrollmentScreen
         self.onSignIn = onSignIn
     }
 
@@ -71,7 +80,13 @@ struct SignedInTabs: View {
                       onOpened: { router.requestedAssignmentId = nil }, onSignIn: onSignIn)
                 .tabItem { Label("Track", systemImage: "bus") }
                 .tag(AppTab.track)
-            ComingSoon(title: "My Route")
+            Group {
+                if let enrollment {
+                    FamilyActionsView(source: enrollment, initialScreen: enrollmentScreen)
+                } else {
+                    ComingSoon(title: "My Route")
+                }
+            }
                 .tabItem { Label("My Route", systemImage: "map") }
                 .tag(AppTab.route)
             AlertsView(tracking: source, notifications: notifications, registrar: registrar)

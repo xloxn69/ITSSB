@@ -1,32 +1,51 @@
 import ITSSBDesignSystem
 import SwiftUI
 
-/// The family actions list: join a route, link a student, check in, my requests.
+/// Screens reachable from My Route. Raw values double as DEBUG screenshot launch names.
+enum FamilyScreen: String, Hashable, Sendable {
+    case join, link, checkIn, requests
+    #if DEBUG
+    case joinForm, joinSent, joinRefused, joinUnconfirmed, joinExpired, linkSent, checkInRoute, checkInAccepted
+    #endif
+}
+
+/// My Route: join a route, link a student, check in, and request status (docs/06 I05–I08, I11, I17–I18).
 struct FamilyActionsView: View {
     let source: any EnrollmentSource
+    @State private var path: [FamilyScreen]
+
+    init(source: any EnrollmentSource, initialScreen: FamilyScreen? = nil) {
+        self.source = source
+        _path = State(initialValue: initialScreen.map { [$0] } ?? [])
+    }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 Section {
-                    NavigationLink { JoinRouteView(model: JoinRouteViewModel(source: source)) } label: {
-                        Label("Join a route", systemImage: "bus.doubledecker")
-                    }
-                    NavigationLink { LinkStudentView(model: LinkStudentViewModel(source: source)) } label: {
-                        Label("Link a student", systemImage: "person.2")
-                    }
-                    NavigationLink { CheckInListView(source: source) } label: {
-                        Label("Check in", systemImage: "qrcode.viewfinder")
-                    }
-                    NavigationLink { RequestsView(model: RequestsViewModel(source: source)) } label: {
-                        Label("My requests", systemImage: "tray")
-                    }
+                    NavigationLink(value: FamilyScreen.join) { Label("Join a route", systemImage: "bus.doubledecker") }
+                    NavigationLink(value: FamilyScreen.link) { Label("Link a student", systemImage: "person.2") }
+                    NavigationLink(value: FamilyScreen.checkIn) { Label("Check in", systemImage: "qrcode.viewfinder") }
+                    NavigationLink(value: FamilyScreen.requests) { Label("My requests", systemImage: "tray") }
                 } footer: {
                     Text("The school approves every request. Until then, this account can't see a bus.")
                         .font(AppFonts.caption)
                 }
             }
-            .navigationTitle("Account")
+            .navigationTitle("My Route")
+            .navigationDestination(for: FamilyScreen.self) { destination($0) }
+        }
+    }
+
+    @ViewBuilder private func destination(_ screen: FamilyScreen) -> some View {
+        switch screen {
+        case .join: JoinRouteView(model: JoinRouteViewModel(source: source))
+        case .link: LinkStudentView(model: LinkStudentViewModel(source: source))
+        case .checkIn: CheckInListView(source: source)
+        case .requests: RequestsView(model: RequestsViewModel(source: source))
+        #if DEBUG
+        default: PreviewScreens.view(screen, source: source)
+        #endif
         }
     }
 }
@@ -81,12 +100,18 @@ struct JoinRouteView: View {
     @State var model: JoinRouteViewModel
 
     var body: some View {
-        Form {
-            if model.outcome == .sent {
-                sentSection
-            } else {
-                codeSection
-                phaseSection
+        ScrollViewReader { proxy in
+            Form {
+                if model.outcome == .sent {
+                    sentSection
+                } else {
+                    codeSection
+                    phaseSection
+                }
+            }
+            // Bring the server's answer into view: it sits below the form.
+            .onChange(of: model.outcome) { _, outcome in
+                if outcome != nil { withAnimation { proxy.scrollTo(Self.outcomeAnchor, anchor: .bottom) } }
             }
         }
         .navigationTitle("Join a route")
@@ -169,9 +194,12 @@ struct JoinRouteView: View {
             .disabled(!model.canSend)
             if let outcome = model.outcome, outcome != .sent {
                 OutcomeNotice(outcome: outcome) { Task { await model.send() } }
+                    .id(Self.outcomeAnchor)
             }
         }
     }
+
+    private static let outcomeAnchor = "outcome"
 
     private func choiceRow(_ title: String, detail: String?, selected: Bool,
                            action: @escaping () -> Void) -> some View {
