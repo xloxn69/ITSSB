@@ -4,7 +4,7 @@ import {
   validateTelemetryEvent,
 } from "@itssb/contracts";
 import { ConvexError, v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx } from "./_generated/server";
 
 /** Fields that must match for a re-sent eventId to count as a duplicate. */
@@ -16,6 +16,28 @@ const IDENTITY_FIELDS = [
   "latitude",
   "longitude",
 ] as const satisfies readonly (keyof TelemetryEvent)[];
+
+/** How long after a run ends its late history is still accepted. */
+export const LATE_HISTORY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Bounded reconciliation after an accepted end (docs/07 §8): an observation
+ * still in the Pi's outbox when the run ended is kept as history if it was
+ * captured no later than the end and inside the final sequence boundary.
+ * Anything else for a completed run is rejected; the run is never
+ * reactivated and its live position never changes.
+ */
+function isLateHistory(run: Doc<"runs">, e: TelemetryEvent, nowMs: number): boolean {
+  return (
+    run.endCapturedAtMs !== undefined &&
+    run.endedAtMs !== undefined &&
+    run.lastRunSequence !== undefined &&
+    run.lastRunSequence !== null &&
+    e.capturedAtMs <= run.endCapturedAtMs &&
+    e.runSequence <= run.lastRunSequence &&
+    nowMs <= run.endedAtMs + LATE_HISTORY_WINDOW_MS
+  );
+}
 
 /**
  * Ingests one batch from an authenticated device and returns one result per
@@ -91,11 +113,13 @@ async function ingestOne(
     };
   }
 
-  // The run must exist, belong to this device, and be active. Don't reveal
-  // which of those failed (docs/08 §5: no existence leaks).
+  // The run must exist, belong to this device, and be active, or be a
+  // completed run receiving late history inside its end boundary. Don't
+  // reveal which of those failed (docs/08 §5: no existence leaks).
   const runId = ctx.db.normalizeId("runs", e.runId);
   const run = runId ? await ctx.db.get(runId) : null;
-  if (!run || run.deviceId !== deviceId || run.state !== "active") {
+  const historyOnly = run?.state === "completed" && isLateHistory(run, e, nowMs);
+  if (!run || run.deviceId !== deviceId || (run.state !== "active" && !historyOnly)) {
     return {
       eventId,
       status: "rejected",
@@ -120,6 +144,9 @@ async function ingestOne(
     horizontalAccuracyM: e.horizontalAccuracyM,
     fixMode: e.fixMode,
   });
+
+  // A completed run's live position is frozen; late history never moves it.
+  if (historyOnly) return { eventId, status: "accepted", receivedAtMs: nowMs, liveStateApplied: false };
 
   const live = await ctx.db
     .query("liveState")

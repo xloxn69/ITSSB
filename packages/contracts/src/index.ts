@@ -84,3 +84,4 @@ export interface RequestError {
 
 export * from "./validate.js";
 export * from "./tracking.js";
+export * from "./tripEvents.js";

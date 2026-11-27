@@ -174,13 +174,52 @@ The backend derives and validates the bus/driver context, verifies the service d
   "runId": "demo_run_001",
   "state": "active",
   "startedAtMs": 1795608000200,
+  "endedAtMs": null,
   "serverNowMs": 1795608000200
 }
 ```
 
 For a previously scheduled run, an authorized start can refer to that server-issued run instead of creating a second one. The server enforces the single active-run rule in either case.
 
-An end request carries the existing `runId`, its own persistent `requestId`, `type: "endRun"`, `driverOperatingGrant`, `capturedAtMs`, and `lastRunSequence`. Before upload, atomically mark the local run completed, freeze its final sequence boundary, and persist its end command/outbox record using the serialized database writer. Telemetry insertion re-checks active state inside its own transaction. The backend verifies that the grant belongs to the authenticated device and authorized driver, covers the intended run and operation, and meets the applicable validity/revocation rules. A device credential alone does not authorize ending a run. The sequence boundary helps reconcile earlier captured telemetry that arrives later; it is checked against the authenticated stream and plausible timing.
+An end request carries the existing `runId`, its own persistent `requestId`, `type: "endRun"`, `driverOperatingGrant`, `capturedAtMs`, and `lastRunSequence` (the highest `runSequence` recorded for the run, or `null` if none):
+
+```json
+{
+  "schemaVersion": 1,
+  "requestId": "9b1f3c2e-5d4a-4e6b-8c7d-0a1b2c3d4e5f",
+  "type": "endRun",
+  "driverOperatingGrant": "EXAMPLE_ONLY_NOT_A_REAL_GRANT_0000000",
+  "runId": "demo_run_001",
+  "capturedAtMs": 1795611600000,
+  "lastRunSequence": 1640
+}
+```
+
+An accepted end returns the same shape as a start, with `state: "completed"` and `endedAtMs` set. Both responses always carry `endedAtMs`, `null` while the run is active. A retry with the same `requestId` and content returns the stored result unchanged; the same `requestId` with different content is a conflict, never the earlier run. Idempotency is per authenticated device.
+
+Version 1 implementation rules:
+
+- **Grant.** `driverOperatingGrant` is an opaque server-issued secret (32 to 512 URL-safe characters) bound to one device, one driver account, a set of route versions, and an expiry. The server stores only its hash. Until `POST /device/v1/driver-session` exists, an administrator issues grants with the internal `driverGrants:issue` function. An exact retry of an already accepted request, presenting the same grant, is honored after that grant expires; any new start or end needs a current grant. A grant authorizes starting and ending, not each position: telemetry for an active run is authorized by the device credential and the run's device, so revoking a grant never hides a moving bus. To stop a device reporting, revoke its credential.
+- **Request identity.** One `requestId` names one command per device: reusing it for a different operation, run or content is `REQUEST_ID_CONFLICT`. A retried start answers `active` with `endedAtMs: null` even if the run has ended since. With an invalid grant, an end request gets `GRANT_NOT_AUTHORIZED` before any run lookup.
+- **Start.** The route version must be in the grant, `serviceDate` must be today (by server or capture time) in `serviceTimezone`, and `capturedAtMs` must lie within 6 hours before to 2 minutes after the server clock. A device or route version with an active run cannot start another.
+- **End.** Only the run's own device, with a current grant covering its route version. `lastRunSequence` may not be below telemetry already accepted for the run.
+- **Late telemetry after an end** is accepted as history (`liveStateApplied: false`) only if captured at or before the end's `capturedAtMs`, with `runSequence` at most `lastRunSequence`, and received within 24 hours of the end. Anything else for a completed run is `rejected` with `RUN_NOT_AUTHORIZED`. A completed run's live position never changes.
+
+Trip-event failures use the request-level error body (§5):
+
+| HTTP | `error.code` | Meaning |
+| --- | --- | --- |
+| `400` | `INVALID_REQUEST`, `MALFORMED_JSON`, `UNSUPPORTED_SCHEMA_VERSION` | Fix the request; do not resend it unchanged. |
+| `400` | `CLOCK_OUT_OF_RANGE`, `SERVICE_DATE_OUT_OF_RANGE` | Capture time or service date implausible for the server clock or the run. |
+| `401` | `UNAUTHENTICATED` | Device credential missing, unknown, or revoked. |
+| `403` | `GRANT_NOT_AUTHORIZED` | Grant unknown, expired, revoked, another device's, or route outside it. |
+| `403` | `RUN_NOT_AUTHORIZED` | Unknown run or another device's run (deliberately indistinguishable). |
+| `409` | `REQUEST_ID_CONFLICT` | Same `requestId`, different content. |
+| `409` | `ACTIVE_RUN_CONFLICT` | The device or route version already has an active run. |
+| `409` | `RUN_NOT_ACTIVE` | The run was already ended by a different request. |
+| `413` | `BODY_TOO_LARGE` | Body above 8 KiB. |
+
+Canonical fixtures: `packages/contracts/fixtures/tripEvent.*.json`. The iOS app does not call this endpoint. Before upload, atomically mark the local run completed, freeze its final sequence boundary, and persist its end command/outbox record using the serialized database writer. Telemetry insertion re-checks active state inside its own transaction. The backend verifies that the grant belongs to the authenticated device and authorized driver, covers the intended run and operation, and meets the applicable validity/revocation rules. A device credential alone does not authorize ending a run. The sequence boundary helps reconcile earlier captured telemetry that arrives later; it is checked against the authenticated stream and plausible timing.
 
 Other trip-event types can cover driver delay reports, staff check-ins, and corrections. Each requires `driverOperatingGrant` as well as its own validated payload and operation-specific authorization rule. The same bound driver authorization is required for driver-initiated route drafts, QR issuance, roster access, seat notes, and assignment removal; endpoint-specific contracts must define how the grant is supplied. Never accept an arbitrary “patch this database row” event or a caller-provided `driverId` as authority.
 

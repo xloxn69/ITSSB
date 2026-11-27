@@ -37,7 +37,12 @@ export default defineSchema({
     busLabel: v.optional(v.string()),
   }).index("by_credential_hash", ["credentialHash"]),
 
-  /** One execution of an approved route version. */
+  /**
+   * One execution of an approved route version. Started and ended only by
+   * `POST /device/v1/trip-events` with a driver operating grant. The start and
+   * end request fields are the idempotency receipts: a retry with the same
+   * `requestId` and content returns the stored result.
+   */
   runs: defineTable({
     deviceId: v.id("devices"),
     routeVersionId: v.string(),
@@ -45,10 +50,40 @@ export default defineSchema({
     startRequestId: v.string(),
     startedAtMs: v.optional(v.number()),
     endedAtMs: v.optional(v.number()),
+    // Optional so runs written before trip events existed stay valid.
+    driverUserId: v.optional(v.id("users")),
+    /** Grant that started / ended the run; an exact retry must present it again. */
+    startGrantId: v.optional(v.id("driverGrants")),
+    endGrantId: v.optional(v.id("driverGrants")),
+    serviceDate: v.optional(v.string()),
+    serviceTimezone: v.optional(v.string()),
+    startCapturedAtMs: v.optional(v.number()),
+    endRequestId: v.optional(v.string()),
+    endCapturedAtMs: v.optional(v.number()),
+    endedByDriverUserId: v.optional(v.id("users")),
+    /** Final `runSequence` boundary from the end request; bounds late history. */
+    lastRunSequence: v.optional(v.union(v.number(), v.null())),
   })
     .index("by_device_state", ["deviceId", "state"])
     .index("by_route_version_state", ["routeVersionId", "state"])
-    .index("by_start_request", ["startRequestId"]),
+    .index("by_device_start_request", ["deviceId", "startRequestId"])
+    .index("by_device_end_request", ["deviceId", "endRequestId"]),
+
+  /**
+   * A server-issued driver operating grant (docs/07 §6, docs/08 §6): proof
+   * that an authorized driver may operate this device on these route
+   * versions until `expiresAtMs`. Only the SHA-256 hash is stored. A device
+   * credential alone never starts or ends a run.
+   */
+  driverGrants: defineTable({
+    tokenHash: v.string(),
+    deviceId: v.id("devices"),
+    driverUserId: v.id("users"),
+    routeVersionIds: v.array(v.id("routeVersions")),
+    issuedAtMs: v.number(),
+    expiresAtMs: v.number(),
+    revoked: v.boolean(),
+  }).index("by_token_hash", ["tokenHash"]),
 
   /** Accepted telemetry history. `eventId` makes delivery idempotent. */
   telemetryEvents: defineTable({
@@ -68,7 +103,8 @@ export default defineSchema({
     fixMode: v.union(v.literal(2), v.literal(3)),
   })
     .index("by_event_id", ["eventId"])
-    .index("by_run_captured", ["runId", "capturedAtMs"]),
+    .index("by_run_captured", ["runId", "capturedAtMs"])
+    .index("by_run_sequence", ["runId", "runSequence"]),
 
   /** Compact current position per run; what clients subscribe to. */
   liveState: defineTable({

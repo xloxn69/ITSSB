@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "requestId": "9b1f3c2e-5d4a-4e6b-8c7d-0a1b2c3d4e5f",
+  "type": "endRun",
+  "driverOperatingGrant": "EXAMPLE_ONLY_NOT_A_REAL_GRANT_0000000",
+  "runId": "demo_run_001",
+  "capturedAtMs": 1795611600000,
+  "lastRunSequence": 1640
+}

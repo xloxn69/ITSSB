@@ -1,8 +1,12 @@
+import json
+from pathlib import Path
+
 import pytest
 
 from itssb_device.database import Database
 from itssb_device.trips import (
     BackendNotReadyRunStarter,
+    EndRunRequest,
     StartRunRequest,
     StartRunResult,
     start_run_online,
@@ -68,3 +72,47 @@ def test_late_accept_never_reactivates_a_completed_run(db):
     db.save_run("demo_run_001", "completed")
     start_run_online(db, Scripted(StartRunResult("accepted", "demo_run_001", "active")), REQ, 0)
     assert db.active_run() is None
+
+
+# Contract: the wire bodies match the shared fixtures (docs/08 §6).
+FIXTURES = Path(__file__).resolve().parents[3] / "packages" / "contracts" / "fixtures"
+
+
+def _fixture(name):
+    return json.loads((FIXTURES / f"{name}.json").read_text())
+
+
+def test_start_run_wire_matches_contract_fixture():
+    f = _fixture("tripEvent.startRun.request")
+    req = StartRunRequest(
+        request_id=f["requestId"],
+        route_version_id=f["routeVersionId"],
+        service_date=f["serviceDate"],
+        service_timezone=f["serviceTimezone"],
+        captured_at_ms=f["capturedAtMs"],
+        driver_operating_grant=f["driverOperatingGrant"],
+    )
+    assert req.to_wire() == f
+
+
+def test_end_run_wire_matches_contract_fixture():
+    f = _fixture("tripEvent.endRun.request")
+    req = EndRunRequest(
+        request_id=f["requestId"],
+        run_id=f["runId"],
+        captured_at_ms=f["capturedAtMs"],
+        last_run_sequence=f["lastRunSequence"],
+        driver_operating_grant=f["driverOperatingGrant"],
+    )
+    assert req.to_wire() == f
+
+
+def test_end_run_without_telemetry_sends_explicit_null():
+    req = EndRunRequest("r", "run", 1, None, "g")
+    assert "lastRunSequence" in req.to_wire()
+    assert req.to_wire()["lastRunSequence"] is None
+
+
+def test_accepted_start_fixture_has_what_the_flow_requires():
+    f = _fixture("tripEvent.startRun.accepted")
+    assert f["status"] == "accepted" and f["state"] == "active" and f["runId"]
