@@ -209,6 +209,11 @@ def activate(args: argparse.Namespace, version: str, verb: str) -> int:
             "migrations are documented as additive"
         )
     current = root / "current"
+    if current.exists() and not current.is_symlink():
+        raise Refused(
+            f"{current} is a plain directory from the first install; convert it once "
+            "(runbook: 'Convert a first install') before using releases"
+        )
     before = link_target(current)
     if before == version:
         print(f"{version} is already current; nothing changed")

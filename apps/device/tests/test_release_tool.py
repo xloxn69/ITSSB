@@ -181,6 +181,16 @@ def test_activate_refuses_code_older_than_the_database(tmp_path):
     assert r.returncode == 0, r.stderr
 
 
+def test_activate_refuses_to_replace_a_plain_current_directory(tmp_path):
+    root = tmp_path / "opt"
+    assert tool(root, "stage", str(fake_source(tmp_path, "a")), "--version", "v1").returncode == 0
+    (root / "current" / "src").mkdir(parents=True)  # INSTALL.md's first rsync layout
+    r = tool(root, "activate", "v1")
+    assert r.returncode != 0
+    assert "plain directory" in r.stderr
+    assert (root / "current" / "src").is_dir()
+
+
 def test_rollback_without_previous_fails_cleanly(tmp_path):
     root = tmp_path / "opt"
     assert tool(root, "stage", str(fake_source(tmp_path, "a")), "--version", "v1").returncode == 0

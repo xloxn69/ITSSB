@@ -44,7 +44,7 @@ Make one authorized online-started test run on the Pi produce a fresh location i
 | [16_TROUBLESHOOTING.md](16_TROUBLESHOOTING.md) | What do I check when display, GPS, services, network, or synchronization fail? |
 | [17_DECISIONS_AND_SOURCES.md](17_DECISIONS_AND_SOURCES.md) | Which choices are settled, provisional, or still open, and which official sources support them? |
 
-Owner-run procedures live under [runbooks/](runbooks/): [releases](runbooks/release.md) and [Convex backup and restore](runbooks/convex-backup-restore.md).
+Owner-run procedures live under [runbooks/](runbooks/): [releases](runbooks/release.md), [Convex backup and restore](runbooks/convex-backup-restore.md), and [Pi update, rollback, backup and restore](runbooks/pi-update-and-rollback.md).
 
 ## How to use the instructions
 

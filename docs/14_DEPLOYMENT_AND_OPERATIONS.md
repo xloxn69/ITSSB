@@ -72,7 +72,7 @@ A release procedure should:
 9. Start the service and verify local health, GPS reading, backend communication, and kiosk display.
 10. Retain a rollback path until the release is accepted.
 
-Switching `/opt/itssb/current` alone is not sufficient if `/opt/itssb/venv` has incompatible dependencies. The release mechanism must manage both consistently. This pack describes that requirement rather than providing an untested updater script.
+Switching `/opt/itssb/current` alone is not sufficient if `/opt/itssb/venv` has incompatible dependencies. The release mechanism must manage both consistently. The device service has no runtime dependencies and runs with the system Python, so each release under `/opt/itssb/releases/<version>` carries its whole runtime and `current` is a symlink switched atomically. `apps/device/deploy/itssb_release.py` stages, verifies, activates, and rolls back releases; the owner runs it by following the [Pi update and rollback runbook](runbooks/pi-update-and-rollback.md), rehearsed on the bench Pi.
 
 Rollback code only when it can read the current database format. Destructive migrations need a separate recovery plan; they cannot be undone merely by restarting an old executable. Preserve unsent events unless an authorized incident procedure explicitly determines their disposition.
 
@@ -118,7 +118,7 @@ There are several different things to preserve:
 
 The [Convex backup runbook](runbooks/convex-backup-restore.md) exports a snapshot and rehearses its restore in an isolated local deployment. Convex's data backups do not include the application code, environment variables, or pending scheduled functions. Its restore operation replaces deployment data, so rehearse restoration in an isolated target and take the appropriate current-state backup before an authorized restore. Verify available plan features and retention rather than assuming a schedule is included. See [Convex Backup & Restore](https://docs.convex.dev/database/backup-restore).
 
-For the Pi, use a consistent SQLite backup mechanism or an explicitly stopped, checkpointed procedure. Copying only a live database's main file can omit state associated with its journaling mode. The [SQLite online backup API](https://www.sqlite.org/backup.html) provides a supported approach for obtaining a consistent copy.
+For the Pi, use a consistent SQLite backup mechanism or an explicitly stopped, checkpointed procedure. Copying only a live database's main file can omit state associated with its journaling mode. The [SQLite online backup API](https://www.sqlite.org/backup.html) provides a supported approach for obtaining a consistent copy. The release tool's `backup` and `restore` commands use it; see the [runbook](runbooks/pi-update-and-rollback.md#back-up).
 
 Protect backups like the original data. Do not casually copy real students into a public test environment. Apply access, retention, and deletion policies to exports as well as live records.
 
