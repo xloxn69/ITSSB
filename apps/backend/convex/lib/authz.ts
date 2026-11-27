@@ -26,16 +26,23 @@ export async function requireUser(ctx: QueryCtx | MutationCtx): Promise<Doc<"use
 /**
  * Whether `user` may see a run's live position.
  *
- * V1 milestone: staff only. Guardian/student access arrives with verified
- * family links and assignments (docs/09); add it here, in one place, so every
- * query that exposes run data inherits the same rule.
+ * Staff may see any run (one organization for now). A student or guardian
+ * may see a run only through an approved assignment on the run's route
+ * version, reached through the student's own account or an approved
+ * guardian link (the same rule as family tracking). Every query that exposes
+ * run data calls this, so the rule lives in one place.
  */
 export async function canViewRun(
-  _ctx: QueryCtx,
+  ctx: QueryCtx,
   user: Doc<"users">,
-  _runId: Id<"runs">,
+  runId: Id<"runs">,
 ): Promise<boolean> {
-  return user.role === "staff";
+  if (user.role === "staff") return true;
+  const run = await ctx.db.get(runId);
+  if (!run) return false;
+  // `runs.routeVersionId` is stored as a string; assignments hold the Id.
+  const access = await listTrackableAssignments(ctx, user);
+  return access.some(({ assignment }) => assignment.routeVersionId === run.routeVersionId);
 }
 
 export type AssignmentAccess = {

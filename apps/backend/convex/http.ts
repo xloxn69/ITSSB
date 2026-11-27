@@ -5,6 +5,7 @@ import {
   type TelemetryResponse,
 } from "@itssb/contracts";
 import { httpRouter } from "convex/server";
+import { ConvexError } from "convex/values";
 import { internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
 import { parseBearer, sha256Hex } from "./lib/deviceAuth";
@@ -20,6 +21,13 @@ function json(status: number, body: unknown): Response {
 
 function requestError(status: number, code: string, message: string, retryable: boolean) {
   return json(status, { schemaVersion: SCHEMA_VERSION, error: { code, message, retryable } });
+}
+
+function isDeviceNotAuthorized(error: unknown): boolean {
+  return (
+    error instanceof ConvexError &&
+    (error.data as { code?: unknown } | null)?.code === "DEVICE_NOT_AUTHORIZED"
+  );
 }
 
 /** POST /device/v1/telemetry — see docs/08 §4. */
@@ -57,11 +65,20 @@ http.route({
     }
 
     const nowMs = Date.now();
-    const results = await ctx.runMutation(internal.telemetry.ingestBatch, {
-      deviceId,
-      events: envelope.events,
-      nowMs,
-    });
+    let results: TelemetryResponse["results"];
+    try {
+      results = await ctx.runMutation(internal.telemetry.ingestBatch, {
+        deviceId,
+        events: envelope.events,
+        nowMs,
+      });
+    } catch (error) {
+      // Revoked between the credential lookup and the commit.
+      if (isDeviceNotAuthorized(error)) {
+        return requestError(401, "UNAUTHENTICATED", "Device credential rejected.", false);
+      }
+      throw error;
+    }
     const response: TelemetryResponse = { schemaVersion: SCHEMA_VERSION, serverNowMs: nowMs, results };
     return json(200, response);
   }),

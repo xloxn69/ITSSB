@@ -11,7 +11,7 @@ Shared database, authorization, and device ingestion. Spec:
 | `convex/schema.ts` | Users, devices, runs, telemetry history, live state, audit log |
 | `convex/http.ts` | `POST /device/v1/telemetry` with bearer auth, size/version checks |
 | `convex/telemetry.ts` | Idempotent per-event ingestion; late data kept as history only |
-| `convex/runs.ts` | `runs.live` query (staff); returns null for unknown *and* forbidden runs |
+| `convex/runs.ts` | `runs.live` query (staff, the assigned student, or an approved guardian); returns null for unknown *and* forbidden runs |
 | `convex/tracking.ts` | Family queries `myAssignments`, `myRun`, `myRoute` (docs/08 §8), checked against the shared fixtures |
 | `convex/lib/authz.ts` | `getUser` / `requireUser` / `canViewRun`, the one place access rules live |
 | `convex/lib/deviceAuth.ts` | Device secrets are stored only as SHA-256 hashes |
