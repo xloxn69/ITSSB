@@ -242,3 +242,16 @@ describe("independent review round 3 cases", () => {
     expect(stopStatus(route, state, "b")).toBe("passed");
   });
 });
+
+describe("independent review round 4 case", () => {
+  it("one jittered fix past a close stop's band does not depart it", () => {
+    const route = prepareRoute(densePath(3000), [stop("a", 0, 1000), stop("b", 1, 1040)])!;
+    let state = initialProgress(route, T0);
+    let t = T0;
+    for (let d = 50; d <= 1000; d += 50) state = advance(route, state, fix(d, 0, (t += 5000)));
+    state = advance(route, state, { ...at(1021, 4), horizontalAccuracyM: 10, capturedAtMs: (t += 3000) });
+    for (let i = 0; i < 5; i++) state = advance(route, state, fix(1000 + (i % 2) * 3, 1, (t += 3000)));
+    expect(stopStatus(route, state, "a")).toBe("at_stop");
+    expect(stopStatus(route, state, "b")).toBe("upcoming");
+  });
+});

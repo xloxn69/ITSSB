@@ -98,6 +98,8 @@ export interface ProgressState {
   atMs: number;
   /** Result of matching the most recent fix. */
   lastStatus: MatchStatus;
+  /** This fix's own matched distance along the path (not the running maximum), for confirming departures. */
+  lastFixAlongM?: number;
   stops: StopOutcome[];
 }
 
@@ -278,7 +280,13 @@ export function advance(route: PreparedRoute, prev: ProgressState, fix: Fix): Pr
     const departAfter = next
       ? Math.min(DEPART_AFTER_M, Math.max(5, (next.alongM - stop.alongM) / 2))
       : DEPART_AFTER_M;
-    if (alongM >= stop.alongM + departAfter) {
+    // Departure needs two consecutive fixes past the band (or one far past
+    // it), so a single fix jittered forward never releases the next stop.
+    const band = stop.alongM + departAfter;
+    const confirmed =
+      (located.alongM >= band && (prev.lastFixAlongM ?? -Infinity) >= band) ||
+      located.alongM >= stop.alongM + 2 * DEPART_AFTER_M;
+    if (confirmed) {
       departedAtMs = fix.capturedAtMs;
     } else if (
       arrivedAtMs === null &&
@@ -290,7 +298,7 @@ export function advance(route: PreparedRoute, prev: ProgressState, fix: Fix): Pr
     }
     stops.push({ stopId: outcome.stopId, arrivedAtMs, departedAtMs });
   }
-  return { alongM, atMs: fix.capturedAtMs, lastStatus: "on_route", stops };
+  return { alongM, atMs: fix.capturedAtMs, lastStatus: "on_route", lastFixAlongM: located.alongM, stops };
 }
 
 export function stopStatus(route: PreparedRoute, state: ProgressState, stopId: string): StopStatus {

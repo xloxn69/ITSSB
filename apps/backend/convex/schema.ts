@@ -165,6 +165,8 @@ export default defineSchema({
     alongM: v.number(),
     atMs: v.number(),
     lastStatus: v.union(v.literal("on_route"), v.literal("off_route"), v.literal("ambiguous")),
+    /** The newest matched fix's own distance along the path; confirms departures. */
+    lastFixAlongM: v.optional(v.number()),
     /** Telemetry event most recently matched (or not) against the route. */
     lastEventId: v.string(),
     stops: v.array(

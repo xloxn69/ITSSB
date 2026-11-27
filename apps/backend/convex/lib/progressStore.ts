@@ -65,7 +65,13 @@ export class ProgressTracker {
     const row = await getRunProgress(this.ctx, run._id);
     const state: ProgressState =
       row && row.stops.length === route.stops.length
-        ? { alongM: row.alongM, atMs: row.atMs, lastStatus: row.lastStatus, stops: row.stops }
+        ? {
+            alongM: row.alongM,
+            atMs: row.atMs,
+            lastStatus: row.lastStatus,
+            ...(row.lastFixAlongM === undefined ? {} : { lastFixAlongM: row.lastFixAlongM }),
+            stops: row.stops,
+          }
         : initialProgress(route, run.startedAtMs ?? run._creationTime);
     return { run, route, state, last: null };
   }
@@ -81,6 +87,7 @@ export class ProgressTracker {
         alongM: state.alongM,
         atMs: state.atMs,
         lastStatus: state.lastStatus,
+        ...(state.lastFixAlongM === undefined ? {} : { lastFixAlongM: state.lastFixAlongM }),
         lastEventId: last.eventId,
         stops: state.stops,
       };
