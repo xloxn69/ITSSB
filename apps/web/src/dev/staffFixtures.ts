@@ -13,6 +13,7 @@ import type {
 } from "@itssb/contracts";
 import { myRouteReady } from "@itssb/contracts/fixtures";
 import type { StaffActionName, StaffMutationName, StaffQueryName, StaffSource } from "../staff/source";
+import { enrollmentAct, enrollmentAnswer, enrollmentFixtureState, enrollmentMutate } from "./enrollmentStaffFixtures";
 
 export const STAFF_VARIANTS = ["staff", "staff-empty", "staff-denied", "staff-error", "staff-loading"] as const;
 export type StaffVariant = (typeof STAFF_VARIANTS)[number];
@@ -160,6 +161,7 @@ function initialState(variant: StaffVariant) {
 
 export function staffFixtureSource(variant: StaffVariant): StaffSource {
   const state = initialState(variant);
+  const enrollment = enrollmentFixtureState(variant === "staff-empty");
   const listeners = new Set<() => void>();
   const changed = () => {
     for (const l of listeners) l();
@@ -211,6 +213,8 @@ export function staffFixtureSource(variant: StaffVariant): StaffSource {
                 : null,
           })),
         });
+      default:
+        return enrollmentAnswer(enrollment, name, args);
     }
   }
 
@@ -271,6 +275,11 @@ export function staffFixtureSource(variant: StaffVariant): StaffSource {
         changed();
         return env({ status: "ok" });
       }
+      default: {
+        const result = enrollmentMutate(enrollment, name, args);
+        changed();
+        return result;
+      }
     }
   }
 
@@ -278,14 +287,14 @@ export function staffFixtureSource(variant: StaffVariant): StaffSource {
   let issuedCount = 0;
   const fakeSecret = () => `fixture0not0a0real0device0secret${String(++issuedCount).padStart(32, "0")}`;
 
-  function act(name: StaffActionName, args: Record<string, string>): unknown {
+  function act(name: StaffActionName, args: Record<string, string | number>): unknown {
     if (variant === "staff-denied") return env({ status: "access_unavailable", reason: "not_permitted" });
     switch (name) {
       case "fleet:provisionDevice": {
-        const label = args.label?.trim() ?? "";
+        const label = String(args.label ?? "").trim();
         if (!label || label.length > 80) return refuse("invalid_label", "Use 1 to 80 characters for the device name.");
         const deviceId = `demo_device_new_${state.devices.length + 1}`;
-        state.devices.push({ deviceId, label, busLabel: args.busLabel?.trim() || null, revoked: false, activeRun: null, lastContactAtMs: null });
+        state.devices.push({ deviceId, label, busLabel: String(args.busLabel ?? "").trim() || null, revoked: false, activeRun: null, lastContactAtMs: null });
         changed();
         return env({ status: "issued", deviceId, deviceSecret: fakeSecret() });
       }
@@ -294,6 +303,11 @@ export function staffFixtureSource(variant: StaffVariant): StaffSource {
         if (!device) return refuse("not_found", "That device doesn't exist.");
         if (device.revoked) return refuse("revoked", "This device is revoked. Provision a new device instead.");
         return env({ status: "issued", deviceId: device.deviceId, deviceSecret: fakeSecret() });
+      }
+      default: {
+        const result = enrollmentAct(enrollment, name, args);
+        changed();
+        return result;
       }
     }
   }

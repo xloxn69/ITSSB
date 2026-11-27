@@ -93,6 +93,10 @@ input, select, textarea { font: inherit; min-height: 44px; padding: var(--space-
   border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface);
   color: var(--color-text-primary); }
 .error-text { color: var(--color-status-stale); }
+/* A one-time invitation code, large enough to read aloud or type. */
+.code-display { font-family: ui-monospace, monospace; font-size: var(--font-size-headline);
+  font-weight: var(--font-weight-semibold); letter-spacing: 0.05em; margin: 0; overflow-wrap: anywhere; }
+.flush { margin: 0; }
 @media (max-width: 40rem) {
   .responsive-table thead { display: none; }
   .responsive-table tr { display: block; border-bottom: 1px solid var(--color-border); padding: var(--space-sm) 0; }
