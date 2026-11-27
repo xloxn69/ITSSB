@@ -25,3 +25,20 @@ export function generateDeviceSecret(): string {
   crypto.getRandomValues(bytes);
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
+
+/**
+ * Commit-time device check for the write mutations. The HTTP action resolves
+ * the credential in an earlier transaction; by commit the device may have
+ * been revoked or its credential rotated (devices:rotateCredential). A request
+ * that authenticated with the old secret must not commit after a rotation,
+ * so the hash it authenticated with must still be the device's current one.
+ * `authenticatedHash` is always passed by http.ts; it is optional only so
+ * direct internal calls in tests can omit it.
+ */
+export function stillAuthorized(
+  device: { revoked: boolean; credentialHash: string } | null,
+  authenticatedHash: string | undefined,
+): boolean {
+  if (!device || device.revoked) return false;
+  return authenticatedHash === undefined || device.credentialHash === authenticatedHash;
+}

@@ -6,6 +6,7 @@ import {
 import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx } from "./_generated/server";
+import { stillAuthorized } from "./lib/deviceAuth";
 
 /** Fields that must match for a re-sent eventId to count as a duplicate. */
 const IDENTITY_FIELDS = [
@@ -51,14 +52,19 @@ function isLateHistory(run: Doc<"runs">, e: TelemetryEvent, nowMs: number): bool
 export const ingestBatch = internalMutation({
   args: {
     deviceId: v.id("devices"),
+    /** Hash of the credential the request authenticated with; see stillAuthorized. */
+    credentialHash: v.optional(v.string()),
     events: v.array(v.any()),
     nowMs: v.number(),
   },
-  handler: async (ctx, { deviceId, events, nowMs }): Promise<EventResult[]> => {
+  handler: async (ctx, { deviceId, credentialHash, events, nowMs }): Promise<EventResult[]> => {
     // The HTTP action looked the credential up in an earlier transaction.
-    // Recheck here so a device revoked in between cannot commit (docs/07 §6).
+    // Recheck here so a device revoked, or a credential rotated, in between
+    // cannot commit (docs/07 §6).
     const device = await ctx.db.get(deviceId);
-    if (!device || device.revoked) throw new ConvexError({ code: "DEVICE_NOT_AUTHORIZED" });
+    if (!device || !stillAuthorized(device, credentialHash)) {
+      throw new ConvexError({ code: "DEVICE_NOT_AUTHORIZED" });
+    }
     const results: EventResult[] = [];
     for (const raw of events) {
       results.push(await ingestOne(ctx, deviceId, raw, nowMs));

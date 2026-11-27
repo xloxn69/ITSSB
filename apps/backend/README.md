@@ -87,3 +87,16 @@ stored). Put the secret in the Pi's `/etc/itssb/device.env` as
 `.convex.site` URL. Then link your Clerk sign-in to the seeded guardian or
 student with `users:linkIdentity` (see "Owner steps" above, step 5). Issue a
 fresh grant later with `bunx convex run driverGrants:issue`.
+
+### Rotate a device credential
+
+The seed prints the device secret once. If it is lost, or a Pi needs a new
+one, issue a replacement (the old secret stops working immediately; a revoked
+device stays revoked):
+
+```sh
+bunx convex run devices:rotateCredential '{"deviceId":"<devices id>"}'
+```
+
+Put the printed secret in the Pi's `/etc/itssb/device.env` as
+`ITSSB_DEVICE_TOKEN` and restart the service.
