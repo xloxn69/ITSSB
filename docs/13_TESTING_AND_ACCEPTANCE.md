@@ -127,7 +127,7 @@ For each executed case, record build versions, backend environment, fixture/run 
 
 ## 12. Resilient-prototype evidence (roadmap Phase 5)
 
-Recorded 2026-11-26 against the development backend, with fictional data only. Pi runs used the bench Pi in its own folder, a dedicated fictional device credential, and a server-issued run started through `POST /device/v1/trip-events`. The bench receiver reports no device indoors, so Pi positions came from the fake GPSD. The link outage was simulated with `devtools/link_proxy.py`, which refuses connections while down. The OS was not rebooted.
+Recorded 2026-11-26 against the development backend, with fictional data only. Two 9-minute Pi drills used the bench Pi in its own folder, a dedicated fictional device credential, and a server-issued run started through `POST /device/v1/trip-events`. The bench receiver reports no device indoors, so Pi positions came from the fake GPSD. The link outage was simulated with `devtools/link_proxy.py`, which refuses connections while down. The OS was not rebooted.
 
 | Case | Automated test (layer) | Pi drill (`devtools/outage_drill.py`) | Result |
 |---|---|---|---|
@@ -135,11 +135,11 @@ Recorded 2026-11-26 against the development backend, with fictional data only. P
 | D02 lost response | `test_outages.py::test_d02` (device process + fake backend); `telemetry.test.ts` idempotent duplicate | Every retry was stored once: backend eventIds equal the Pi's | Pass |
 | D03 mixed batch | `test_uploader.py::test_results_are_applied_per_event`; `telemetry.test.ts` one result per event | — | Pass |
 | D04 out of order | `telemetry.test.ts` late observation kept as history, live unchanged | — | Pass |
-| D05 restart mid-run | `test_outages.py::test_d05` (kill -9 during an outage); `test_service.py` SIGTERM + kill | kill -9 while the link was down: same run, new bootId, runSequence 0–181 unbroken across 3 boots | Pass (process restart). OS reboot not run |
-| D06 interface restart only | The driver UI is a page over the read-only local API; the service holds no per-page state | Driver pages opened and closed repeatedly while collection continued | Pass |
-| D07 bus internet loss | `test_outages.py::test_d07_d08` | Queue grew to 26 rows / 49 s behind; GPS stayed valid; backend status never claimed ok | Pass |
-| D08 reconnect with backlog | `test_uploader.py` D08 tests (failed before the fix in #35); `test_outages.py::test_d07_d08` (newest first) | First acknowledgement 4 s after the link returned; caught up 2 s later | Pass |
-| D09 GPS loss, internet up | Device: `test_outages.py::test_d09`, `test_health.py`. Backend: `health.test.ts`. Clients: web `tracking.test.ts` D09 gating, iOS `testGpsProblemNeedsRecentContact` | GPS `no_fix`, last fix kept its time, nothing recorded, network and backend ok | Pass. Family path is tested, not yet seen live on dev |
+| D05 restart mid-run | `test_outages.py::test_d05` (kill -9 during an outage); `test_service.py` SIGTERM + kill | kill -9 while the link was down, twice: same run, a new bootId each time. Backend and Pi hold the same 312 eventIds, runSequence 0–311 unbroken across 5 boots | Pass (process restart). OS reboot not run |
+| D06 interface restart only | The driver UI is a page over the read-only local API; the service holds no per-page state | Driver page sessions opened and closed during both drills; collection never paused | Pass |
+| D07 bus internet loss | `test_outages.py::test_d07_d08` | Queue grew to about 37 rows, 73 s behind; GPS stayed valid; the driver screen showed "School server: Not reachable" and the queue count | Pass |
+| D08 reconnect with backlog | `test_uploader.py` D08 tests (failed before the fix in #35); `test_outages.py::test_d07_d08` (newest first) | First acknowledgement 4.0 s after the link returned in both drills; backlog cleared within 2 s | Pass |
+| D09 GPS loss, internet up | Device: `test_outages.py::test_d09`, `test_health.py`. Backend: `health.test.ts`. Clients: web `tracking.test.ts` D09 gating, iOS `testGpsProblemNeedsRecentContact` | GPS `no_fix`, last fix kept its time, nothing recorded, network and backend ok; the driver screen showed "GPS: No fix — last fix 36 s ago" | Pass. Family path is tested, not yet seen live on dev |
 | D10 invalid / conflicting | `validate.test.ts` (NaN, range, future); `telemetry.test.ts` content conflict | — | Pass |
 | D13 end trip offline | `test_runs_api.py` end completes locally, stays pending, retries the same request | — | Pass (device); backend `tripEvents.test.ts` |
 | D15 end during a write | `test_recorder.py` run ended between check and write; `tripEvents.test.ts` final sequence boundary | — | Pass |
