@@ -7,7 +7,8 @@
 import { css } from "../styles.js";
 import type { ScreenId } from "../screens.js";
 import { correctionView, detailView, emptyStudentUi, qrView, rosterView, type StudentController, type StudentUi } from "../studentViews.js";
-import type { DeviceQrCode, RosterAction, RosterResponse } from "../students.js";
+import { type DeviceQrCode, type RosterAction, type RosterResponse, studentChangeLines } from "../students.js";
+import { dashboardView, h } from "../views.js";
 import { observed, snapshot } from "../testing.js";
 
 const RUN = "demo_run_001";
@@ -158,7 +159,15 @@ style.textContent = css;
 document.head.append(style);
 const name = new URLSearchParams(location.search).get("state") ?? "qr-check-in";
 const ui: StudentUi = { ...emptyStudentUi(), ...states[name] };
-const view = name.startsWith("qr")
+const dashboard = () => {
+  // After the run ended: one change still waiting, one rejected.
+  const ended = observed(snapshot({ run: null, session: { unlocked: true, driverName: "Dana Driver" } , studentChanges: { pending: 1, rejected: [rejected] } }));
+  const lines = studentChangeLines(ended.snapshot?.studentChanges).map((l) => h("div", { class: `banner lv-${l.level}` }, l.text));
+  return dashboardView(ended, { go: () => {}, action: () => {} }, lines);
+};
+const view = name === "dashboard-changes"
+  ? dashboard()
+  : name.startsWith("qr")
   ? qrView(o, ui, noop, NOW, "Route 17 Morning")
   : name.startsWith("roster")
     ? rosterView(ui, noop, NOW)

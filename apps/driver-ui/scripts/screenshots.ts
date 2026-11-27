@@ -23,6 +23,7 @@ const STATES = [
   "detail",
   "detail-confirm-remove",
   "correction",
+  "dashboard-changes",
 ];
 
 const outDir = process.argv[2] ?? "build/screenshots";

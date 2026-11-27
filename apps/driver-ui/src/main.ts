@@ -16,7 +16,7 @@ import {
 import { type ActionId, parked as parkedNow, STUDENT_SCREENS, type ScreenId, selectScreen } from "./screens.js";
 import type { DeviceSnapshot, DraftSummary, Observed } from "./snapshot.js";
 import { correctionView, detailView, emptyStudentUi, qrView, rosterView, type StudentController } from "./studentViews.js";
-import { type AttendanceStatus, type QrPurpose, type RosterAction, rosterRows, syncLabel } from "./students.js";
+import { type AttendanceStatus, type QrPurpose, type RosterAction, rosterRows, studentChangeLines, syncLabel } from "./students.js";
 import { css } from "./styles.js";
 import { dashboardView, diagnosticsView, drivingView, type Nav, offlineView, startupView, statusBar } from "./views.js";
 
@@ -455,6 +455,13 @@ function dashboardControls(o: Observed): (HTMLElement | null)[] {
     end.disabled = !parkedNow(o);
     end.addEventListener("click", () => ctl.go("D23"));
     extra.push(end);
+  }
+  // Student changes still waiting, and any rejection, even after the run ended.
+  for (const line of studentChangeLines(o.snapshot?.studentChanges)) {
+    const note = document.createElement("div");
+    note.className = `banner lv-${line.level}`;
+    note.textContent = line.text;
+    extra.push(note);
   }
   if (s.unlocked && o.snapshot?.lastEndedRun && !o.snapshot.run) {
     const last = document.createElement("button");

@@ -14,6 +14,7 @@ import {
   qrShowable,
   rosterRows,
   SOURCE_LABELS,
+  studentChangeLines,
   syncLabel,
 } from "./students.js";
 import { observed, snapshot } from "./testing.js";
@@ -233,5 +234,39 @@ describe("student screens", () => {
   it("moving hides the code and the roster behind the driving view", () => {
     const o = observed(ready({ motion: { state: "moving", parked: false } }));
     for (const s of ["D15", "D16", "D17", "D18", "D19"] as const) expect(selectScreen(o, s)).toBe("D13");
+  });
+});
+
+describe("student changes on the dashboard", () => {
+  const rejected: RosterAction = {
+    requestId: "r9",
+    type: "recordAttendance",
+    assignmentId: "demo_assignment_002",
+    studentDisplayName: "Blake Example",
+    runId: RUN,
+    sync: "rejected",
+    result: "rejected",
+    code: "grant_not_authorized",
+    problem: "Ask staff to make the change.",
+    checkIn: null,
+    capturedAtMs: 1_795_608_000_000,
+    details: { status: "boarded" },
+  };
+
+  it("names pending and rejected changes even with no run", () => {
+    const lines = studentChangeLines({ pending: 2, rejected: [rejected] });
+    expect(lines).toEqual([
+      { level: "warn", text: "2 student changes are waiting to sync with the school server." },
+      { level: "problem", text: "Blake Example: Recorded boarded · Rejected: Ask staff to make the change." },
+    ]);
+  });
+
+  it("says nothing when there is nothing to report, or no data behind the lock", () => {
+    expect(studentChangeLines({ pending: 0, rejected: [] })).toEqual([]);
+    expect(studentChangeLines(null)).toEqual([]);
+    expect(studentChangeLines(undefined)).toEqual([]);
+    expect(studentChangeLines({ pending: 1, rejected: [] })[0]?.text).toBe(
+      "1 student change is waiting to sync with the school server.",
+    );
   });
 });

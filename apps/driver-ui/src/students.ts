@@ -161,6 +161,36 @@ export function actionText(a: RosterAction): string {
   }
 }
 
+/** The device's summary of student changes, shown on the dashboard even with no run. */
+export interface StudentChanges {
+  pending: number;
+  rejected: RosterAction[];
+}
+
+/**
+ * Lines for the dashboard: how many changes still wait to sync, and each
+ * recent rejection by name. A rejection that arrives after the run ended is
+ * shown here, so the driver never believes a refused change went through.
+ * Null (locked, or older device software) shows nothing.
+ */
+export function studentChangeLines(
+  changes: StudentChanges | null | undefined,
+): { level: "warn" | "problem"; text: string }[] {
+  if (!changes) return [];
+  const lines: { level: "warn" | "problem"; text: string }[] = [];
+  if (changes.pending > 0) {
+    const n = changes.pending;
+    lines.push({
+      level: "warn",
+      text: `${n} student ${n === 1 ? "change is" : "changes are"} waiting to sync with the school server.`,
+    });
+  }
+  for (const a of changes.rejected) {
+    lines.push({ level: "problem", text: `${a.studentDisplayName}: ${actionText(a)} · ${syncLabel(a)}` });
+  }
+  return lines;
+}
+
 export interface RosterRow {
   assignmentId: string;
   name: string;
