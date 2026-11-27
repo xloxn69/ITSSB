@@ -2,10 +2,12 @@ import { useMemo, useState } from "react";
 import { FamilyApp } from "../family/FamilyApp";
 import { TrackPage } from "../family/TrackPage";
 import { Shell } from "../Shell";
+import { SignInScreen } from "../live/SignInScreen";
 import { StaffApp } from "../staff/StaffApp";
 import { TrackStore } from "../tracking/store";
 import { FIXTURE_SCENARIOS, type FixtureScenario, fixtureSource } from "./fixtureSource";
 import { FAMILY_FLOW_VARIANTS, type FamilyFlowVariant, familyFlowSource } from "./familyFlowFixtures";
+import { SIGN_IN_VARIANTS, type SignInVariant, signInFixtureFlow } from "./signInFixtures";
 import { STAFF_VARIANTS, type StaffVariant, staffFixtureSource } from "./staffFixtures";
 
 /**
@@ -25,21 +27,34 @@ export default function DevFixtures() {
   const flowStore = useMemo(() => (flows ? new TrackStore(fixtureSource("live")) : null), [flows]);
   const family = (FIXTURE_SCENARIOS as readonly string[]).includes(requested) ? (requested as FixtureScenario) : null;
   const staff = (STAFF_VARIANTS as readonly string[]).includes(requested) ? (requested as StaffVariant) : null;
+  const signInVariant =
+    requested === "sign-in" && (SIGN_IN_VARIANTS as readonly string[]).includes(flowVariant)
+      ? (flowVariant as SignInVariant)
+      : requested === "sign-in"
+        ? "email"
+        : null;
+  const signInFlow = useMemo(() => (signInVariant ? signInFixtureFlow(signInVariant) : null), [signInVariant]);
   const store = useMemo(() => (family ? new TrackStore(fixtureSource(family)) : null), [family]);
   const staffSource = useMemo(() => (staff ? staffFixtureSource(staff) : null), [staff]);
   return (
     <Shell right={<span className="badge">Fictional data</span>}>
+      {signInFlow && <SignInScreen flow={signInFlow} />}
       {store && <TrackPage store={store} onSignIn={() => location.reload()} />}
       {staffSource && <StaffApp source={staffSource} />}
       {flowSource && flowStore && (
         <FamilyApp source={flowSource} track={<TrackPage store={flowStore} onSignIn={() => location.reload()} />} />
       )}
-      {!store && !staffSource && !flowSource && (
+      {!store && !staffSource && !flowSource && !signInFlow && (
         <nav className="card stack">
           <h1>Fixture screens</h1>
           {FIXTURE_SCENARIOS.map((s) => (
             <a key={s} href={`?fixture=${s}`}>
               {s}
+            </a>
+          ))}
+          {SIGN_IN_VARIANTS.map((v) => (
+            <a key={v} href={`?fixture=sign-in&v=${v}`}>
+              sign-in {v}
             </a>
           ))}
           {STAFF_VARIANTS.map((s) => (

@@ -19,6 +19,9 @@ export const FIXTURE_SCREENS: {
 }[] = [
   // Without VITE_CONVEX_URL / VITE_CLERK_PUBLISHABLE_KEY the app fails closed.
   { name: "not-configured", path: "", ready: "main h1" },
+  { name: "sign-in-email", path: "?fixture=sign-in&v=email", ready: "input[name=email]" },
+  { name: "sign-in-code", path: "?fixture=sign-in&v=code", ready: "input[name=code]" },
+  { name: "sign-in-error", path: "?fixture=sign-in&v=error", ready: "#sign-in-problem" },
   ...FIXTURE_SCENARIOS.map((s) => ({
     name: `family-${s}`,
     path: `?fixture=${s}`,
