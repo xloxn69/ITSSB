@@ -119,10 +119,20 @@ class Database:
             "nextRunSequence": row["next_run_sequence"],
         }
 
-    def last_captured_at_ms(self, run_id: str) -> int | None:
-        row = self.conn.execute(
-            "SELECT MAX(captured_at_ms) AS m FROM telemetry_events WHERE run_id=?", (run_id,)
-        ).fetchone()
+    def last_captured_at_ms(self, run_id: str, at_most: int | None = None) -> int | None:
+        """Newest saved capture time for the run. `at_most` ignores implausible
+        future rows (saved before plausibility checks existed or under a wrong
+        clock) so they can't block every later observation."""
+        if at_most is None:
+            row = self.conn.execute(
+                "SELECT MAX(captured_at_ms) AS m FROM telemetry_events WHERE run_id=?", (run_id,)
+            ).fetchone()
+        else:
+            row = self.conn.execute(
+                "SELECT MAX(captured_at_ms) AS m FROM telemetry_events "
+                "WHERE run_id=? AND captured_at_ms<=?",
+                (run_id, at_most),
+            ).fetchone()
         return row["m"]
 
     def save_start_request(self, request_id: str, payload: dict, created_at_ms: int) -> None:
@@ -207,14 +217,26 @@ class Database:
 
     # ── Outbox ────────────────────────────────────────────────────────
 
-    def pending_payloads(self, now_ms: int, limit: int = 50) -> list[dict]:
-        """Oldest-first pending payloads that are due. Payloads are byte-for-byte
+    def pending_payloads(
+        self, now_ms: int, limit: int = 50, newest_first: bool = False
+    ) -> list[dict]:
+        """Due pending payloads, oldest first. With `newest_first`, the newest due
+        payload leads the list so current tracking resumes immediately after an
+        outage while history drains (docs/04 §9). Payloads are byte-for-byte
         what was saved, so retries reuse the same eventId."""
         rows = self.conn.execute(
-            "SELECT payload FROM outbox WHERE status='pending' AND next_attempt_at_ms<=? "
+            "SELECT rowid, payload FROM outbox WHERE status='pending' AND next_attempt_at_ms<=? "
             "ORDER BY rowid LIMIT ?",
             (now_ms, limit),
         ).fetchall()
+        if newest_first and rows:
+            newest = self.conn.execute(
+                "SELECT rowid, payload FROM outbox WHERE status='pending' "
+                "AND next_attempt_at_ms<=? ORDER BY rowid DESC LIMIT 1",
+                (now_ms,),
+            ).fetchone()
+            rest = [r for r in rows if r["rowid"] != newest["rowid"]]
+            rows = [newest, *rest[: limit - 1]]
         return [json.loads(r["payload"]) for r in rows]
 
     def outbox_counts(self) -> dict:

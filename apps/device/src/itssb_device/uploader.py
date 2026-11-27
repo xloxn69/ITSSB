@@ -22,6 +22,7 @@ problem. A small TCP probe keeps `network` honest while the queue is empty.
 
 from __future__ import annotations
 
+import errno
 import http.client
 import json
 import logging
@@ -47,14 +48,36 @@ CLIENT_ERROR_PAUSE_MS = 60_000
 PROBE_INTERVAL_S = 30.0
 
 
-class TransportError(Exception):
-    """`connected` says whether a TCP/TLS connection was established before
-    the failure (so the network was up but the backend didn't answer)."""
+_NO_ROUTE_ERRNOS = {errno.ENETUNREACH, errno.EHOSTUNREACH, errno.ENETDOWN}
 
-    def __init__(self, connected: bool, reason: str) -> None:
-        super().__init__(reason)
-        self.connected = connected
-        self.reason = reason
+
+def classify(exc: BaseException, connected: bool) -> tuple[str, str]:
+    """Maps a transport failure to separate (network, backend) states.
+
+    Only "we could not reach the host at all" means the network is offline.
+    A refused/reset connection or a TLS failure means something answered,
+    so the network is up and the backend is the problem.
+    """
+    if isinstance(exc, ssl.SSLError):
+        return "online", "tls_error"
+    if connected:
+        return "online", "no_response"
+    if isinstance(exc, socket.gaierror):
+        return "offline", "unreachable"  # DNS failed
+    if isinstance(exc, TimeoutError):
+        return "offline", "unreachable"  # connect timed out
+    if isinstance(exc, OSError) and exc.errno in _NO_ROUTE_ERRNOS:
+        return "offline", "unreachable"
+    if isinstance(exc, ConnectionRefusedError | ConnectionResetError):
+        return "online", "unreachable"  # the host answered; nothing is serving
+    return "unknown", "unreachable"
+
+
+class TransportError(Exception):
+    def __init__(self, exc: BaseException, connected: bool) -> None:
+        self.reason = type(exc).__name__
+        super().__init__(self.reason)
+        self.network, self.backend = classify(exc, connected)
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,7 +111,7 @@ class HttpTransport:
                 conn.connect()
             except (OSError, http.client.HTTPException) as exc:
                 conn.close()
-                raise TransportError(False, type(exc).__name__) from exc
+                raise TransportError(exc, connected=False) from exc
             self._conn = conn
         return self._conn
 
@@ -105,19 +128,18 @@ class HttpTransport:
                 # A kept-alive connection the server had already closed; one
                 # fresh attempt is safe because the payload is idempotent.
                 return self.post(path, body, headers)
-            raise TransportError(True, type(exc).__name__) from exc
+            raise TransportError(exc, connected=True) from exc
         if resp.getheader("Connection", "").lower() == "close":
             self.close()
         return HttpResponse(resp.status, {k.lower(): v for k, v in resp.getheaders()}, data)
 
-    def probe(self) -> str | None:
-        """TCP reachability of the backend host. Returns None if reachable,
-        otherwise a short reason."""
+    def probe(self) -> tuple[str, str | None]:
+        """TCP reachability of the backend host: (network status, reason)."""
         try:
             with socket.create_connection((self.host, self.port), timeout=self.timeout_s):
-                return None
+                return "online", None
         except OSError as exc:
-            return type(exc).__name__
+            return classify(exc, connected=False)[0], type(exc).__name__
 
     def close(self) -> None:
         if self._conn is not None:
@@ -167,7 +189,7 @@ class Uploader:
         self.failures = 0  # consecutive request-level failures
 
     def _batch(self, now: int) -> tuple[list[str], bytes] | None:
-        payloads = self.db.pending_payloads(now, limit=self.batch_limit)
+        payloads = self.db.pending_payloads(now, limit=self.batch_limit, newest_first=True)
         if not payloads:
             return None
         events: list[dict[str, Any]] = []
@@ -208,12 +230,8 @@ class Uploader:
         try:
             resp = self.transport.post(TELEMETRY_PATH, body, headers)
         except TransportError as exc:
-            if exc.connected:
-                self.board.network("online")
-                self.board.backend("no_response", exc.reason)
-            else:
-                self.board.network("offline", exc.reason)
-                self.board.backend("unreachable", exc.reason)
+            self.board.network(exc.network, None if exc.network == "online" else exc.reason)
+            self.board.backend(exc.backend, exc.reason)
             log.warning(
                 "upload of %d events failed (%s); will retry same eventIds", len(sent), exc.reason
             )
@@ -266,8 +284,8 @@ class Uploader:
         return "server_error"
 
     def probe_network(self) -> None:
-        reason = self.transport.probe()
-        self.board.network("offline" if reason else "online", reason)
+        status, reason = self.transport.probe()
+        self.board.network(status, reason)
 
 
 class UploaderThread(threading.Thread):

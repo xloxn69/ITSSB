@@ -80,3 +80,75 @@ def test_restart_without_run_does_not_invent_one(tmp_path, clock):
     rec2.tick()
     assert board.snapshot()["run"] is None
     assert rec2.db.active_run() is None
+
+
+NOW_MS = 1_795_609_085_000
+
+
+def make_at(path, clock, now_ms=NOW_MS, boot="boot-a"):
+    board = StatusBoard(boot, upload_enabled=False, monotonic=clock)
+    latest = LatestFixHolder()
+    rec = Recorder(Database(path), board, latest, boot, monotonic=clock, now_ms=lambda: now_ms)
+    return rec, latest, board
+
+
+def test_future_capture_is_not_saved_and_does_not_block_later_fixes(tmp_path, clock):
+    rec, latest, _ = make_at(tmp_path / "d.db", clock)
+    rec.db.save_run("demo_run_001", "active")
+    latest.set(fix(NOW_MS + 24 * 3600 * 1000), clock())  # a receiver dated tomorrow
+    assert rec.tick() is False
+    latest.set(fix(NOW_MS), clock())
+    assert rec.tick() is True
+
+
+def test_a_future_row_already_in_the_database_does_not_block_after_restart(tmp_path, clock):
+    path = tmp_path / "d.db"
+    old = Database(path)
+    old.save_run("demo_run_001", "active")
+    old.record_observation("demo_run_001", fix(NOW_MS + 24 * 3600 * 1000), "boot-old", 0)
+    old.close()
+    rec, latest, _ = make_at(path, clock)
+    latest.set(fix(NOW_MS), clock())
+    assert rec.tick() is True
+
+
+def test_failed_saves_become_a_visible_fault_until_recovery(tmp_path, clock, stop_event):
+    import threading
+
+    from itssb_device.recorder import RecorderThread
+
+    board = StatusBoard("boot-a", upload_enabled=False, monotonic=clock)
+    faults: list[str | None] = []
+    real_fault = board.recorder_fault
+
+    def spy(fault):
+        real_fault(fault)
+        faults.append(board.snapshot()["recorder"]["fault"])
+
+    board.recorder_fault = spy
+    recovered = threading.Event()
+
+    def factory():  # runs inside the recorder thread, like the service
+        rec = Recorder(
+            Database(tmp_path / "d.db"), board, LatestFixHolder(), "boot-a", monotonic=clock
+        )
+        real_tick, calls = rec.tick, {"n": 0}
+
+        def flaky_tick():
+            calls["n"] += 1
+            if calls["n"] <= 2:
+                raise OSError("disk full")  # e.g. SD card full
+            recovered.set()
+            return real_tick()
+
+        rec.tick = flaky_tick
+        return rec
+
+    t = RecorderThread(factory, 0.01, stop_event)
+    t.start()
+    assert recovered.wait(5)
+    stop_event.set()
+    t.join(5)
+    assert faults[:2] == ["save failed: OSError", "save failed: OSError"]
+    assert board.snapshot()["recorder"]["fault"] is None  # cleared after a good cycle
+    assert None in faults[2:]

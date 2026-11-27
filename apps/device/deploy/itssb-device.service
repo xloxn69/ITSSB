@@ -1,0 +1,67 @@
+# ITSSB device service. Reviewed template; installation steps: deploy/INSTALL.md.
+# Install as /etc/systemd/system/itssb-device.service (needs root; the owner does this).
+#
+# Runtime is the standard library only, so the source tree is run directly with
+# the system Python (no virtualenv or build step on the Pi).
+
+[Unit]
+Description=ITSSB bus device service (GPS, outbox, upload, local status API)
+Documentation=https://github.com/xloxn69/ITSSB/blob/main/apps/device/deploy/INSTALL.md
+# GPSD is wanted, not required: the service must still serve health
+# (gps "unknown") when GPSD is missing.
+Wants=gpsd.socket
+After=network.target gpsd.socket
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=itssb
+Group=itssb
+WorkingDirectory=/opt/itssb/current
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONPATH=/opt/itssb/current/src
+# Optional ("-"): an unpaired device still starts, with uploads disabled.
+EnvironmentFile=-/etc/itssb/device.env
+ExecStart=/usr/bin/python3 -m itssb_device run
+
+# SIGTERM -> clean shutdown well inside TimeoutStopSec.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5
+# Exit 2 = invalid configuration. Restarting can't fix it; stay stopped.
+RestartPreventExitStatus=2
+
+# State: /var/lib/itssb, created by systemd, owned by itssb, mode 0700.
+StateDirectory=itssb
+StateDirectoryMode=0700
+UMask=0077
+
+# Hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

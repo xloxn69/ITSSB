@@ -1,5 +1,7 @@
+import errno
 import logging
 import socket
+import ssl
 
 import pytest
 
@@ -8,7 +10,7 @@ from itssb_device.devtools.fake_backend import FakeBackend
 from itssb_device.models import Fix
 from itssb_device.status import StatusBoard
 from itssb_device.sync import backoff_ms
-from itssb_device.uploader import AUTH_PAUSE_MS, HttpTransport, Uploader
+from itssb_device.uploader import AUTH_PAUSE_MS, HttpTransport, Uploader, classify
 
 TOKEN = "fake-dev-token"  # noqa: S105 - obviously fake
 BOOT = "3cd44c56-c96b-4b83-a970-5414990bc25a"
@@ -90,9 +92,13 @@ def test_lost_response_retries_same_event_id_and_gets_duplicate(db, backend):
 def test_results_are_applied_per_event(db, backend):
     ids = add(db, 4)
     up, board, _ = make(db, backend.origin)
-    backend.mode = "partial"  # answers for events 0 and 2 only
+    backend.mode = "partial"  # answers for every other event in the request
     assert up.upload_once() == "ok"
-    assert statuses(db, ids) == ["acknowledged", "pending", "acknowledged", "pending"]
+    [sent] = [r["eventIds"] for r in backend.requests]
+    answered, unanswered = set(sent[::2]), set(sent[1::2])
+    for eid in ids:
+        assert db.outbox_status(eid) == ("acknowledged" if eid in answered else "pending")
+    assert len(answered) == len(unanswered) == 2
     assert board.snapshot()["backend"]["lastBatch"]["missing"] == 2
 
 
@@ -111,7 +117,7 @@ def test_server_error_keeps_rows_pending_and_backs_off(db, backend):
     assert statuses(db, ids) == ["acknowledged", "acknowledged"]
 
 
-def test_backend_unreachable_is_network_offline(db):
+def test_refused_connection_means_network_up_backend_unreachable(db):
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         dead = f"http://127.0.0.1:{s.getsockname()[1]}"
@@ -119,11 +125,28 @@ def test_backend_unreachable_is_network_offline(db):
     up, board, _ = make(db, dead)
     assert up.upload_once() == "transport_error"
     snap = board.snapshot()
-    assert snap["network"]["status"] == "offline"
+    assert snap["network"]["status"] == "online"  # the host answered (refused)
     assert snap["backend"]["status"] == "unreachable"
     assert statuses(db, ids) == ["pending"]
     up.probe_network()
-    assert board.snapshot()["network"]["status"] == "offline"
+    assert board.snapshot()["network"]["status"] == "online"
+
+
+@pytest.mark.parametrize(
+    ("exc", "connected", "expected"),
+    [
+        (socket.gaierror(socket.EAI_NONAME, "no name"), False, ("offline", "unreachable")),
+        (TimeoutError(), False, ("offline", "unreachable")),
+        (OSError(errno.ENETUNREACH, "unreachable"), False, ("offline", "unreachable")),
+        (OSError(errno.EHOSTUNREACH, "no route"), False, ("offline", "unreachable")),
+        (ConnectionRefusedError(errno.ECONNREFUSED, "refused"), False, ("online", "unreachable")),
+        (ssl.SSLCertVerificationError("bad cert"), False, ("online", "tls_error")),
+        (TimeoutError(), True, ("online", "no_response")),
+        (ConnectionResetError(), True, ("online", "no_response")),
+    ],
+)
+def test_failure_classification_keeps_network_and_backend_apart(exc, connected, expected):
+    assert classify(exc, connected) == expected
 
 
 def test_bad_credential_pauses_and_keeps_queue(db, backend, caplog):
@@ -145,7 +168,7 @@ def test_413_halves_the_batch(db, backend):
     assert up.upload_once() == "split"
     assert up.upload_once() == "split"
     assert up.upload_once() == "ok"
-    assert statuses(db, ids)[0] == "acknowledged"
+    assert statuses(db, ids).count("acknowledged") == 1
 
 
 def test_429_respects_retry_after(db, backend):
@@ -178,3 +201,16 @@ def test_byte_bound_splits_even_with_room_for_more_events(db, backend):
         pass
     sizes = [len(r["eventIds"]) for r in backend.requests]
     assert sum(sizes) == 6 and max(sizes) < 6
+
+
+def test_after_an_outage_the_newest_observation_goes_first(db, backend):
+    ids = add(db, 120)  # backlog from an outage
+    up, _, _ = make(db, backend.origin)
+    assert up.upload_once() == "ok"
+    first = backend.requests[0]["eventIds"]
+    assert first[0] == ids[-1]  # current position reaches families immediately
+    assert first[1:] == ids[: len(first) - 1]  # history still drains oldest-first
+    while up.upload_once() == "ok":
+        pass
+    sent = [e for r in backend.requests for e in r["eventIds"]]
+    assert sorted(sent) == sorted(ids)  # each event sent exactly once
