@@ -145,7 +145,7 @@ Recorded 2026-11-26 against the development backend, with fictional data only. T
 | D15 end during a write | `test_recorder.py` run ended between check and write; `tripEvents.test.ts` final sequence boundary | — | Pass |
 | D11, D12, D14 | Not in this milestone: route progress and alerts (Phase 8), queue limits, staff assignment workflow | — | Not run |
 
-Phone internet loss is a client state. Web shows a "Connection lost" banner and never calls the position fresh while disconnected (`live.test.ts`). iOS ages the position on screen; its explicit connection banner is tracked separately.
+Phone internet loss is a client state. Web shows a "Connection lost" banner and never calls the position fresh while disconnected (`live.test.ts`). iOS does the same: while the phone reconnects, the status card says "Reconnecting — Your phone lost its connection" and never calls the position fresh (`TrackViewModelTests`, `StatusCopyTests`, `LivePresentationTests` connection-lost cases). Starting up is not treated as lost.
 
 The live PR for this phase holds the drill transcripts and screenshots.
 
