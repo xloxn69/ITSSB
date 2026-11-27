@@ -258,7 +258,7 @@ Both QR purposes require current authorization and expiration checks. A backend 
 
 The signed-in identity is supplied through the authenticated client. The query verifies that this is the student's assignment or a permitted guardian relationship. It does not trust a caller-supplied role.
 
-Three queries make up the family tracking contract. TypeScript types live in `packages/contracts/src/tracking.ts`; canonical fixtures are generated to `packages/contracts/fixtures/*.json` and decoded by the backend and Swift tests.
+Three queries make up the family tracking contract. TypeScript types live in `packages/contracts/src/tracking.ts`; canonical fixtures are generated to `packages/contracts/fixtures/*.json` and decoded by the backend and Swift tests. The fixture route and the dev seed share one fictional demo path (`packages/contracts/src/demoRoute.ts`). Clients draw straight segments between path points and never snap them to roads, so the path is dense: 373 points at most 20 m apart along public roads. It was generated once from the public OSRM demo server; road data © OpenStreetMap contributors, Open Database License (ODbL 1.0).
 
 | Query | Args | Returns |
 | --- | --- | --- |
@@ -393,7 +393,7 @@ The staff web calls these Convex functions. The Pi and the iOS app never do, so 
 
 **Checks.** `checks` entries have a `code`, a `severity` (`blocking` or `warning`) and a `message`.
 - Blocking, which prevents approval: `too_few_points` (under 2), `too_many_points` (over 2000, `MAX_ROUTE_PATH_POINTS`), `invalid_coordinate`, `no_stops`.
-- Warnings, which the reviewer decides on: `path_gap` (consecutive points over 500 m apart) and `stop_off_path` (a stop over 150 m from every path point).
+- Warnings, which the reviewer decides on: `path_gap` (consecutive points over 100 m apart, `ROUTE_GAP_WARNING_M`; maps draw straight lines between points, so a longer gap cuts across blocks) and `stop_off_path` (a stop over 150 m from every path point).
 
 **Approval and version pinning.**
 - Approval copies the draft into a new immutable `routeVersions` row and its ordered `stops`, and sets `routes.currentVersionId`.

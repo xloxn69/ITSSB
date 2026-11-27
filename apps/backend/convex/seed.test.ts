@@ -1,5 +1,5 @@
 import { localDate } from "@itssb/contracts";
-import { demoTelemetryEvent } from "@itssb/contracts/fixtures";
+import { DEMO_ROUTE_PATH, demoTelemetryEvent } from "@itssb/contracts/fixtures";
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, internal } from "./_generated/api";
@@ -60,6 +60,10 @@ describe("seed.dev", () => {
     const t = convexTest(schema, modules);
     const seeded = await t.action(internal.seed.dev, {});
     const { ids, deviceSecret, driverGrant } = seeded;
+
+    // The seeded route is the dense road-following demo path, not a few corners.
+    const route = await t.run((ctx) => ctx.db.get(ids.routeVersionId));
+    expect(route?.path).toEqual(DEMO_ROUTE_PATH);
 
     // Secrets are returned once and stored only as hashes.
     const stored = JSON.stringify(await t.run(async (ctx) => [await ctx.db.query("devices").collect(), await ctx.db.query("driverGrants").collect()]));

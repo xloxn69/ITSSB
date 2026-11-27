@@ -10,26 +10,20 @@ enum PreviewFixtures {
 
     static let stop = AssignedStop(
         stopId: "demo_stop_003", label: "Oak & Pine",
-        coordinate: Coordinate(latitude: 34.105, longitude: -83.975), status: .unknown)
+        coordinate: Coordinate(latitude: 34.105971, longitude: -83.977736), status: .unknown)
 
     static let route = RouteGeometry(
         assignmentId: assignment.assignmentId,
         routeVersionId: "demo_route_version_003",
         routeLabel: "Route 17 Morning",
-        path: [
-            Coordinate(latitude: 34.092, longitude: -83.995),
-            Coordinate(latitude: 34.098, longitude: -83.99),
-            Coordinate(latitude: 34.1, longitude: -83.98),
-            Coordinate(latitude: 34.105, longitude: -83.975),
-            Coordinate(latitude: 34.111, longitude: -83.968)
-        ],
+        path: DemoRoute.path,
         assignedStop: stop)
 
     static func position(capturedSecondsAgo: TimeInterval, now: Date = Date()) -> LivePosition {
         let captured = now.addingTimeInterval(-capturedSecondsAgo)
         return LivePosition(
-            eventId: "5fe2a60d-7c11-45b9-995d-f50192adea42", latitude: 34.1, longitude: -83.98,
-            speedMps: 7.2, headingDegrees: 95, horizontalAccuracyM: nil,
+            eventId: "5fe2a60d-7c11-45b9-995d-f50192adea42", latitude: 34.112587, longitude: -83.99113,
+            speedMps: 7.2, headingDegrees: 130, horizontalAccuracyM: nil,
             capturedAt: captured, receivedAt: captured.addingTimeInterval(0.4))
     }
 

@@ -1,3 +1,4 @@
+import { DEMO_ROUTE_PATH, DEMO_ROUTE_POINTS } from "./demoRoute.js";
 import {
   type ServerTimeResult,
   type MyAssignmentsResult,
@@ -47,18 +48,17 @@ export const myRunReady: MyRunResult = {
       eventId: "5fe2a60d-7c11-45b9-995d-f50192adea42",
       capturedAtMs: 1795609085000,
       receivedAtMs: 1795609085400,
-      latitude: 34.1,
-      longitude: -83.98,
+      ...DEMO_ROUTE_POINTS.bus,
       speedMps: 7.2,
-      headingDegrees: 95.0,
+      // Direction of travel along the demo path at this point.
+      headingDegrees: 130.0,
       horizontalAccuracyM: null,
     },
     nextStopId: "demo_stop_003",
     assignedStop: {
       stopId: "demo_stop_003",
       label: "Oak & Pine",
-      latitude: 34.105,
-      longitude: -83.975,
+      ...DEMO_ROUTE_POINTS.assignedStop,
       status: "upcoming",
     },
     eta: {
@@ -92,8 +92,7 @@ export const myRunReadyNoPosition: MyRunResult = {
     assignedStop: {
       stopId: "demo_stop_003",
       label: "Oak & Pine",
-      latitude: 34.105,
-      longitude: -83.975,
+      ...DEMO_ROUTE_POINTS.assignedStop,
       status: "unknown",
     },
     eta: null,
@@ -118,8 +117,7 @@ export const myRunStale: MyRunResult = {
       eventId: "0b8e7f52-3f0d-4c55-9a43-1f7f3c0f2a11",
       capturedAtMs: 1795608785000,
       receivedAtMs: 1795608785400,
-      latitude: 34.098,
-      longitude: -83.99,
+      ...DEMO_ROUTE_POINTS.earlierBus,
       speedMps: null,
       headingDegrees: null,
       horizontalAccuracyM: 12.5,
@@ -128,8 +126,7 @@ export const myRunStale: MyRunResult = {
     assignedStop: {
       stopId: "demo_stop_003",
       label: "Oak & Pine",
-      latitude: 34.105,
-      longitude: -83.975,
+      ...DEMO_ROUTE_POINTS.assignedStop,
       status: "unknown",
     },
     eta: null,
@@ -159,18 +156,11 @@ export const myRouteReady: MyRouteResult = {
   assignmentId: "demo_assignment_001",
   routeVersionId: "demo_route_version_003",
   routeLabel: "Route 17 Morning",
-  path: [
-    { latitude: 34.092, longitude: -83.995 },
-    { latitude: 34.098, longitude: -83.99 },
-    { latitude: 34.1, longitude: -83.98 },
-    { latitude: 34.105, longitude: -83.975 },
-    { latitude: 34.111, longitude: -83.968 },
-  ],
+  path: [...DEMO_ROUTE_PATH],
   assignedStop: {
     stopId: "demo_stop_003",
     label: "Oak & Pine",
-    latitude: 34.105,
-    longitude: -83.975,
+    ...DEMO_ROUTE_POINTS.assignedStop,
   },
 };
 

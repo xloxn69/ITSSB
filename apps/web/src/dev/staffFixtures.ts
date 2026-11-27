@@ -45,7 +45,7 @@ function draft(
 const gapWarning: RouteCheck = {
   code: "path_gap",
   severity: "warning",
-  message: "1 gap longer than 500 m in the recording.",
+  message: "1 gap longer than 100 m in the recording.",
 };
 const noStops: RouteCheck = { code: "no_stops", severity: "blocking", message: "The route has no stops." };
 

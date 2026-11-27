@@ -21,3 +21,4 @@ export const demoTelemetryEvent: TelemetryEvent = {
 
 export * from "./trackingFixtures.js";
 export * from "./tripEventFixtures.js";
+export * from "./demoRoute.js";

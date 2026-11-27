@@ -1,3 +1,4 @@
+import { DEMO_ROUTE_PATH, DEMO_ROUTE_POINTS } from "@itssb/contracts/fixtures";
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
@@ -9,8 +10,11 @@ import { UNLINKED_PREFIX } from "./users";
 
 /**
  * Fictional first-run data for a DEVELOPMENT deployment (docs/15 §5): one
- * route version with two stops, one driver, one bus/device, one student
- * with an approved assignment, and one guardian with an approved link.
+ * route version with two stops on a dense path that follows public roads,
+ * one driver, one bus/device, one student with an approved assignment, and
+ * one guardian with an approved link. The path is the shared demo route
+ * (© OpenStreetMap contributors, ODbL, via the OSRM demo server; see
+ * packages/contracts/src/demoRoute.ts).
  *
  * Runnable only where the deployment variable `ITSSB_ALLOW_DEV_SEED` is
  * `true` (set it on the dev deployment only), and only into an empty
@@ -126,23 +130,19 @@ export const insert = internalMutation({
     // Fictional people and places only (AGENTS.md).
     const routeVersionId = await ctx.db.insert("routeVersions", {
       label: "Route 17 Morning (demo)",
-      path: [
-        { latitude: 34.092, longitude: -83.995 },
-        { latitude: 34.098, longitude: -83.986 },
-        { latitude: 34.105, longitude: -83.975 },
-      ],
+      // Dense road-following path from OpenStreetMap data via OSRM (ODbL);
+      // source and licence in packages/contracts/src/demoRoute.ts.
+      path: [...DEMO_ROUTE_PATH],
     });
     const firstStopId = await ctx.db.insert("stops", {
       routeVersionId,
       label: "Maple & Elm (demo)",
-      latitude: 34.098,
-      longitude: -83.986,
+      ...DEMO_ROUTE_POINTS.firstStop,
     });
     const assignedStopId = await ctx.db.insert("stops", {
       routeVersionId,
       label: "Oak & Pine (demo)",
-      latitude: 34.105,
-      longitude: -83.975,
+      ...DEMO_ROUTE_POINTS.assignedStop,
     });
     const stopIds = [firstStopId, assignedStopId];
     const user = (key: string, role: "driver" | "family", displayName: string) =>

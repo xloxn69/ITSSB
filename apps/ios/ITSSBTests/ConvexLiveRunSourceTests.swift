@@ -161,7 +161,7 @@ final class ConvexLiveRunSourceTests: XCTestCase {
         guard case let .ready(route)? = try await first(source.route(assignmentId: "x")) else {
             return XCTFail("expected route")
         }
-        XCTAssertEqual(route.path.count, 5)
+        XCTAssertEqual(route.path.count, 373)
         guard case let .ready(list)? = try await first(source.assignments()) else { return XCTFail("expected list") }
         XCTAssertEqual(list.count, 1)
     }
