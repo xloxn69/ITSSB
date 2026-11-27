@@ -5,10 +5,11 @@ import {
   type MyRouteResult,
   type MyRunResult,
   SCHEMA_VERSION,
+  type ServerTimeResult,
 } from "@itssb/contracts";
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
-import { type QueryCtx, query } from "./_generated/server";
+import { mutation, type QueryCtx, query } from "./_generated/server";
 import { getTrackableAssignment, getUser, listTrackableAssignments } from "./lib/authz";
 import { runState } from "./schema";
 
@@ -33,6 +34,17 @@ const gpsStatus = v.union(v.literal("valid"), v.literal("no_fix"), v.literal("re
 function denied(reason: AccessUnavailableReason): AccessUnavailable {
   return { schemaVersion: SCHEMA_VERSION, status: "access_unavailable", serverNowMs: Date.now(), reason };
 }
+
+/**
+ * Uncached server time (docs/08 §8.1). A mutation, so it is never served
+ * from the query cache the way a query's `serverNowMs` can be. It reads and
+ * writes nothing, so it needs no sign-in.
+ */
+export const serverTime = mutation({
+  args: {},
+  returns: v.object({ schemaVersion: v.literal(SCHEMA_VERSION), serverNowMs: v.number() }),
+  handler: async (): Promise<ServerTimeResult> => ({ schemaVersion: SCHEMA_VERSION, serverNowMs: Date.now() }),
+});
 
 export const myAssignments = query({
   args: {},

@@ -179,6 +179,17 @@ describe("tracking.myRun", () => {
   });
 });
 
+describe("tracking.serverTime", () => {
+  it("returns the current server time without sign-in", async () => {
+    const t = convexTest(schema, modules);
+    const before = Date.now();
+    const r = await t.mutation(api.tracking.serverTime, {});
+    expect(r.schemaVersion).toBe(1);
+    expect(r.serverNowMs).toBeGreaterThanOrEqual(before);
+    expect(r.serverNowMs).toBeLessThanOrEqual(Date.now());
+  });
+});
+
 describe("tracking.myRoute", () => {
   it("returns the approved path and stop in the docs/08 shape", async () => {
     const { t, assignmentId, routeVersionId } = await setup();

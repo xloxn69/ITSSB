@@ -14,6 +14,14 @@ struct AccessUnavailableDTO: Decodable {
     let reason: String
 }
 
+// MARK: tracking:serverTime
+
+/// Uncached server time from a mutation (docs/08 §8.1).
+struct ServerTimeDTO: Decodable {
+    @ConvexFloat var schemaVersion: Double
+    @ConvexFloat var serverNowMs: Double
+}
+
 // MARK: tracking:myAssignments
 
 enum MyAssignmentsDTO: Decodable {

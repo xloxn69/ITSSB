@@ -26,6 +26,18 @@ export interface AccessUnavailable {
   reason: AccessUnavailableReason;
 }
 
+// MARK: tracking:serverTime
+
+/**
+ * Uncached server time (docs/08 §8.1). A mutation, so it is never served
+ * from the query cache; clients set their clock offset from it before they
+ * call any position fresh.
+ */
+export interface ServerTimeResult {
+  schemaVersion: typeof SCHEMA_VERSION;
+  serverNowMs: number;
+}
+
 // MARK: tracking:myAssignments
 
 export interface AssignmentSummary {

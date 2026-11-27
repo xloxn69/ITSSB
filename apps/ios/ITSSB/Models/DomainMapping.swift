@@ -78,6 +78,27 @@ enum DomainMapping {
         )
     }
 
+    // MARK: serverTime
+
+    /// A sample whose round trip took longer than this is too uncertain to verify time.
+    static let maxServerTimeRoundTrip: TimeInterval = 5
+
+    /// A verified clock from one `tracking:serverTime` round trip. The server's reading is
+    /// pinned to the monotonic midpoint, with half the round trip as uncertainty; a slow
+    /// round trip is rejected, so the app stays unverified (never fresh) instead.
+    static func verifiedClock(from dto: ServerTimeDTO, sentAt: ContinuousClock.Instant,
+                              receivedAt: ContinuousClock.Instant, receivedWallTime: Date) throws -> ServerClock {
+        try checkVersion(dto.schemaVersion)
+        let roundTrip = sentAt.duration(to: receivedAt).seconds
+        guard roundTrip >= 0, roundTrip <= maxServerTimeRoundTrip else {
+            throw MappingError.invalidField("serverTime.roundTrip")
+        }
+        return ServerClock(serverNow: try timestamp(dto.serverNowMs, field: "serverNowMs"),
+                           receivedAt: receivedWallTime, isVerified: true,
+                           monotonicAt: sentAt.advanced(by: .seconds(roundTrip / 2)),
+                           uncertainty: roundTrip / 2)
+    }
+
     // MARK: myRoute
 
     static func route(from dto: MyRouteDTO) throws -> RouteSnapshot {

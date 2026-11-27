@@ -1,4 +1,5 @@
 import {
+  type ServerTimeResult,
   type MyAssignmentsResult,
   type MyRouteResult,
   type MyRunResult,
@@ -180,6 +181,8 @@ export const myRouteAccessUnavailable: MyRouteResult = {
   reason: "unauthenticated",
 };
 
+export const serverTime: ServerTimeResult = { schemaVersion: 1, serverNowMs: SERVER_NOW_MS };
+
 /** The provisional freshness policy, so the Swift constants can be checked against it. */
 export const freshnessPolicy = {
   positionAgingAfterMs: POSITION_AGING_AFTER_MS,
@@ -197,4 +200,5 @@ export const trackingFixtureFiles = {
   "myRoute.ready": myRouteReady,
   "myRoute.accessUnavailable": myRouteAccessUnavailable,
   freshnessPolicy,
+  serverTime,
 } as const;
