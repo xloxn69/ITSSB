@@ -278,16 +278,20 @@ The local PIN verifier needs a suitable password-hashing implementation, rate li
 
 ## 12. Local API and the touchscreen
 
-Proposed local endpoints can include:
+Local endpoints. Built ones are marked; the rest are still proposals:
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /health` | Minimal process readiness without secret/roster disclosure. |
-| `GET /api/status` | Authorized operating snapshot for the kiosk. |
-| `POST /api/session/unlock` | Unlock an already authorized driver session. |
-| `POST /api/session/lock` | Clear the driver session and hide protected content. |
-| `POST /api/recordings` | Begin an authorized route draft recording. |
-| `POST /api/recordings/{id}/stops` | Mark/edit a draft stop while safely stopped. |
+| `GET /health` | Built. Minimal process readiness without secret/roster disclosure. |
+| `GET /api/session` | Built. Kiosk session cookie, CSRF token, and provisioned driver names. |
+| `GET /api/status` | Built. Authorized operating snapshot for the kiosk: health plus motion, driver session, capabilities, and the recording. |
+| `POST /api/session/unlock` | Built. Unlock a provisioned driver with a PIN (scrypt hash, device-wide lockout). |
+| `POST /api/session/lock` | Built. Clear the driver session and hide protected content. |
+| `POST /api/motion/parked` | Built. Driver confirms a safe stop; refused unless a fresh fix shows the bus stopped. |
+| `POST /api/recordings` | Built. Begin an authorized route draft recording. |
+| `POST /api/recordings/{id}/stops` | Built. Mark a draft stop at the device's own fix while parked. |
+| `POST /api/recordings/{id}/stops/{stopId}` | Built. Rename, reorder, or remove a draft stop while parked. |
+| `POST /api/recordings/{id}/finish` | Built. Save the draft on the device (not a submission). |
 | `POST /api/runs/start` | Submit an idempotent online trip start. |
 | `POST /api/runs/{runId}/end` | Save and synchronize an end command. |
 | `POST /api/commands` | Submit a typed, validated driver operation. |

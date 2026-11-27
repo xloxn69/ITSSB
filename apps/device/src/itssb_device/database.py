@@ -9,10 +9,11 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from .drafts_schema import DRAFTS_MIGRATION
 from .models import Fix, TelemetryEvent
 
 MIGRATIONS: list[str] = [
@@ -53,11 +54,22 @@ MIGRATIONS: list[str] = [
         created_at_ms INTEGER NOT NULL
     );
     """,
+    # 3: route recording drafts with ordered stops (docs/05 §6)
+    DRAFTS_MIGRATION,
 ]
 
 
 class RunNotActive(Exception):
     pass
+
+
+class GuardRefused(Exception):
+    """A write's precondition (for example Parked) no longer holds once the
+    write lock is held; the transaction is rolled back."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class Database:
@@ -67,6 +79,9 @@ class Database:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.execute("PRAGMA synchronous=FULL")
+        # Optional check run right after BEGIN IMMEDIATE, i.e. after any wait
+        # for another writer. Raise GuardRefused to roll the write back.
+        self.write_guard: Callable[[], None] | None = None
         self._migrate()
 
     def close(self) -> None:
@@ -76,6 +91,8 @@ class Database:
     def transaction(self) -> Iterator[sqlite3.Connection]:
         self.conn.execute("BEGIN IMMEDIATE")
         try:
+            if self.write_guard is not None:
+                self.write_guard()
             yield self.conn
         except BaseException:
             self.conn.execute("ROLLBACK")

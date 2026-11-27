@@ -47,6 +47,12 @@ class LatestFixHolder:
         with self._lock:
             return self._value
 
+    def lost(self) -> None:
+        """GPSD reported no usable fix (or lost the receiver): the last fix
+        stops being current right away, not only when it ages out."""
+        with self._lock:
+            self._value = None
+
 
 class LineBuffer:
     """Splits a byte stream into lines, discarding any line over the limit
@@ -105,6 +111,7 @@ class GpsReader(threading.Thread):
                 self._session()
                 delay = 1.0  # clean EOF after a working session: retry promptly
             except OSError as exc:
+                self.latest.lost()
                 self.board.gpsd_state("unreachable", type(exc).__name__)
                 log.warning(
                     "gpsd %s:%s unreachable (%s); retry in %.0fs",
@@ -114,6 +121,7 @@ class GpsReader(threading.Thread):
                     delay,
                 )
             else:
+                self.latest.lost()
                 self.board.gpsd_state("unreachable", "connection closed")
                 log.warning("gpsd closed the connection; reconnecting")
             if self.stop_event.wait(delay):
@@ -149,6 +157,7 @@ class GpsReader(threading.Thread):
             count = len(devices) if isinstance(devices, list) else 0
             self.board.gps_receivers(count)
             if count == 0:
+                self.latest.lost()
                 self._note("receiver missing")
         elif cls == "DEVICE" and sock is not None:
             # A receiver was added or removed; ask for the full list again.
@@ -157,11 +166,13 @@ class GpsReader(threading.Thread):
             try:
                 fix = fix_from_tpv(report)
             except Rejected as reason:
+                self.latest.lost()
                 self.board.gps_rejected(str(reason))
                 self._note(str(reason))
                 return
             reason = self._implausible(fix.captured_at_ms)
             if reason:
+                self.latest.lost()
                 self.board.gps_rejected(reason)
                 self._note(reason)
                 return

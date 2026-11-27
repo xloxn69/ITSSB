@@ -7,6 +7,11 @@ per second. `--mode fix` reports a fictional moving position stamped with the
 current time; `nofix` reports mode 1; `nodevice` reports no receivers and then
 stays silent, like a real GPSD with the USB receiver unplugged.
 
+`--control FILE` switches behavior live for bench demos: the file holds
+`drive` (moving fix), `stop` (fix at rest), or `nofix`, re-read every tick.
+The fictional position only advances while driving, so stop-and-go looks
+like one continuous trip.
+
 It exists so the outbox/restart path can be exercised indoors, where a real
 receiver correctly reports no fix. Never point a production device at it.
 """
@@ -32,8 +37,11 @@ class FakeGpsd(socketserver.ThreadingTCPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, port: int = 0, mode: str = "fix", interval_s: float = 1.0) -> None:
+    def __init__(
+        self, port: int = 0, mode: str = "fix", interval_s: float = 1.0, control: str | None = None
+    ) -> None:
         self.mode = mode
+        self.control = control
         self.interval_s = interval_s
         self.stopping = threading.Event()
         super().__init__(("127.0.0.1", port), _Handler)
@@ -70,20 +78,39 @@ class _Handler(socketserver.StreamRequestHandler):
             self._send({"class": "WATCH", "enable": True, "json": True})
             step = 0
             while not srv.stopping.is_set():
-                if srv.mode == "fix":
+                mode = srv.mode
+                if srv.control:
+                    with contextlib.suppress(OSError), open(srv.control) as f:
+                        mode = {"drive": "fix", "stop": "stopped"}.get(f.read().strip(), "nofix")
+                if mode == "stopped":
                     self._send(
                         {
                             "class": "TPV",
                             "mode": 3,
                             "time": _now_iso(),
                             "lat": DEMO_LAT + step * 1e-5,
-                            "lon": DEMO_LON,
+                            "lon": DEMO_LON + (step // 40) * 2e-4,
+                            "speed": 0.0,
+                            "track": 0.0,
+                            "eph": 6.0,
+                        }
+                    )
+                    srv.stopping.wait(srv.interval_s)
+                    continue
+                if mode == "fix":
+                    self._send(
+                        {
+                            "class": "TPV",
+                            "mode": 3,
+                            "time": _now_iso(),
+                            "lat": DEMO_LAT + step * 1e-5,
+                            "lon": DEMO_LON + (step // 40) * 2e-4,
                             "speed": 5.0,
                             "track": 0.0,
                             "eph": 6.0,
                         }
                     )
-                elif srv.mode == "nofix":
+                elif mode == "nofix":
                     self._send({"class": "TPV", "mode": 1, "time": _now_iso()})
                 step += 1
                 srv.stopping.wait(srv.interval_s)
@@ -95,8 +122,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="fake_gpsd", description=__doc__.splitlines()[0])
     parser.add_argument("--port", type=int, default=2948)
     parser.add_argument("--mode", choices=["fix", "nofix", "nodevice"], default="fix")
+    parser.add_argument("--control", help="file holding drive|stop|nofix, re-read every tick")
     args = parser.parse_args(argv)
-    server = FakeGpsd(args.port, args.mode)
+    server = FakeGpsd(args.port, args.mode, control=args.control)
     print(f"fake gpsd ({args.mode}, FICTIONAL data) on 127.0.0.1:{server.port}", flush=True)
     with contextlib.suppress(KeyboardInterrupt):
         server.serve_forever()

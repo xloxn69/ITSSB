@@ -24,6 +24,9 @@ from urllib.parse import urlsplit
 log = logging.getLogger(__name__)
 
 DEFAULT_ENV_FILE = Path("/etc/itssb/device.env")
+DEFAULT_DRIVERS_FILE = Path("/etc/itssb/drivers.json")
+# Built driver UI (apps/driver-ui `bun run build` output) shipped inside the package.
+DEFAULT_DRIVER_UI_DIR = Path(__file__).resolve().parent / "static"
 LOOPBACK_NAMES = {"localhost"}
 
 
@@ -47,6 +50,8 @@ class Config:
     device_token: str | None = field(default=None, repr=False)
     log_level: str = "INFO"
     log_file: Path | None = None
+    drivers_file: Path = DEFAULT_DRIVERS_FILE
+    driver_ui_dir: Path = DEFAULT_DRIVER_UI_DIR
 
     @property
     def upload_enabled(self) -> bool:
@@ -63,6 +68,8 @@ class Config:
             "deviceApiOrigin": self.device_api_origin,
             "deviceToken": "<set>" if self.device_token else "<missing>",
             "logFile": str(self.log_file) if self.log_file else None,
+            "driversFile": str(self.drivers_file),
+            "driverUiDir": str(self.driver_ui_dir),
         }
 
 
@@ -200,4 +207,6 @@ def load_config(environ: Mapping[str, str] | None = None, env_file: Path | None 
         device_token=token,
         log_level=level,
         log_file=Path(log_file) if log_file else None,
+        drivers_file=Path(env.get("ITSSB_DRIVERS_FILE") or DEFAULT_DRIVERS_FILE),
+        driver_ui_dir=Path(env.get("ITSSB_DRIVER_UI_DIR") or DEFAULT_DRIVER_UI_DIR),
     )

@@ -16,13 +16,60 @@ Python service that runs on the bus Raspberry Pi. Spec:
 | `uploader.py` | `POST /device/v1/telemetry`: bounded batches (50 events / 128 KiB), verified TLS, timeouts, per-event results, backoff + jitter, 401/403/413/429 handling, TCP network probe |
 | `trips.py` | Online run start flow behind a `RunStarter` interface; ships a stub because the backend has no `/device/v1/trip-events` yet |
 | `status.py` | Thread-safe health snapshot: GPS, network, backend, outbox, run kept separate |
-| `api.py` | Local API on `127.0.0.1:8765`: `GET /health` (JSON) and `GET /` (status page) |
+| `api.py` | Local API on `127.0.0.1:8765`: `GET /health` (JSON), the built driver UI (or a status page), and `/api/*` |
+| `driver_api.py` | Driver touchscreen routes: session, unlock, parked, route recording; static UI files |
+| `local_auth.py` | Origin/CSRF/session checks for the local API; scrypt driver PINs with a device-wide lockout |
+| `motion.py` | Moving / stopped / unknown from fresh fixes; the driver-confirmed **Parked** state |
+| `drafts.py` | Route recording into a local draft: sampled points with gap flags, service-ordered stops |
 | `service.py` | One process, one writer per thread, SIGTERM/SIGINT clean shutdown, bounded logs |
 | `devtools/fake_gpsd.py` | Fake GPSD with **fictional** data for tests and indoor demos |
 | `devtools/fake_backend.py` | Local fake of the telemetry endpoint with outage modes (`down`, `drop_response`, `partial`, ...) |
 
 Still to build (see [roadmap](../../docs/15_BUILD_ROADMAP.md)): the HTTP
 `RunStarter` (needs the backend's trip-events endpoint).
+
+## Driver touchscreen
+
+The service serves the built `apps/driver-ui` from `src/itssb_device/static/`
+(gitignored; build it with `bun run build:device` in `apps/driver-ui`, or
+point `ITSSB_DRIVER_UI_DIR` at a build). Without it, `GET /` shows the plain
+status page.
+
+Local API (all on `127.0.0.1:8765`, same origin as the UI):
+
+| Endpoint | Needs | Does |
+|---|---|---|
+| `GET /api/session` | same-origin | Kiosk session cookie, CSRF token, provisioned driver names (never hashes) |
+| `GET /api/status` | session | `/health` plus `motion`, `session`, `capabilities`, and the recording (unlocked only) |
+| `POST /api/session/unlock` `{driverId, pin}` | session + CSRF, not moving | PIN check; 5 wrong PINs lock the device for 30 s, doubling to 15 min |
+| `POST /api/session/lock` | session + CSRF | Ends the driver session |
+| `POST /api/motion/parked` | driver | Confirms Parked; refused unless a fresh fix shows the bus stopped |
+| `GET /api/recordings`, `GET /api/recordings/{id}` | driver | Drafts on this device; one draft with ordered stops and a bounded path |
+| `POST /api/recordings` `{requestId, name, direction}` | driver + parked + fix, no active run | Starts recording; same `requestId` returns the same draft |
+| `POST /api/recordings/{id}/stops` `{requestId, name?}` | driver + parked + fix | Marks a stop at the device's own fix (request coordinates are ignored) |
+| `POST /api/recordings/{id}/stops/{stopId}` `{name}` / `{position}` / `{remove: true}` | driver + parked | Renames, reorders, or removes a stop |
+| `POST /api/recordings/{id}/finish` | driver + parked | Saves the draft on this device. It is **not submitted**: the backend has no route-draft endpoint yet |
+
+Every `POST` needs `Origin: http://127.0.0.1:8765` (or `localhost`), a JSON
+body, the `itssb_kiosk` cookie, and `X-ITSSB-CSRF`. Moving or unknown motion
+(no fresh fix) clears Parked; the driver confirms it again after stopping.
+Points keep recording while driving.
+
+Drivers come from `ITSSB_DRIVERS_FILE` (default `/etc/itssb/drivers.json`):
+
+```json
+{"drivers": [{"driverId": "drv_demo", "displayName": "Demo Driver", "pinHash": "scrypt$16384$8$1$..."}]}
+```
+
+No file means nobody can unlock. There is no default or override PIN.
+
+Bench demo with the fake GPSD switched live (`drive`, `stop`, `nofix`):
+
+```sh
+echo stop > var/gps
+uv run python -m itssb_device.devtools.fake_gpsd --port 2948 --control var/gps
+ITSSB_GPSD_PORT=2948 ITSSB_DRIVERS_FILE=var/drivers.json uv run itssb-device run
+```
 
 ## Install on the Pi
 
@@ -38,6 +85,7 @@ sudo.
 uv run itssb-device run                       # the service (default)
 uv run itssb-device watch                     # print GPSD fixes
 uv run itssb-device outbox                    # outbox rows: eventId, status, attempts (no coordinates)
+echo 482916 | uv run itssb-device hash-pin   # scrypt hash for drivers.json (fictional PIN)
 uv run itssb-device fixture-run start         # DEV ONLY: fictional local run "demo_run_001"
 uv run itssb-device fixture-run end
 ```

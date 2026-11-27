@@ -26,7 +26,11 @@ from pathlib import Path
 from .api import LocalApiServer
 from .config import Config
 from .database import Database
-from .gps_reader import GpsReader, LatestFixHolder
+from .drafts import DraftSamplerThread
+from .driver_api import DriverApi
+from .gps_reader import GpsReader
+from .local_auth import SessionManager, allowed_origins, load_drivers
+from .motion import MotionJudge, ObservedFixHolder
 from .recorder import Recorder, RecorderThread
 from .status import StatusBoard
 from .uploader import UploaderThread
@@ -70,7 +74,9 @@ class Service:
         self.boot_id = str(uuid.uuid4())
         self.stop_event = threading.Event()
         self.board = StatusBoard(self.boot_id, upload_enabled=config.upload_enabled)
-        self.latest = LatestFixHolder()
+        self.latest = ObservedFixHolder()
+        self.judge = MotionJudge(self.latest)
+        self.latest.judge = self.judge
         self._threads: list[threading.Thread] = []
         self.api: LocalApiServer | None = None
 
@@ -91,7 +97,22 @@ class Service:
         self.board.outbox(counts)
         log.info("recovered run=%s outbox=%s", run, counts)
 
-        self.api = LocalApiServer(cfg.local_api_host, cfg.local_api_port, self.board)
+        drivers = load_drivers(cfg.drivers_file)
+        log.info("driver unlock: %d driver(s) provisioned", len(drivers))
+        driver_api = DriverApi(
+            self.board,
+            SessionManager(drivers),
+            self.judge,
+            self.latest,
+            cfg.database_path,
+            cfg.driver_ui_dir,
+            allowed_origins(cfg.local_api_port),
+        )
+        if not driver_api.serves_ui:
+            log.warning("driver UI not found at %s; serving the status page", cfg.driver_ui_dir)
+        self.api = LocalApiServer(
+            cfg.local_api_host, cfg.local_api_port, self.board, driver_api=driver_api
+        )
         log.info("local api on http://%s:%s", cfg.local_api_host, cfg.local_api_port)
 
         self._threads.append(
@@ -106,6 +127,7 @@ class Service:
                 self.stop_event,
             )
         )
+        self._threads.append(DraftSamplerThread(cfg.database_path, self.latest, self.stop_event))
         if cfg.upload_enabled:
             self._threads.append(UploaderThread(cfg, self.board, self.stop_event))
         else:

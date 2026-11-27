@@ -10,7 +10,8 @@
     "build": "vite build",
     "lint": "oxlint src",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:device": "vite build --outDir ../device/src/itssb_device/static --emptyOutDir"
   },
   "dependencies": {
     "@itssb/ui": "workspace:*"
