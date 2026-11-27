@@ -3,7 +3,7 @@ import {
   type TelemetryEvent,
   validateTelemetryEvent,
 } from "@itssb/contracts";
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx } from "./_generated/server";
 
@@ -33,6 +33,10 @@ export const ingestBatch = internalMutation({
     nowMs: v.number(),
   },
   handler: async (ctx, { deviceId, events, nowMs }): Promise<EventResult[]> => {
+    // The HTTP action looked the credential up in an earlier transaction.
+    // Recheck here so a device revoked in between cannot commit (docs/07 §6).
+    const device = await ctx.db.get(deviceId);
+    if (!device || device.revoked) throw new ConvexError({ code: "DEVICE_NOT_AUTHORIZED" });
     const results: EventResult[] = [];
     for (const raw of events) {
       results.push(await ingestOne(ctx, deviceId, raw, nowMs));
