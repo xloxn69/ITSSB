@@ -186,6 +186,10 @@ class SessionManager:
         self._sessions: OrderedDict[str, KioskSession] = OrderedDict()
         self._failures = 0
         self._locked_until: float | None = None
+        # One PIN attempt at a time: the lockout check, the hash, and the
+        # counter update happen together, so parallel guesses can't race past
+        # the limit or an in-flight guess finish during a lockout.
+        self._attempt_lock = threading.Lock()
 
     def new_session(self) -> KioskSession:
         s = KioskSession(secrets.token_urlsafe(32), secrets.token_urlsafe(32))
@@ -220,6 +224,10 @@ class SessionManager:
             return max(0.0, self._locked_until - self._mono())
 
     def unlock(self, session: KioskSession, driver_id: object, pin: object) -> str:
+        with self._attempt_lock:
+            return self._unlock(session, driver_id, pin)
+
+    def _unlock(self, session: KioskSession, driver_id: object, pin: object) -> str:
         if not isinstance(driver_id, str) or not valid_pin_format(pin):
             return UnlockResult.BAD_INPUT
         if self.lockout_remaining_s() > 0:

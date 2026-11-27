@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
 
-from .database import Database
+from .database import Database, GuardRefused
 from .drafts import DraftError, Drafts
 from .gps_reader import LatestFixHolder
 from .local_auth import (
@@ -160,6 +160,8 @@ class DriverApi:
             return _error(HTTPStatus.BAD_REQUEST, "BAD_JSON", "Body must be a JSON object.")
         try:
             return self._post(path, session, data)
+        except GuardRefused as exc:
+            return _error(HTTPStatus.CONFLICT, exc.code, str(exc))
         except DraftError as exc:
             status = HTTPStatus.NOT_FOUND if exc.code == "NOT_FOUND" else HTTPStatus.CONFLICT
             if exc.code.startswith("BAD_"):
@@ -317,6 +319,9 @@ class DriverApi:
             )
 
         with self._db() as db:
+            # Parked again AFTER any wait for the SQLite writer: the bus may
+            # have moved while this request was queued.
+            db.write_guard = self._require_parked
             drafts = Drafts(db)
             if path == "/api/recordings":
                 if db.active_run_id() is not None:
@@ -360,6 +365,10 @@ class DriverApi:
             if m:
                 return _json(HTTPStatus.OK, drafts.finish(m.group(1), self.now_ms()))
         return _error(HTTPStatus.NOT_FOUND, "NOT_FOUND", "Not found.")
+
+    def _require_parked(self) -> None:
+        if not self.judge.parked():
+            raise GuardRefused("NOT_PARKED", "The bus moved. Stop safely and confirm parked again.")
 
     def _db(self) -> _DbContext:
         return _DbContext(self.database_path)

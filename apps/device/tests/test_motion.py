@@ -99,3 +99,54 @@ def test_a_fix_gap_nobody_saw_still_unparks():
     clock.t += 30  # no fixes for 30 s (tunnel, unplugged), and no reads
     latest.set(fix(0.0), clock.t)
     assert judge.parked() is False
+
+
+def test_gpsd_no_fix_report_ends_parked_immediately():
+    """Review finding: a mode-1 report left the last stopped fix authoritative,
+    so Parked (and editing) survived until the fix aged out."""
+    import json
+    import threading
+
+    from itssb_device.gps_reader import GpsReader
+    from itssb_device.status import StatusBoard
+
+    clock, latest, judge = setup()
+    reader = GpsReader(
+        "127.0.0.1",
+        1,
+        StatusBoard("b", upload_enabled=False),
+        latest,
+        threading.Event(),
+        monotonic=clock,
+    )
+    latest.set(fix(0.0), clock.t)
+    assert judge.confirm_parked() is True
+    clock.t += 1
+    reader.handle_line(json.dumps({"class": "TPV", "mode": 1}).encode())
+    assert latest.get() is None
+    assert judge.parked() is False
+    # A stopped fix returning a moment later does not restore it.
+    latest.set(fix(0.0), clock.t + 1)
+    assert judge.parked() is False
+
+
+def test_receiver_unplugged_ends_parked():
+    import json
+    import threading
+
+    from itssb_device.gps_reader import GpsReader
+    from itssb_device.status import StatusBoard
+
+    clock, latest, judge = setup()
+    reader = GpsReader(
+        "127.0.0.1",
+        1,
+        StatusBoard("b", upload_enabled=False),
+        latest,
+        threading.Event(),
+        monotonic=clock,
+    )
+    latest.set(fix(0.0), clock.t)
+    judge.confirm_parked()
+    reader.handle_line(json.dumps({"class": "DEVICES", "devices": []}).encode())
+    assert judge.parked() is False

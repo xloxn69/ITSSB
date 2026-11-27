@@ -156,3 +156,26 @@ def test_drivers_file_rejects_plaintext_and_missing(tmp_path, demo_hash):
     entry = {"driverId": "drv_demo", "displayName": "Demo Driver", "pinHash": demo_hash}
     good.write_text(json.dumps({"drivers": [entry]}))
     assert load_drivers(good)["drv_demo"].display_name == "Demo Driver"
+
+
+def test_parallel_wrong_pins_cannot_race_past_the_lockout(demo_hash):
+    """Review finding: the lockout check ran outside the attempt, so a burst of
+    parallel guesses all reached the hash check."""
+    import threading
+
+    m = manager(demo_hash)
+    s = m.new_session()
+    start = threading.Barrier(12)
+    results: list[str] = []
+
+    def guess() -> None:
+        start.wait()
+        results.append(m.unlock(s, "drv_demo", "111111"))
+
+    threads = [threading.Thread(target=guess) for _ in range(12)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert results.count(UnlockResult.WRONG) == FREE_ATTEMPTS
+    assert results.count(UnlockResult.LOCKED_OUT) == 12 - FREE_ATTEMPTS

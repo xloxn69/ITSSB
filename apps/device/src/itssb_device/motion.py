@@ -118,3 +118,8 @@ class ObservedFixHolder(LatestFixHolder):
         super().set(fix, received_mono)
         if self.judge is not None:
             self.judge.feed(fix, received_mono)
+
+    def lost(self) -> None:
+        super().lost()
+        if self.judge is not None:
+            self.judge.clear()  # unknown motion: Parked ends now

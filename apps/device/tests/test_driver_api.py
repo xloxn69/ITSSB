@@ -374,3 +374,41 @@ def test_static_serves_the_ui_with_a_csp(env):
     page = env.api.handle("GET", "/", {}, b"")
     assert "frame-ancestors 'none'" in dict(page.headers)["Content-Security-Policy"]
     assert env.api.handle("POST", "/", {}, b"").status == 405
+
+
+def test_a_write_queued_behind_another_writer_rechecks_parked(env):
+    """Review finding: a stop request that passed the Parked check and then
+    waited for the SQLite writer still saved after the bus started moving."""
+    import sqlite3
+    import threading
+
+    k = unlocked_parked(env)
+    d = k.post(
+        "/api/recordings",
+        {"requestId": rid(), "name": "Demo Route North", "direction": "to_school"},
+    )
+    blocker = sqlite3.connect(env.db_path, isolation_level=None)
+    blocker.execute("BEGIN IMMEDIATE")  # another writer holds the lock
+    result = {}
+
+    def mark() -> None:
+        r = env.api.handle(
+            "POST",
+            f"/api/recordings/{d['draftId']}/stops",
+            k.headers(),
+            json.dumps({"requestId": rid()}).encode(),
+        )
+        result["status"], result["body"] = r.status, json.loads(r.body)
+
+    t = threading.Thread(target=mark)
+    t.start()
+    t.join(0.5)  # the request is now waiting on SQLite
+    assert t.is_alive()
+    env.gps(6.0)  # the bus moves while it waits
+    blocker.execute("COMMIT")
+    blocker.close()
+    t.join(5)
+    assert (result["status"], result["body"]["error"]) == (409, "NOT_PARKED")
+    db = Database(env.db_path)
+    assert db.conn.execute("SELECT COUNT(*) FROM route_draft_stops").fetchone()[0] == 0
+    db.close()
