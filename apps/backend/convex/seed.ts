@@ -83,6 +83,8 @@ const SEED_GUARDED_TABLES = [
   "liveState",
   "routeVersions",
   "stops",
+  "routes",
+  "routeDrafts",
   "students",
   "assignments",
   "guardianLinks",

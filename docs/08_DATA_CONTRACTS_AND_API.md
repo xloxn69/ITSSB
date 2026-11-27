@@ -398,7 +398,7 @@ The staff web calls these Convex functions. The Pi and the iOS app never do, so 
 **Approval and version pinning.**
 - Approval copies the draft into a new immutable `routeVersions` row and its ordered `stops`, and sets `routes.currentVersionId`.
 - A new run pins `routes.currentVersionId` at creation (`approvedVersionForNewRun` in `apps/backend/convex/lib/routeVersions.ts`). A run already started keeps its version, and approved versions are never edited.
-- A superseded version must not start a new run, even if an older driver grant names it. Run start checks `isApprovedForNewRuns`, also in `lib/routeVersions.ts`. Versions created before route review existed stay allowed.
+- A superseded version must not start a new run, even if an older driver grant names it. `startRun` (§6) checks `isApprovedForNewRuns`, also in `lib/routeVersions.ts`, and answers a superseded version with the existing `403 GRANT_NOT_AUTHORIZED`. Versions created before route review existed stay allowed.
 - Approving an approved draft returns the same version.
 - Refusal codes:
   - `not_found`
