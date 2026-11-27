@@ -793,3 +793,51 @@ def test_a_record_synced_before_the_roster_refreshed_can_be_corrected(tmp_path, 
     assert code == 200, body
     assert body["action"]["sync"] == "pending"
     assert body["action"]["type"] == "correctAttendance"
+
+
+def test_another_routes_driver_sees_no_names_in_the_change_summary(tmp_path, pin_hash, backend):
+    env = Env(tmp_path, pin_hash, backend)
+    env.roster()
+    backend.reject_actions = "grant_not_authorized"
+    env.action(type="recordAttendance", assignmentId="demo_assignment_002", status="boarded")
+    backend.mode = "down"
+    env.action(type="recordAttendance", assignmentId="demo_assignment_001", status="boarded")
+    backend.mode = "ok"
+    env.tick()  # the first is rejected; the second stays pending (server refuses it too)
+    assert env.status()["studentChanges"]["rejected"]  # driver A sees it
+    env.post("/api/session/lock")
+    env.post("/api/session/unlock", {"driverId": "drv_other", "pin": PIN})
+    changes = env.status()["studentChanges"]
+    assert changes == {"pending": 0, "rejected": []}
+    assert "Example" not in json.dumps(env.status())
+
+
+def test_a_correction_targets_the_newest_record_from_any_source(tmp_path, pin_hash, backend):
+    env = Env(tmp_path, pin_hash, backend)
+    env.roster()
+    env.action(type="recordAttendance", assignmentId="demo_assignment_002", status="boarded")
+    env.tick()  # the device's record A is accepted
+    # Staff then correct it on the server (record B, received later).
+    rows = backend.check_ins[(env.run_id, "demo_assignment_002")]
+    newer = {
+        **rows[-1],
+        "checkInId": "fake_check_in_staff",
+        "status": "not_boarded",
+        "source": "staff_correction",
+        "receivedAtMs": rows[-1]["receivedAtMs"] + 60_000,
+    }
+    rows.append(newer)
+    env.advance(ROSTER_REUSE_MS + 1)
+    assert env.roster()[0] == 200  # the roster now shows B
+    request_id = rid()
+    code, body = env.action(
+        requestId=request_id,
+        type="correctAttendance",
+        assignmentId="demo_assignment_002",
+        status="boarded",
+        reason="Was aboard after all",
+    )
+    assert code == 200, body
+    env.tick()
+    sent = json.loads(backend.action_bodies[request_id][-1])
+    assert sent["correctsCheckInId"] == "fake_check_in_staff"
