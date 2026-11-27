@@ -253,3 +253,23 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertFalse(real.isPlaceholder)
     }
 }
+
+extension SessionStoreTests {
+    func testSignOutHidesScreensFirstAndNeverWaitsForAStuckCleanup() async {
+        let auth = StubAuth()
+        auth.restoreResult = .success(true)
+        let session = store(auth)
+        await session.restore()
+        var stateDuringCleanup: SessionState?
+        session.signOutCleanupLimit = .milliseconds(50)
+        session.beforeSignOut = { [unowned session] in
+            stateDuringCleanup = session.state
+            // Offline: the cleanup never finishes.
+            await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }
+        }
+        await session.signOut()
+        XCTAssertEqual(stateDuringCleanup, .signedOut(.notSignedIn))
+        XCTAssertEqual(session.state, .signedOut(.notSignedIn))
+        XCTAssertTrue(auth.calls.contains("signOut"))
+    }
+}

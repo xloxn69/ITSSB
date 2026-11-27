@@ -43,6 +43,9 @@ targets:
       path: ITSSB/ITSSB.entitlements
       properties:
         com.apple.developer.applesignin: [Default]
+        # Push registration (docs/08 §9.1). A signed build needs the Push
+        # Notifications capability on its App ID; distribution archives use production.
+        aps-environment: development
     info:
       path: ITSSB/Info.plist
       properties:

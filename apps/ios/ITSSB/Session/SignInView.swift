@@ -208,7 +208,7 @@ private func authPreview(_ scenario: PreviewAuthScenario) -> some View {
     let session = SessionStore(auth: PreviewAuthSession(configured: scenario != .notConfigured))
     scenario.apply(to: session)
     return AppRootView(session: session, source: PreviewLiveRunSource(scenario: .live),
-                       initialTab: scenario == .account ? .account : .track)
+                       notifications: PreviewNotificationSource(), initialTab: scenario == .account ? .account : .track)
 }
 
 #Preview("Email") { authPreview(.email) }

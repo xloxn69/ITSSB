@@ -40,10 +40,13 @@ shoot() { # name, then launch arguments
 
 for APPEARANCE in light dark; do
   xcrun simctl ui "$UDID" appearance "$APPEARANCE"
-  for scenario in live aging stale awaitingPosition gpsUnavailable noActiveRun loading \
+  for scenario in live eta atStop passed aging stale awaitingPosition gpsUnavailable noActiveRun loading \
                   accessUnavailable sessionExpired failed; do
     shoot "$scenario" -ITSSBScenario "$scenario"
   done
+  # The Alerts tab: preference on with one inbox entry, and the default (off, empty).
+  shoot alertsTab -ITSSBScenario alerts -ITSSBTab alerts
+  shoot alertsTabEmpty -ITSSBScenario live -ITSSBTab alerts
   for auth in notConfigured restoring restoreFailed email emailInvalid sending code codeWrong \
               trackingRejected account; do
     shoot "auth-$auth" -ITSSBAuthScenario "$auth"

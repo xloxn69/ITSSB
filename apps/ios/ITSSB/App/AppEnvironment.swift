@@ -1,5 +1,6 @@
 @preconcurrency import ConvexMobile
 import Foundation
+import UIKit
 
 /// Long-lived dependencies, built once per process (docs/06 §3, §8: one
 /// Convex client for the process).
@@ -7,6 +8,9 @@ import Foundation
 struct AppEnvironment {
     let session: SessionStore
     let source: any LiveRunSource
+    let notifications: any NotificationSource
+    /// Nil without sign-in and in fixture mode: screenshots never touch OS notification settings.
+    var registrar: PushRegistrar?
     var initialTab: AppTab = .track
 
     static func make(configuration: AppConfiguration = .fromBundle(),
@@ -18,8 +22,10 @@ struct AppEnvironment {
         guard let publishableKey = configuration.clerkPublishableKey else {
             // No Clerk key in this build: say sign-in isn't set up; never call Clerk.
             let client = ConvexClientWithAuth(deploymentUrl: deploymentUrl, authProvider: UnconfiguredAuthProvider())
+            let querying = ConvexClientQuerying(client: client)
             return AppEnvironment(session: SessionStore(auth: UnconfiguredAuthSession()),
-                                  source: ConvexLiveRunSource(client: ConvexClientQuerying(client: client)))
+                                  source: ConvexLiveRunSource(client: querying),
+                                  notifications: ConvexNotificationSource(queries: querying, commands: querying))
         }
         let backend = ClerkSDKBackend(publishableKey: publishableKey)
         let provider = ClerkConvexTokenProvider { backend }
@@ -27,7 +33,21 @@ struct AppEnvironment {
         let querying = ConvexClientQuerying(client: client)
         let convex = ConvexClientAuth(client: client, querying: querying) { provider.forcedRefreshes }
         let auth = ClerkAuthSession(backend: backend, convex: convex, marker: DefaultsSignOutMarker())
-        return AppEnvironment(session: SessionStore(auth: auth), source: ConvexLiveRunSource(client: querying))
+        let notifications = ConvexNotificationSource(queries: querying, commands: querying)
+        #if DEBUG
+        let pushEnvironment = PushEnvironment.sandbox
+        #else
+        let pushEnvironment = PushEnvironment.production
+        #endif
+        let registrar = PushRegistrar(source: notifications, authorizing: SystemPushAuthorizing(),
+                                      environment: pushEnvironment) {
+            UIApplication.shared.registerForRemoteNotifications()
+        }
+        let session = SessionStore(auth: auth)
+        // While still signed in: this phone stops receiving the account's pushes.
+        session.beforeSignOut = { await registrar.deactivate() }
+        return AppEnvironment(session: session, source: ConvexLiveRunSource(client: querying),
+                              notifications: notifications, registrar: registrar)
     }
 
     #if DEBUG
@@ -51,11 +71,15 @@ struct AppEnvironment {
             let session = SessionStore(auth: PreviewAuthSession(configured: auth != .notConfigured))
             auth.apply(to: session)
             return AppEnvironment(session: session, source: PreviewLiveRunSource(scenario: .live),
+                                  notifications: PreviewNotificationSource(scenario: .live),
                                   initialTab: auth == .account ? .account : .track)
         }
         if let scenario = scenario(from: arguments) {
+            // `-ITSSBTab alerts` opens on the Alerts tab, for screenshots.
+            let tab: AppTab = value(after: "-ITSSBTab", in: arguments) == "alerts" ? .alerts : .track
             return AppEnvironment(session: SessionStore(auth: PreviewAuthSession()),
-                                  source: PreviewLiveRunSource(scenario: scenario))
+                                  source: PreviewLiveRunSource(scenario: scenario),
+                                  notifications: PreviewNotificationSource(scenario: scenario), initialTab: tab)
         }
         return nil
     }

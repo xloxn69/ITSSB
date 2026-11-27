@@ -64,6 +64,21 @@ final class TrackViewModel {
         start()
     }
 
+    /// An assignment a tapped notification asked for, kept until assignments load.
+    private(set) var pendingAssignmentId: String?
+
+    /// Opens a notification's assignment: now if it is loaded, otherwise once
+    /// assignments arrive. An ID that isn't one of this person's approved
+    /// assignments is dropped, never selected.
+    func open(assignmentId: String) {
+        if assignments.contains(where: { $0.assignmentId == assignmentId }) {
+            pendingAssignmentId = nil
+            select(assignmentId: assignmentId)
+        } else {
+            pendingAssignmentId = assignmentId
+        }
+    }
+
     /// Switches to another approved assignment (docs/06 §8).
     func select(assignmentId: String) {
         guard assignmentId != selectedAssignmentId,
@@ -94,7 +109,11 @@ final class TrackViewModel {
             state = reason == .unauthenticated ? .sessionExpired : .accessUnavailable
         case .ready(let list):
             assignments = list
-            if list.isEmpty {
+            let pending = pendingAssignmentId
+            pendingAssignmentId = nil
+            if let pending, list.contains(where: { $0.assignmentId == pending }) {
+                if pending != selectedAssignmentId { beginSelection(pending) } else { render() }
+            } else if list.isEmpty {
                 clearSelection()
                 state = .accessUnavailable
             } else if let selected = selectedAssignmentId, list.contains(where: { $0.assignmentId == selected }) {

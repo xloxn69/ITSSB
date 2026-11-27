@@ -104,6 +104,11 @@ final class SessionStore {
 
     private let auth: any AuthSession
     private let now: () -> Date
+    /// Runs after protected screens are hidden but before the session ends, while
+    /// the client is still authenticated (e.g. stop this phone's pushes). Bounded
+    /// by `signOutCleanupLimit`, so an offline phone still signs out promptly.
+    @ObservationIgnored var beforeSignOut: (@MainActor () async -> Void)?
+    @ObservationIgnored var signOutCleanupLimit: Duration = .seconds(3)
 
     init(auth: any AuthSession, now: @escaping () -> Date = { Date() }) {
         self.auth = auth
@@ -111,6 +116,21 @@ final class SessionStore {
     }
 
     var accountLabel: String? { auth.accountLabel }
+
+    /// Waits for `work` or `limit`, whichever comes first; `work` may finish later.
+    private static func run(_ work: @escaping @MainActor () async -> Void, atMost limit: Duration) async {
+        let gate = FirstOnly()
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            Task { @MainActor in
+                await work()
+                if gate.claim() { continuation.resume() }
+            }
+            Task { @MainActor in
+                try? await Task.sleep(for: limit)
+                if gate.claim() { continuation.resume() }
+            }
+        }
+    }
 
     func restore() async {
         guard auth.isConfigured else {
@@ -183,6 +203,7 @@ final class SessionStore {
         resendAvailableAt = nil
         state = auth.isConfigured ? .signedOut(.notSignedIn) : .signedOut(.signInUnavailable)
         isWorking = true
+        if let cleanup = beforeSignOut { await Self.run(cleanup, atMost: signOutCleanupLimit) }
         await auth.signOut()
         isWorking = false
     }
@@ -322,5 +343,15 @@ final class ConvexClientAuth: ConvexAuthControlling {
             return result.flatMap { $0 }
         }
         return first
+    }
+}
+
+/// Lets exactly one of several callers through.
+@MainActor
+private final class FirstOnly {
+    private var claimed = false
+    func claim() -> Bool {
+        defer { claimed = true }
+        return !claimed
     }
 }

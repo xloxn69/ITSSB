@@ -6,6 +6,8 @@ import SwiftUI
 struct AppRootView: View {
     let session: SessionStore
     let source: any LiveRunSource
+    let notifications: any NotificationSource
+    var registrar: PushRegistrar?
     var initialTab: AppTab = .track
 
     var body: some View {
@@ -24,7 +26,8 @@ struct AppRootView: View {
                 SignInView(session: session)
             case .signedIn:
                 // "Sign in again" from Track ends the rejected session and returns to sign-in.
-                SignedInTabs(source: source, session: session, initialTab: initialTab) {
+                SignedInTabs(source: source, notifications: notifications, registrar: registrar,
+                             session: session, initialTab: initialTab) {
                     Task { await session.signOut() }
                 }
             }
@@ -41,16 +44,22 @@ enum AppTab: Hashable {
     case track, route, alerts, account
 }
 
-/// The four V1 tabs (docs/06 §5).
+/// The four V1 tabs (docs/06 §5). Track, Alerts, and Account are implemented.
 struct SignedInTabs: View {
     let source: any LiveRunSource
+    let notifications: any NotificationSource
+    let registrar: PushRegistrar?
     let session: SessionStore
     @State private var tab: AppTab
+    @State private var router = NotificationRouter.shared
+    @Environment(\.scenePhase) private var scenePhase
     let onSignIn: () -> Void
 
-    init(source: any LiveRunSource, session: SessionStore, initialTab: AppTab = .track,
-         onSignIn: @escaping () -> Void) {
+    init(source: any LiveRunSource, notifications: any NotificationSource, registrar: PushRegistrar?,
+         session: SessionStore, initialTab: AppTab = .track, onSignIn: @escaping () -> Void) {
         self.source = source
+        self.notifications = notifications
+        self.registrar = registrar
         self.session = session
         _tab = State(initialValue: initialTab)
         self.onSignIn = onSignIn
@@ -58,13 +67,14 @@ struct SignedInTabs: View {
 
     var body: some View {
         TabView(selection: $tab) {
-            TrackView(source: source, onSignIn: onSignIn)
+            TrackView(source: source, openAssignmentId: router.requestedAssignmentId,
+                      onOpened: { router.requestedAssignmentId = nil }, onSignIn: onSignIn)
                 .tabItem { Label("Track", systemImage: "bus") }
                 .tag(AppTab.track)
             ComingSoon(title: "My Route")
                 .tabItem { Label("My Route", systemImage: "map") }
                 .tag(AppTab.route)
-            ComingSoon(title: "Alerts")
+            AlertsView(tracking: source, notifications: notifications, registrar: registrar)
                 .tabItem { Label("Alerts", systemImage: "bell") }
                 .tag(AppTab.alerts)
             AccountView(session: session)
@@ -72,6 +82,13 @@ struct SignedInTabs: View {
                 .tag(AppTab.account)
         }
         .tint(AppColors.brand)
+        // A tapped notification opens Track for its assignment, with current state.
+        .onChange(of: router.requestedAssignmentId) { _, id in if id != nil { tab = .track } }
+        .task { await registrar?.activate() }
+        // Returning from Settings may have changed the permission: re-read and re-register.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await registrar?.refresh() } }
+        }
     }
 }
 

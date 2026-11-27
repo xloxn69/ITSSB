@@ -196,4 +196,24 @@ final class TrackViewModelTests: XCTestCase {
         let cancelled = await eventually { source.cancelledRuns.contains("a_alex") }
         XCTAssertTrue(cancelled)
     }
+
+    func testATapBeforeAssignmentsLoadOpensThatStudentOnceTheyArrive() async {
+        let source = MockLiveRunSource()
+        let model = await started(source)
+        model.open(assignmentId: "a_jordan")
+        source.assignmentsContinuation?.yield(.ready([alex, jordan]))
+        _ = await eventually { model.selectedAssignmentId != nil }
+        XCTAssertEqual(model.selectedAssignmentId, "a_jordan")
+        XCTAssertNil(model.pendingAssignmentId)
+    }
+
+    func testATapForAnAssignmentThePersonCantTrackIsDropped() async {
+        let source = MockLiveRunSource()
+        let model = await started(source)
+        model.open(assignmentId: "someone_else")
+        source.assignmentsContinuation?.yield(.ready([alex]))
+        _ = await eventually { model.selectedAssignmentId != nil }
+        XCTAssertEqual(model.selectedAssignmentId, "a_alex")
+        XCTAssertNil(model.pendingAssignmentId)
+    }
 }
