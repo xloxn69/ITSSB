@@ -208,3 +208,37 @@ describe("fixes without reported accuracy", () => {
     expect(stopStatus(route, state, "a")).toBe("passed");
   });
 });
+
+describe("independent review round 3 cases", () => {
+  it("a return stop on a 30 m-wide hairpin goes on the return leg, not the nearer-in-order outbound leg", () => {
+    const route = prepareRoute([at(0), at(1500), at(1500, 30), at(0, 30)], [
+      stop("first", 0, 200),
+      stop("back", 1, 1000, 30),
+    ])!;
+    expect(route.stops.map((s) => Math.round(s.alongM))).toEqual([200, 2030]);
+  });
+
+  it("a parallel-street fix with poor reported accuracy never changes stop outcomes", () => {
+    const route = prepareRoute(densePath(5000), [stop("a", 0, 1000), stop("b", 1, 3000)])!;
+    let state = initialProgress(route, T0);
+    let t = T0;
+    for (let d = 50; d <= 900; d += 50) state = advance(route, state, fix(d, 0, (t += 5000)));
+    for (let d = 950; d <= 1300; d += 50) {
+      state = advance(route, state, { ...at(d, 20), horizontalAccuracyM: 40, capturedAtMs: (t += 5000) });
+    }
+    expect(stopStatus(route, state, "a")).toBe("upcoming");
+  });
+
+  it("of two stops 20 m apart, the second does not arrive while the bus waits at the first", () => {
+    const route = prepareRoute(densePath(3000), [stop("a", 0, 1000), stop("b", 1, 1020)])!;
+    let state = initialProgress(route, T0);
+    let t = T0;
+    for (let d = 50; d <= 1000; d += 50) state = advance(route, state, fix(d, 0, (t += 5000)));
+    for (let i = 0; i < 4; i++) state = advance(route, state, fix(1000, 2, (t += 5000)));
+    expect(stopStatus(route, state, "a")).toBe("at_stop");
+    expect(stopStatus(route, state, "b")).toBe("upcoming");
+    for (let d = 1010; d <= 1200; d += 10) state = advance(route, state, fix(d, 0, (t += 2000)));
+    expect(stopStatus(route, state, "a")).toBe("passed");
+    expect(stopStatus(route, state, "b")).toBe("passed");
+  });
+});

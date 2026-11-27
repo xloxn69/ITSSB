@@ -21,7 +21,7 @@ export const MATCH_LATERAL_M = 25;
 export const MAX_ACCURACY_ALLOWANCE_M = 25;
 /**
  * A fix may change stop outcomes only if its distance from the path plus its
- * reported accuracy is within this: the whole error circle must support being
+ * full reported accuracy (never capped) is within this: the whole error circle must support being
  * on the route, so a biased fix from a parallel street cannot serve a stop.
  */
 export const CONFIDENT_LATERAL_M = 30;
@@ -33,6 +33,8 @@ export const CONFIDENT_LATERAL_M = 30;
 export const UNREPORTED_ACCURACY_M = 10;
 /** How far from the path a recorded stop may be and still be placed on it. */
 export const STOP_PLACEMENT_LATERAL_M = 40;
+/** Passes whose distance from a stop differs by less than this are a tie; the earlier wins. */
+export const PASS_TIE_M = 5;
 /** An arrival also needs the fix itself this close to the stop (plus up to 20 m of accuracy). */
 export const ARRIVE_RADIUS_M = 40;
 /** How far behind accepted progress a fix may match (GPS noise). */
@@ -183,9 +185,13 @@ export function prepareRoute(path: RoutePoint[], stops: RouteStopInput[]): Prepa
       }
       lastAlong = proj.alongM;
     }
-    // The first stop takes the first pass (it may sit at the very start);
-    // each later stop the first pass past the previous stop.
-    const chosen = placed.length === 0 ? passes[0] : passes.find((p) => p.alongM > minAlong + 0.5);
+    // Among the passes after the previous stop (any pass for the first stop,
+    // which may sit at the very start), the closest one; on a near tie the
+    // earliest. A narrow hairpin's far leg can be within reach of a stop, but
+    // the leg the stop is actually on is closer.
+    const eligible = placed.length === 0 ? passes : passes.filter((p) => p.alongM > minAlong + 0.5);
+    const closest = Math.min(...eligible.map((p) => p.lateralM));
+    const chosen = eligible.find((p) => p.lateralM <= closest + PASS_TIE_M);
     const alongM = chosen?.alongM ?? nearest?.alongM ?? minAlong;
     placed.push({ stopId: s.stopId, sequence: s.sequence!, alongM });
     minAlong = alongM;
@@ -255,22 +261,35 @@ export function advance(route: PreparedRoute, prev: ProgressState, fix: Fix): Pr
   const alongM = Math.max(prev.alongM, located.alongM);
   const accuracy = fix.horizontalAccuracyM ?? UNREPORTED_ACCURACY_M;
   // A loosely matched fix moves progress but never changes a stop outcome.
-  const confident = located.lateralM + Math.min(accuracy, MAX_ACCURACY_ALLOWANCE_M) <= CONFIDENT_LATERAL_M;
-  const stops = prev.stops.map((outcome, i) => {
+  const confident = located.lateralM + accuracy <= CONFIDENT_LATERAL_M;
+  const stops: StopOutcome[] = [];
+  for (const [i, outcome] of prev.stops.entries()) {
     const stop = route.stops[i]!;
-    let { arrivedAtMs, departedAtMs } = outcome;
-    if (!confident || departedAtMs !== null) return outcome;
-    if (alongM >= stop.alongM + DEPART_AFTER_M) {
+    // Stops are served in order: none arrives while an earlier one is still open.
+    const earlierOpen = stops.some((s) => s.departedAtMs === null);
+    if (!confident || outcome.departedAtMs !== null) {
+      stops.push(outcome);
+      continue;
+    }
+    let arrivedAtMs: number | null = outcome.arrivedAtMs;
+    let departedAtMs: number | null = null;
+    // Close stops get a shorter departure band, so the next one can be served.
+    const next = route.stops[i + 1];
+    const departAfter = next
+      ? Math.min(DEPART_AFTER_M, Math.max(5, (next.alongM - stop.alongM) / 2))
+      : DEPART_AFTER_M;
+    if (alongM >= stop.alongM + departAfter) {
       departedAtMs = fix.capturedAtMs;
     } else if (
       arrivedAtMs === null &&
+      !earlierOpen &&
       alongM >= stop.alongM - ARRIVE_BEFORE_M &&
       planarDistance(route.stopPoints[i]!, fix) <= ARRIVE_RADIUS_M + Math.min(accuracy, 20)
     ) {
       arrivedAtMs = fix.capturedAtMs;
     }
-    return { stopId: outcome.stopId, arrivedAtMs, departedAtMs };
-  });
+    stops.push({ stopId: outcome.stopId, arrivedAtMs, departedAtMs });
+  }
   return { alongM, atMs: fix.capturedAtMs, lastStatus: "on_route", stops };
 }
 
