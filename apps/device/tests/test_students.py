@@ -758,7 +758,9 @@ def test_a_driver_for_another_route_never_sees_the_cached_roster(tmp_path, pin_h
     assert "Example" not in env.last_raw.decode()
     code, body = env.post("/api/qr-codes", {"purpose": "trip_check_in"})
     assert (code, body["error"]) == (403, "NOT_YOUR_ROUTE")
-    code, body = env.action(type="recordAttendance", assignmentId="demo_assignment_002", status="boarded")
+    code, body = env.action(
+        type="recordAttendance", assignmentId="demo_assignment_002", status="boarded"
+    )
     assert (code, body["error"]) == (403, "NOT_YOUR_ROUTE")
 
 
@@ -776,7 +778,9 @@ def test_a_clock_stepping_back_does_not_extend_a_code(tmp_path, pin_hash, backen
 def test_a_record_synced_before_the_roster_refreshed_can_be_corrected(tmp_path, pin_hash, backend):
     env = Env(tmp_path, pin_hash, backend)
     env.roster()
-    code, _ = env.action(type="recordAttendance", assignmentId="demo_assignment_002", status="boarded")
+    code, _ = env.action(
+        type="recordAttendance", assignmentId="demo_assignment_002", status="boarded"
+    )
     assert code == 200
     env.tick()  # accepted; the cached roster still has no record for this student
     backend.mode = "down"  # so the roster can't refresh
@@ -787,4 +791,5 @@ def test_a_record_synced_before_the_roster_refreshed_can_be_corrected(tmp_path, 
         reason="Stayed home",
     )
     assert code == 200, body
-    assert body["sync"] == "pending"
+    assert body["action"]["sync"] == "pending"
+    assert body["action"]["type"] == "correctAttendance"

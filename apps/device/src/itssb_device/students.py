@@ -206,8 +206,8 @@ class _CachedQr:
     lifetime_ms: int
 
     def remaining_ms(self, now_ms: int) -> int:
-        # Measured on this device's clock from the server's own lifetime, so
-        # a device clock that differs from the server's does not stretch it.
+        # Measured on this device's monotonic clock from the server's own
+        # lifetime, so neither clock skew nor a wall-clock step stretches it.
         return max(0, self.lifetime_ms - max(0, now_ms - self.fetched_at_ms))
 
 
@@ -298,10 +298,14 @@ class StudentDesk:
         client: DeviceGrantClient,
         now_ms: Callable[[], int] = lambda: time.time_ns() // 1_000_000,
         wake: threading.Event | None = None,
+        mono_ms: Callable[[], int] = lambda: time.monotonic_ns() // 1_000_000,
     ) -> None:
         self.database_path = database_path
         self.client = client
         self.now_ms = now_ms
+        # Elapsed time for code lifetimes: a wall clock that steps back must
+        # never make an expired code valid again.
+        self.mono_ms = mono_ms
         self.wake = wake
         self._qr_lock = threading.Lock()  # issuing a check-in code revokes the last one
         self._qr: dict[str, _CachedQr] = {}
@@ -365,7 +369,29 @@ class StudentDesk:
                 "NO_GRANT",
                 "Your transport office has not authorized you on this device.",
             )
+        # The run must be on one of this driver's routes. Checked here, not
+        # only by the server, because an offline device answers from its
+        # cache: another route's driver must never see this run's names.
+        route = self._route_version(db, run_id)
+        if route is None or route not in {r.route_version_id for r in driver.route_versions}:
+            return _error(
+                HTTPStatus.FORBIDDEN,
+                "NOT_YOUR_ROUTE",
+                "This run is not on one of your routes. The driver who started it can use it.",
+            )
         return _Ctx(run_id, driver.driver_id, driver.operating_grant)
+
+    @staticmethod
+    def _latest_check_in(db: Database, run_id: str, assignment_id: str) -> dict[str, Any] | None:
+        """The record the server most recently accepted from this device for
+        this student and run, if newer than the cached roster could show."""
+        row = db.conn.execute(
+            "SELECT check_in FROM roster_actions WHERE run_id=? AND assignment_id=? "
+            "AND sync='synced' AND check_in IS NOT NULL "
+            "ORDER BY resolved_at_ms DESC, rowid DESC LIMIT 1",
+            (run_id, assignment_id),
+        ).fetchone()
+        return json.loads(row["check_in"]) if row is not None else None
 
     @staticmethod
     def _route_version(db: Database, run_id: str) -> str | None:
@@ -406,7 +432,9 @@ class StudentDesk:
     def _qr_locked(
         self, purpose: str, run_id: str, driver_id: str, grant: str, route: str | None
     ) -> Reply:
-        now = self.now_ms()
+        # Lifetimes run on the monotonic clock: a wall clock stepping back
+        # must never make an expired code valid again.
+        now = self.mono_ms()
         cached = self._qr.get(purpose)
         if cached is not None and (cached.run_id != run_id or cached.driver_id != driver_id):
             cached = None
@@ -618,7 +646,11 @@ class StudentDesk:
             if kind in ("recordAttendance", "correctAttendance"):
                 fields += [("runId", run_id), ("status", intent["status"])]
             if kind == "correctAttendance":
-                current = student.get("checkIn")
+                # The newest record: the roster's, or one the server accepted
+                # from this device since the roster was fetched.
+                current = self._latest_check_in(db, run_id, intent["assignmentId"]) or student.get(
+                    "checkIn"
+                )
                 if not current:
                     return _error(
                         HTTPStatus.CONFLICT,
