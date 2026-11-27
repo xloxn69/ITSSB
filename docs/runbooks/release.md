@@ -32,8 +32,9 @@ it.
 | Pi | `/etc/itssb/device.env` points at the dev `.convex.site` | its own credential | its own credential |
 
 A device credential, Clerk key, or Convex URL is never shared between
-environments. The web app shows a **Development** or **Staging** badge unless
-built with `production`; a missing or unknown value counts as development.
+environments. The web app, the iPhone app (sign-in screen and Account) and the
+Pi driver screen show a **Development** or **Staging** label unless built or set
+for `production`; a missing or unknown value counts as development.
 
 ## 3. Build and stamp each part
 
