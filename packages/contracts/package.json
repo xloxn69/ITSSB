@@ -7,11 +7,13 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./fixtures": "./src/fixtures.ts"
+    "./fixtures": "./src/fixtures.ts",
+    "./fixtures/*.json": "./fixtures/*.json"
   },
   "scripts": {
     "lint": "oxlint src",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "fixtures": "bun scripts/write-fixtures.ts"
   }
 }

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "status": "ready",
+  "serverNowMs": 1795609085500,
+  "assignments": [
+    {
+      "assignmentId": "demo_assignment_001",
+      "relationship": "self",
+      "studentDisplayName": "Sam Example",
+      "routeLabel": "Route 17 Morning",
+      "stopLabel": "Oak & Pine"
+    }
+  ]
+}

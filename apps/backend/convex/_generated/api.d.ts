@@ -14,6 +14,7 @@ import type * as lib_authz from "../lib/authz.js";
 import type * as lib_deviceAuth from "../lib/deviceAuth.js";
 import type * as runs from "../runs.js";
 import type * as telemetry from "../telemetry.js";
+import type * as tracking from "../tracking.js";
 
 import type {
   ApiFromModules,
@@ -28,6 +29,7 @@ declare const fullApi: ApiFromModules<{
   "lib/deviceAuth": typeof lib_deviceAuth;
   runs: typeof runs;
   telemetry: typeof telemetry;
+  tracking: typeof tracking;
 }>;
 
 /**

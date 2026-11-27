@@ -13,6 +13,10 @@ configFiles:
 packages:
   ITSSBDesignSystem:
     path: Packages/ITSSBDesignSystem
+  # Convex Swift client (docs/06 §2). Pinned exactly; bump deliberately.
+  ConvexMobile:
+    url: https://github.com/get-convex/convex-swift
+    exactVersion: 0.8.2
 
 settings:
   base:
@@ -27,6 +31,7 @@ targets:
     sources: [ITSSB]
     dependencies:
       - package: ITSSBDesignSystem
+      - package: ConvexMobile
     info:
       path: ITSSB/Info.plist
       properties:
@@ -44,7 +49,12 @@ targets:
   ITSSBTests:
     type: bundle.unit-test
     platform: iOS
-    sources: [ITSSBTests]
+    sources:
+      - ITSSBTests
+      # The shared contract fixtures (docs/08 §10), decoded by the DTO tests.
+      - path: ../../packages/contracts/fixtures
+        type: folder
+        buildPhase: resources
     dependencies:
       - target: ITSSB
     settings:
