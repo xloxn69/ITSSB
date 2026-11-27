@@ -38,7 +38,14 @@ from urllib.parse import urlsplit
 from .config import Config
 from .database import Database
 from .status import StatusBoard, wall_ms
-from .sync import MAX_BACKOFF_MS, apply_results, backoff_ms, no_jitter, with_jitter
+from .sync import (
+    MAX_BACKOFF_MS,
+    apply_results,
+    backoff_ms,
+    no_jitter,
+    note_request_failure,
+    with_jitter,
+)
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +53,9 @@ TELEMETRY_PATH = "/device/v1/telemetry"
 AUTH_PAUSE_MS = 5 * 60_000
 CLIENT_ERROR_PAUSE_MS = 60_000
 PROBE_INTERVAL_S = 30.0
+# While paused because the bus had no internet, probe more often so fresh
+# tracking resumes within seconds of the link coming back (docs/13 D08).
+OFFLINE_PROBE_INTERVAL_S = 5.0
 
 
 _NO_ROUTE_ERRNOS = {errno.ENETUNREACH, errno.EHOSTUNREACH, errno.ENETDOWN}
@@ -186,6 +196,10 @@ class Uploader:
         self._now_ms = now_ms
         self._jitter = jitter
         self.pause_until_ms = 0
+        # Why we are paused. Only an "offline" pause (we could not reach the
+        # host at all) may be ended early by a probe that reaches it again;
+        # a pause the server asked for (401/403, 413, 429, 5xx) is kept.
+        self.pause_reason: str | None = None
         self.failures = 0  # consecutive request-level failures
 
     def _batch(self, now: int) -> tuple[list[str], bytes] | None:
@@ -204,14 +218,19 @@ class Uploader:
             body = candidate
         return [e["eventId"] for e in events], body
 
-    def _pause(self, ms: int) -> None:
+    def _pause(self, ms: int, reason: str = "server") -> None:
         self.pause_until_ms = self._now_ms() + ms
+        self.pause_reason = reason
 
-    def _fail(self, sent: list[str], now: int) -> None:
+    @property
+    def paused_offline(self) -> bool:
+        return self.pause_reason == "offline" and self._now_ms() < self.pause_until_ms
+
+    def _fail(self, sent: list[str], now: int, reason: str = "server") -> None:
         """Outcome unknown or server-side failure: retry the same identities."""
-        apply_results(self.db, sent, [], now, jitter=self._jitter)
+        note_request_failure(self.db, sent, "REQUEST_FAILED")
         self.failures += 1
-        self._pause(self._jitter(backoff_ms(self.failures)))
+        self._pause(self._jitter(backoff_ms(self.failures)), reason)
 
     def upload_once(self) -> str:
         """Sends at most one batch. Returns a short outcome label."""
@@ -235,7 +254,7 @@ class Uploader:
             log.warning(
                 "upload of %d events failed (%s); will retry same eventIds", len(sent), exc.reason
             )
-            self._fail(sent, now)
+            self._fail(sent, now, "offline" if exc.network == "offline" else "server")
             return "transport_error"
 
         self.board.network("online")
@@ -252,6 +271,7 @@ class Uploader:
                 return "bad_response"
             summary = apply_results(self.db, sent, results, now, jitter=self._jitter)
             self.failures = 0
+            self.pause_reason = None
             self.batch_limit = min(self.max_events, self.batch_limit * 2)
             self.board.backend("ok", None, 200, lastBatch={"sent": len(sent), **summary})
             log.info("upload: %d sent %s", len(sent), summary)
@@ -286,6 +306,12 @@ class Uploader:
     def probe_network(self) -> None:
         status, reason = self.transport.probe()
         self.board.network(status, reason)
+        if status == "online" and self.paused_offline:
+            # The internet is back: resume now instead of waiting out a backoff
+            # that grew during the outage. The next batch leads with the
+            # newest observation; history drains behind it.
+            log.info("network back; resuming uploads")
+            self.pause_until_ms, self.pause_reason, self.failures = 0, None, 0
 
 
 class UploaderThread(threading.Thread):
@@ -313,9 +339,12 @@ class UploaderThread(threading.Thread):
             while not self.stop_event.is_set():
                 try:
                     outcome = uploader.upload_once()
+                    probe_every = (
+                        OFFLINE_PROBE_INTERVAL_S if uploader.paused_offline else PROBE_INTERVAL_S
+                    )
                     if (
                         outcome in ("idle", "paused")
-                        and time.monotonic() - last_probe >= PROBE_INTERVAL_S
+                        and time.monotonic() - last_probe >= probe_every
                     ):
                         uploader.probe_network()
                         last_probe = time.monotonic()
