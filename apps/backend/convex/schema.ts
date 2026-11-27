@@ -427,6 +427,8 @@ export default defineSchema({
     approachingMinutes: v.number(),
     updatedAtMs: v.number(),
     lastRequestId: v.string(),
+    /** Recent save requestIds, newest first; a retry of any of them changes nothing. */
+    recentRequestIds: v.optional(v.array(v.string())),
   }).index("by_user_assignment", ["userId", "assignmentId"]),
 
   /**
@@ -499,6 +501,8 @@ export default defineSchema({
     expiresAtMs: v.number(),
     leaseId: v.optional(v.string()),
     leaseExpiresAtMs: v.optional(v.number()),
+    /** The token the current or last attempt was sent to. */
+    sentToken: v.optional(v.string()),
     endReason: v.optional(v.string()),
     updatedAtMs: v.number(),
   })

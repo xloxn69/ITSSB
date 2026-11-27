@@ -93,7 +93,7 @@ class ApnsSender implements PushSender {
 export const deliver = internalAction({
   args: { jobId: v.id("notificationJobs") },
   handler: async (ctx, { jobId }): Promise<string> => {
-    const config = apnsConfigFromEnv(process.env);
+    const config = apnsConfigFromEnv(typeof process === "undefined" ? {} : process.env);
     if (!config) return "provider_not_configured";
     const leaseId = crypto.randomUUID();
     const message = await ctx.runMutation(internal.notificationJobs.claim, { jobId, leaseId, nowMs: Date.now() });

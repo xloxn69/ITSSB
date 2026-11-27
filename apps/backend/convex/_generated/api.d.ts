@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as alerts from "../alerts.js";
 import type * as audit from "../audit.js";
 import type * as checkIns from "../checkIns.js";
 import type * as crons from "../crons.js";
@@ -53,6 +54,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  alerts: typeof alerts;
   audit: typeof audit;
   checkIns: typeof checkIns;
   crons: typeof crons;

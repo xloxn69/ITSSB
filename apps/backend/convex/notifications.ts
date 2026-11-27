@@ -48,6 +48,9 @@ function denied(reason: AccessUnavailableReason): AccessUnavailable {
   return { schemaVersion: SCHEMA_VERSION, status: "access_unavailable", serverNowMs: Date.now(), reason };
 }
 
+/** How many recent save requests are remembered for retry detection. */
+const RECENT_REQUEST_IDS = 20;
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const APNS_TOKEN = /^[0-9a-f]{64,200}$/;
 
@@ -131,8 +134,9 @@ export const setPreferences = mutation({
       return bad(`approachingMinutes must be a whole number from ${APPROACHING_MINUTES_MIN} to ${APPROACHING_MINUTES_MAX}.`);
     }
     const row = await preferenceRow(ctx, user, access.assignment);
-    // A retry of the save that produced the current row returns it unchanged.
-    if (row && row.lastRequestId === args.requestId) {
+    // A retry of any recent save returns the current row unchanged, so a
+    // delayed retry of an older choice never overrides a newer one.
+    if (row && (row.lastRequestId === args.requestId || (row.recentRequestIds ?? []).includes(args.requestId))) {
       return { schemaVersion: SCHEMA_VERSION, status: "saved", serverNowMs: nowMs, preference: present(access.assignment._id, row) };
     }
     const fields = {
@@ -142,6 +146,10 @@ export const setPreferences = mutation({
       approachingMinutes: args.approachingMinutes,
       updatedAtMs: nowMs,
       lastRequestId: args.requestId,
+      recentRequestIds: [args.requestId, ...(row?.recentRequestIds ?? (row ? [row.lastRequestId] : []))].slice(
+        0,
+        RECENT_REQUEST_IDS,
+      ),
     };
     if (row) await ctx.db.replace(row._id, fields);
     else await ctx.db.insert("notificationPreferences", fields);
@@ -186,20 +194,20 @@ export const registerDevice = mutation({
     const token = args.apnsToken?.toLowerCase() ?? null;
     if (token !== null && !APNS_TOKEN.test(token)) return bad("apnsToken must be hex.");
 
-    // One token, one active account: a phone that signs in as someone else
-    // stops receiving the previous account's alerts.
+    // A token belongs to the phone (installation) that holds it. Another
+    // installation presenting an active token is refused, never allowed to
+    // take it over. Account switching on the same phone is handled below.
     if (token) {
       const holders = await ctx.db
         .query("pushTokens")
         .withIndex("by_token", (q) => q.eq("token", token))
         .collect();
-      for (const h of holders) {
-        if (h.active && (h.userId !== user._id || h.installationId !== args.installationId)) {
-          await ctx.db.patch(h._id, { active: false, updatedAtMs: nowMs });
-        }
+      if (holders.some((h) => h.active && h.installationId !== args.installationId)) {
+        return bad("This notification token is registered to another installation.");
       }
     }
-    // One installation, one current row.
+    // One installation, one current row: a phone that signs in as someone
+    // else stops receiving the previous account's alerts.
     const rows = await ctx.db
       .query("pushTokens")
       .withIndex("by_installation", (q) => q.eq("installationId", args.installationId))

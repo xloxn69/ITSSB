@@ -1,7 +1,7 @@
 import { MAX_DELIVERY_ATTEMPTS } from "@itssb/contracts";
 import { myAlertsReady, myPreferenceDefault, registerDeviceRegistered } from "@itssb/contracts/fixtures";
 import { convexTest } from "convex-test";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { sha256Hex } from "./lib/deviceAuth";
@@ -28,6 +28,17 @@ const GRANT = "g".repeat(64);
 const STOPS_EAST = [1000, 2500, 3500];
 const TOKEN_A = "a1".repeat(32);
 const TOKEN_B = "b2".repeat(32);
+/** The student's phone. */
+const INSTALL_A = "11111111-1111-4111-8111-111111111111";
+
+// Alert evaluation runs as a scheduled function after telemetry commits; fake
+// timers let each test run it deterministically. Date stays real.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 async function setup() {
   const t = convexTest(schema, modules);
@@ -107,6 +118,15 @@ function eastForRemaining(seconds: number) {
 }
 
 /** Drives the bus from the start to `east`, ending at `endCapturedAtMs`. */
+type IngestArgs = { deviceId: Id<"devices">; events: unknown[]; nowMs: number };
+
+/** Ingests a batch, then runs the alert evaluation it scheduled. */
+async function ingest(s: { t: ReturnType<typeof convexTest> }, args: IngestArgs) {
+  const result = await s.t.mutation(internal.telemetry.ingestBatch, args);
+  await s.t.finishAllScheduledFunctions(vi.runAllTimers);
+  return result;
+}
+
 async function driveTo(s: Setup, east: number, endCapturedAtMs: number) {
   const events = [];
   const steps = Math.ceil(east / 50);
@@ -115,7 +135,7 @@ async function driveTo(s: Setup, east: number, endCapturedAtMs: number) {
   }
   for (let i = 0; i < events.length; i += 40) {
     const batch = events.slice(i, i + 40);
-    await s.t.mutation(internal.telemetry.ingestBatch, {
+    await ingest(s, {
       deviceId: s.deviceId,
       events: batch,
       nowMs: batch.at(-1)!.capturedAtMs + 1_000,
@@ -218,7 +238,7 @@ describe("approaching alerts", () => {
     for (let i = 0; i < 8; i++) {
       const captured = s.NOW - 100_000 + i * 10_000;
       const lag = i % 2 === 0 ? 1_000 : 8_000;
-      await s.t.mutation(internal.telemetry.ingestBatch, {
+      await ingest(s, {
         deviceId: s.deviceId,
         events: [event(s.runId, east, captured)],
         nowMs: captured + lag,
@@ -248,7 +268,7 @@ describe("approaching alerts", () => {
     for (let d = 50; d <= east; d += 50) events.push(event(s.runId, d, s.NOW - 300_000 + d * 100));
     events.push(event(s.runId, east, s.NOW - 60_000));
     for (let i = 0; i < events.length; i += 40) {
-      await s.t.mutation(internal.telemetry.ingestBatch, {
+      await ingest(s, {
         deviceId: s.deviceId,
         events: events.slice(i, i + 40),
         nowMs: s.NOW,
@@ -276,7 +296,7 @@ describe("approaching alerts", () => {
 async function oneJob() {
   const s = await setup();
   await enable(s, STUDENT);
-  await register(s, STUDENT, TOKEN_A);
+  await register(s, STUDENT, TOKEN_A, INSTALL_A);
   await approach(s);
   const [job] = await jobs(s);
   if (!job) throw new Error("no job");
@@ -417,7 +437,7 @@ describe("delivery jobs", () => {
   it("a token that moved to another account is not used for the first", async () => {
     const { s, jobId } = await oneJob();
     // The same phone signs in as the guardian and registers the same token.
-    await register(s, GUARDIAN, TOKEN_A);
+    await register(s, GUARDIAN, TOKEN_A, INSTALL_A);
     expect((await claim(s, jobId, s.NOW)).r).toBeNull();
     expect(await job(s, jobId)).toMatchObject({ state: "cancelled", endReason: "token_inactive" });
   });
@@ -466,5 +486,121 @@ describe("device registration", () => {
       permission: "authorized",
     });
     expect(r).toMatchObject({ status: "access_unavailable", reason: "unauthenticated" });
+  });
+});
+
+describe("independent review cases", () => {
+  it("a token held by another phone is refused, and that phone keeps it", async () => {
+    const s = await setup();
+    await register(s, STUDENT, TOKEN_A, INSTALL_A);
+    const stolen = await register(s, GUARDIAN, TOKEN_A, crypto.randomUUID());
+    expect(stolen).toMatchObject({ status: "invalid" });
+    const rows = await s.t.run((ctx) => ctx.db.query("pushTokens").collect());
+    expect(rows.filter((r) => r.active).map((r) => r.userId)).toEqual([s.studentUser]);
+  });
+
+  it("telemetry never fans out alerts in its own transaction; evaluation pages through every recipient", async () => {
+    const s = await setup();
+    const extra = 30;
+    await s.t.run(async (ctx) => {
+      const assignment = (await ctx.db.get(s.assignmentId))!;
+      for (let i = 0; i < extra; i++) {
+        const userId = await ctx.db.insert("users", { tokenIdentifier: `test|kid${i}`, role: "family", displayName: `K${i}` });
+        const studentId = await ctx.db.insert("students", { displayName: `Kid ${i}`, userId });
+        const assignmentId = await ctx.db.insert("assignments", {
+          studentId,
+          routeVersionId: assignment.routeVersionId,
+          stopId: assignment.stopId,
+          status: "approved",
+        });
+        await ctx.db.insert("notificationPreferences", {
+          userId,
+          assignmentId,
+          approachingEnabled: true,
+          approachingMinutes: 5,
+          updatedAtMs: s.NOW,
+          lastRequestId: crypto.randomUUID(),
+        });
+        await ctx.db.insert("pushTokens", {
+          userId,
+          installationId: crypto.randomUUID(),
+          token: (i + 10).toString(16).padStart(2, "0").repeat(32),
+          environment: "sandbox",
+          permission: "authorized",
+          active: true,
+          updatedAtMs: s.NOW,
+        });
+      }
+    });
+    // Well outside the threshold first, then one fresh fix 4 minutes out.
+    await driveTo(s, 400, s.NOW - 200_000);
+    expect(await alerts(s)).toEqual([]);
+    await s.t.mutation(internal.telemetry.ingestBatch, {
+      deviceId: s.deviceId,
+      events: [event(s.runId, eastForRemaining(240), s.NOW - 2_000)],
+      nowMs: s.NOW - 1_000,
+    });
+    expect(await alerts(s)).toEqual([]); // nothing inside the telemetry transaction
+    await s.t.finishAllScheduledFunctions(vi.runAllTimers);
+    expect(await alerts(s)).toHaveLength(extra);
+    expect(await jobs(s)).toHaveLength(extra);
+  });
+
+  it("a permanent failure for an old token does not disable the phone's new token", async () => {
+    const { s, jobId } = await oneJob();
+    const c = await s.t.mutation(internal.notificationJobs.claim, { jobId, leaseId: "lease-1", nowMs: s.NOW });
+    expect(c).not.toBeNull();
+    await register(s, STUDENT, TOKEN_B, INSTALL_A); // the phone's token rotated mid-send
+    await s.t.mutation(internal.notificationJobs.record, {
+      jobId,
+      leaseId: "lease-1",
+      result: { kind: "permanent_token", reason: "BadDeviceToken" },
+      nowMs: s.NOW,
+    });
+    const rows = await s.t.run((ctx) => ctx.db.query("pushTokens").collect());
+    expect(rows.map((r) => [r.token, r.active])).toEqual([[TOKEN_B, true]]);
+  });
+
+  it("a job expires at the predicted arrival, never after it", async () => {
+    const { s, jobId } = await oneJob();
+    const [alert] = await alerts(s);
+    const row = await s.t.run((ctx) => ctx.db.get(jobId));
+    expect(row!.expiresAtMs).toBe(alert!.predictedArrivalAtMs);
+    const late = await s.t.mutation(internal.notificationJobs.claim, {
+      jobId,
+      leaseId: "lease-late",
+      nowMs: alert!.predictedArrivalAtMs,
+    });
+    expect(late).toBeNull();
+  });
+
+  it("no delivery job when the bus is already due; the inbox still has the alert", async () => {
+    const s = await setup();
+    await enable(s, STUDENT);
+    await register(s, STUDENT, TOKEN_A, INSTALL_A);
+    await driveTo(s, 400, s.NOW - 200_000);
+    // A fix 20 s from the stop, uploaded 24 s late: still fresh enough to
+    // alert, but the predicted arrival has already passed.
+    await ingest(s, {
+      deviceId: s.deviceId,
+      events: [event(s.runId, STOPS_EAST[2]! - 20 * BASELINE_V1.cruiseSpeedMps, s.NOW - 25_000)],
+      nowMs: s.NOW - 1_000,
+    });
+    expect(await alerts(s)).toHaveLength(1);
+    expect(await jobs(s)).toEqual([]);
+  });
+
+  it("a delayed retry of an older save never reverses a newer opt-out", async () => {
+    const s = await setup();
+    const student = s.t.withIdentity({ tokenIdentifier: STUDENT });
+    const enableReq = { requestId: crypto.randomUUID(), assignmentId: s.assignmentId, approachingEnabled: true, approachingMinutes: 5 };
+    await student.mutation(api.notifications.setPreferences, enableReq);
+    await student.mutation(api.notifications.setPreferences, {
+      ...enableReq,
+      requestId: crypto.randomUUID(),
+      approachingEnabled: false,
+    });
+    const replay = await student.mutation(api.notifications.setPreferences, enableReq);
+    expect(replay).toMatchObject({ status: "saved", preference: { approachingEnabled: false } });
   });
 });

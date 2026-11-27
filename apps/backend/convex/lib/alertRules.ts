@@ -4,8 +4,9 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 
 /**
- * Server-side approaching-alert rule (docs/10 §8), evaluated inside the
- * telemetry transaction that stored the estimates.
+ * Server-side approaching-alert rule (docs/10 §8). Telemetry ingest only
+ * schedules it (`alerts:evaluate`), so a route with many recipients can never
+ * make a telemetry upload fail; it runs a page of assignments at a time.
  *
  * "Notify me at 5 minutes" means once, when a reliable, fresh estimate first
  * enters the condition, not on every update. The logical key (recipient,
@@ -37,27 +38,37 @@ async function recipients(ctx: MutationCtx, assignment: Doc<"assignments">): Pro
   return [...new Set(users)];
 }
 
-export async function evaluateApproaching(
+/** Assignments evaluated per scheduled page. */
+export const ASSIGNMENTS_PER_PAGE = 20;
+
+/** Whether this source position may create alerts at all. */
+export function alertable(source: { capturedAtMs: number }, estimates: StopEstimate[], nowMs: number) {
+  // Stale input never alerts, even if an estimate exists for evaluation.
+  if (nowMs - source.capturedAtMs >= ALERT_MAX_INPUT_AGE_MS) return [];
+  return estimates.filter((e) => nowMs < e.validUntilMs);
+}
+
+/** One page of assignments; returns the cursor to continue from, or null when done. */
+export async function evaluateApproachingPage(
   ctx: MutationCtx,
   run: Doc<"runs">,
   source: { eventId: string; capturedAtMs: number },
   estimates: StopEstimate[],
   nowMs: number,
-): Promise<void> {
-  if (run.state !== "active") return;
-  // Stale input never alerts, even if an estimate exists for evaluation.
-  if (nowMs - source.capturedAtMs >= ALERT_MAX_INPUT_AGE_MS) return;
-  const byStop = new Map(estimates.filter((e) => nowMs < e.validUntilMs).map((e) => [e.stopId, e]));
-  if (byStop.size === 0) return;
+  cursor: string | null,
+): Promise<string | null> {
+  if (run.state !== "active") return null;
+  const byStop = new Map(alertable(source, estimates, nowMs).map((e) => [e.stopId, e]));
+  if (byStop.size === 0) return null;
 
   const routeVersionId = ctx.db.normalizeId("routeVersions", run.routeVersionId);
-  if (!routeVersionId) return;
-  const assignments = await ctx.db
+  if (!routeVersionId) return null;
+  const page = await ctx.db
     .query("assignments")
     .withIndex("by_route_version", (q) => q.eq("routeVersionId", routeVersionId))
-    .collect();
+    .paginate({ numItems: ASSIGNMENTS_PER_PAGE, cursor });
 
-  for (const assignment of assignments) {
+  for (const assignment of page.page) {
     if (assignment.status !== "approved") continue;
     const estimate = byStop.get(assignment.stopId);
     if (!estimate) continue;
@@ -93,6 +104,8 @@ export async function evaluateApproaching(
         .query("pushTokens")
         .withIndex("by_user", (q) => q.eq("userId", userId))
         .collect();
+      // Nothing to send once the bus is predicted to be there; the inbox keeps the alert.
+      if (estimate.arrivalAtMs <= nowMs) continue;
       for (const token of tokens) {
         if (!token.active || !token.token) continue;
         if (token.permission !== "authorized" && token.permission !== "provisional") continue;
@@ -105,11 +118,12 @@ export async function evaluateApproaching(
           attempts: 0,
           nextAttemptAtMs: nowMs,
           // An approaching alert is useless once the bus is predicted to be there.
-          expiresAtMs: Math.max(estimate.arrivalAtMs, nowMs + 60_000),
+          expiresAtMs: estimate.arrivalAtMs,
           updatedAtMs: nowMs,
         });
         await ctx.scheduler.runAfter(0, internal.pushDelivery.deliver, { jobId });
       }
     }
   }
+  return page.isDone ? null : page.continueCursor;
 }

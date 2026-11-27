@@ -116,6 +116,7 @@ export const claim = internalMutation({
       attempts: attempt,
       leaseId,
       leaseExpiresAtMs: nowMs + LEASE_MS,
+      sentToken: token.token!,
       updatedAtMs: nowMs,
     });
     return {
@@ -146,7 +147,11 @@ export const record = internalMutation({
         return;
       case "permanent_token":
         await end(ctx, job, "permanent_failure", nowMs, result.reason);
-        await ctx.db.patch(job.pushTokenId, { active: false, updatedAtMs: nowMs });
+        // Only the token that was rejected: the phone may have rotated to a new one since.
+        const token = await ctx.db.get(job.pushTokenId);
+        if (token && token.token === job.sentToken) {
+          await ctx.db.patch(token._id, { active: false, updatedAtMs: nowMs });
+        }
         return;
       case "permanent":
         await end(ctx, job, "permanent_failure", nowMs, result.reason);
