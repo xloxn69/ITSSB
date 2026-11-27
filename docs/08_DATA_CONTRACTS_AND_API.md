@@ -387,6 +387,33 @@ Age is `now - capturedAtMs`, measured on a server-aligned clock. A query result 
 | `notifications:registerDevice` | Installation identity, APNs token, app environment, permission status | Associate current token with the signed-in account. |
 | `routes:removeAssignment` | `requestId`, assignment, reason, authorized driver/admin context | Scoped revocation and audit record; not global account deletion. |
 
+### 9.1 Enrollment and guardian linking (implemented)
+
+Types: `packages/contracts/src/enrollment.ts`; fixtures `enrollment.*.json`, `guardianLinks.*.json`. Family functions resolve the caller from the verified sign-in identity, which need not have an approved account yet; they answer `access_unavailable` (`unauthenticated`) when signed out. A pending request grants no tracking. Staff functions follow §11 (staff role, `access_unavailable` before any read, audited denials).
+
+**Tokens.** 20 Crockford base32 characters, shown as `ABCD-EFGH-JKMN-PQRS-TVWX`, accepted in any case with or without dashes (`normalizeToken`). A scanned link must be `https://<allowed host>/join?token=…` (enrollment), `/link` (guardian) or `/checkin` (trip), with no other parameters (`parseScannedToken`). A token that is not accepted answers `status: "token_problem"` with `problem`: `invalid` (unknown, malformed or revoked, deliberately alike), `expired`, `wrong_purpose`, `already_used` (a single-use guardian invitation redeemed by another account) or `unavailable` (its route has no approved version).
+
+| Function | Who | Args | Returns |
+| --- | --- | --- | --- |
+| `enrollment:previewInvitation` (query) | family | `{ token }` | `ready` with `routeLabel`, `direction`, `expiresAtMs`, `stops` (`stopId`, `label`, `sequence`, `instructions`); or `token_problem`. No position, roster or other family's data. |
+| `enrollment:request` (mutation) | family | `{ requestId, token, studentName, address, stopId \| null, note \| null }` | `submitted` with `enrollmentRequestId`, `requestStatus`; `token_problem`; or `refused` (`invalid_details`, `stop_not_eligible`, `request_id_conflict`, `already_requested`, `already_enrolled`). `requestId` is per applicant; a retry with the same content returns the stored result even after the invitation expires. `stopId: null` asks for manual review. |
+| `enrollment:myRequests` (query) | family | `{}` | `ready` with `requests` (`enrollmentRequestId`, `routeLabel`, `direction`, `studentName`, `requestedStopLabel`, `status: pending \| approved \| rejected`, `submittedAtMs`, `decidedAtMs`, `decisionReason` for a rejection). Never the address. |
+| `guardianLinks:request` (mutation) | family | `{ requestId, token, guardianName }` | `submitted` with `linkRequestId`, `requestStatus`; `token_problem`; or `refused` (`invalid_details`, `request_id_conflict`, `already_linked`). |
+| `guardianLinks:myRequests` (query) | family | `{}` | `ready` with `requests` (`linkRequestId`, `status`, `submittedAtMs`, `decidedAtMs`, `decisionReason`, `studentDisplayName` only while approved). |
+| `enrollment:createRouteInvitation` (action) | staff | `{ routeId, ttlMs }` | `created` with `invitationId`, `token` (shown once), `expiresAtMs`; or `refused` (`not_found`, `invalid_ttl`, `route_unavailable`). |
+| `guardianLinks:createInvitation` (action) | staff | `{ studentId, ttlMs }` | Same shape; single use. |
+| `enrollment:listInvitations` (query) | staff | `{}` | `ready` with `invitations` (never the token or its hash). |
+| `enrollment:revokeInvitation` (mutation) | staff | `{ invitationId }` | `revoked` (idempotent) or `refused` `not_found`. |
+| `enrollment:listRequests` (query) | staff | `{}` | `ready` with pending requests first, including the private `address` and the route's current `eligibleStops`. |
+| `enrollment:approve` (mutation) | staff | `{ enrollmentRequestId, stopId }` | `approved` with `assignmentId`; or `refused` (`not_found`, `already_decided`, `stop_not_eligible`, `route_unavailable`, `account_conflict`: the sign-in is a staff or driver account, or already belongs to a differently named student). The stop must be in the route's current version. |
+| `enrollment:reject` (mutation) | staff | `{ enrollmentRequestId, reason }` | `rejected`; or `refused` (`reason_required`, …). The reason is kept on the request and shown to the family, never copied into the audit log. |
+| `guardianLinks:listRequests` / `approve` / `reject` | staff | `{}` / `{ linkRequestId }` / `{ linkRequestId, reason }` | As enrollment; `approve` returns `guardianLinkId`. |
+| `guardianLinks:revoke` (mutation) | staff | `{ guardianLinkId, reason }` | `revoked`; future tracking reads stop at once. |
+| `students:list` (query) | staff | `{}` | `ready` with `students` (assignments and guardian links; no addresses). |
+| `audit:list` (query) | staff | `{ limit? }` | `ready` with the newest `entries` (`actorName`, `action`, `resourceType`, `resourceId`, `result`, `reason`, `source`, `capturedAtMs`). Audit rows never hold tokens or addresses. |
+
+The Pi does not call these functions, so the device models are unaffected; the iOS app decodes the family results with the fixtures above.
+
 Private enrollment fields belong only in authenticated submissions and appropriately restricted storage. Treat a scanned link as untrusted input: allow expected scheme/host/path and a bounded token, then ask the backend to validate purpose, expiration, revocation, route, and account eligibility.
 
 The shared trip challenge supports multiple legitimate students. Do not invalidate it globally after the first student scans it. Deduplicate the resulting check-in by student/run/phase. A scan result must identify its source as a student claim; staff-confirmed corrections remain distinguishable.

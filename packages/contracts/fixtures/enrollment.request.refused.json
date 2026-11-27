@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "status": "refused",
+  "serverNowMs": 1795608000000,
+  "code": "stop_not_eligible",
+  "message": "That stop isn't one of this route's approved stops."
+}

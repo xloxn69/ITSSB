@@ -223,6 +223,13 @@ export default defineSchema({
     routeVersionId: v.id("routeVersions"),
     stopId: v.id("stops"),
     status: v.union(v.literal("approved"), v.literal("revoked")),
+    // Optional so assignments created before enrollment existed stay valid.
+    approvedByUserId: v.optional(v.id("users")),
+    approvedAtMs: v.optional(v.number()),
+    enrollmentRequestId: v.optional(v.id("enrollmentRequests")),
+    revokedAtMs: v.optional(v.number()),
+    revokedByUserId: v.optional(v.id("users")),
+    revokeReason: v.optional(v.string()),
   })
     .index("by_student", ["studentId"])
     .index("by_route_version", ["routeVersionId"]),
@@ -232,9 +239,95 @@ export default defineSchema({
     guardianUserId: v.id("users"),
     studentId: v.id("students"),
     status: v.union(v.literal("approved"), v.literal("revoked")),
+    // Optional so links created before guardian linking existed stay valid.
+    approvedByUserId: v.optional(v.id("users")),
+    approvedAtMs: v.optional(v.number()),
+    revokedAtMs: v.optional(v.number()),
+    revokedByUserId: v.optional(v.id("users")),
+    revokeReason: v.optional(v.string()),
   })
     .index("by_guardian", ["guardianUserId"])
-    .index("by_guardian_student", ["guardianUserId", "studentId"]),
+    .index("by_guardian_student", ["guardianUserId", "studentId"])
+    .index("by_student", ["studentId"]),
+
+  /**
+   * A scoped opaque token (docs/09 §2–§3): a route enrollment invitation, a
+   * guardian link invitation, or a trip check-in challenge. Only the SHA-256
+   * hash of the token is stored. A token is checked for its own purpose,
+   * expiry, revocation, and scope; it never grants anything by decoding.
+   */
+  scopedTokens: defineTable({
+    tokenHash: v.string(),
+    purpose: v.union(v.literal("route_enrollment"), v.literal("guardian_link"), v.literal("trip_check_in")),
+    /** route_enrollment: the route whose current approved stops are offered. */
+    routeId: v.optional(v.id("routes")),
+    /** guardian_link: the one student this invitation may link. */
+    studentId: v.optional(v.id("students")),
+    /** trip_check_in: the one run this challenge belongs to. */
+    runId: v.optional(v.id("runs")),
+    issuedByUserId: v.optional(v.id("users")),
+    issuedByDeviceId: v.optional(v.id("devices")),
+    issuedAtMs: v.number(),
+    expiresAtMs: v.number(),
+    revoked: v.boolean(),
+    /** Single-use tokens (guardian_link) record their first use. */
+    singleUse: v.boolean(),
+    usedAtMs: v.optional(v.number()),
+    usedByTokenIdentifier: v.optional(v.string()),
+  })
+    .index("by_token_hash", ["tokenHash"])
+    .index("by_purpose", ["purpose", "issuedAtMs"]),
+
+  /**
+   * A private enrollment request (docs/09 §4). Keyed by the applicant's
+   * verified sign-in identity, because a new applicant has no approved
+   * `users` row. Staff approval creates the account link, the student, and
+   * the assignment; until then the applicant can track nothing.
+   */
+  enrollmentRequests: defineTable({
+    applicantTokenIdentifier: v.string(),
+    requestId: v.string(),
+    invitationId: v.id("scopedTokens"),
+    routeId: v.id("routes"),
+    /** The route version whose stops were offered. */
+    routeVersionId: v.id("routeVersions"),
+    studentName: v.string(),
+    /** Private. Returned only to staff review, never to drivers or other families. */
+    address: v.string(),
+    note: v.optional(v.string()),
+    requestedStopId: v.optional(v.id("stops")),
+    status: v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected")),
+    submittedAtMs: v.number(),
+    reviewedByUserId: v.optional(v.id("users")),
+    reviewedAtMs: v.optional(v.number()),
+    decisionReason: v.optional(v.string()),
+    assignmentId: v.optional(v.id("assignments")),
+  })
+    .index("by_applicant_request", ["applicantTokenIdentifier", "requestId"])
+    .index("by_applicant", ["applicantTokenIdentifier"])
+    .index("by_status", ["status", "submittedAtMs"]),
+
+  /**
+   * A guardian's request to link one student, made with a school-issued
+   * single-use invitation (docs/09 §5). Approval creates the `guardianLinks`
+   * row; a name alone never does.
+   */
+  guardianLinkRequests: defineTable({
+    guardianTokenIdentifier: v.string(),
+    requestId: v.string(),
+    invitationId: v.id("scopedTokens"),
+    studentId: v.id("students"),
+    guardianName: v.string(),
+    status: v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected")),
+    submittedAtMs: v.number(),
+    reviewedByUserId: v.optional(v.id("users")),
+    reviewedAtMs: v.optional(v.number()),
+    decisionReason: v.optional(v.string()),
+    guardianLinkId: v.optional(v.id("guardianLinks")),
+  })
+    .index("by_guardian_request", ["guardianTokenIdentifier", "requestId"])
+    .index("by_guardian", ["guardianTokenIdentifier"])
+    .index("by_status", ["status", "submittedAtMs"]),
 
   /** Append-only record of sensitive actions. Never update or delete rows. */
   auditLog: defineTable({
@@ -242,11 +335,24 @@ export default defineSchema({
       v.object({ kind: v.literal("user"), userId: v.id("users") }),
       v.object({ kind: v.literal("device"), deviceId: v.id("devices") }),
       v.object({ kind: v.literal("system") }),
+      /** A signed-in applicant who has no approved `users` row yet. */
+      v.object({ kind: v.literal("identity"), tokenIdentifier: v.string() }),
     ),
     action: v.string(),
     resourceType: v.string(),
     resourceId: v.optional(v.string()),
     result: v.union(v.literal("allowed"), v.literal("denied")),
     atMs: v.number(),
-  }).index("by_resource", ["resourceType", "resourceId"]),
+    // Optional so rows written before enrollment existed stay valid.
+    /** Why, for removals, rejections, corrections. Never a token or an address. */
+    reason: v.optional(v.string()),
+    /** `staff_web`, `family_app`, or `driver_device`. */
+    source: v.optional(v.string()),
+    /** Device that carried a driver's action. */
+    viaDeviceId: v.optional(v.id("devices")),
+    /** Device capture time of a queued action; `atMs` is the receipt time. */
+    capturedAtMs: v.optional(v.number()),
+  })
+    .index("by_resource", ["resourceType", "resourceId"])
+    .index("by_at", ["atMs"]),
 });

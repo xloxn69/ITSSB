@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "status": "ready",
+  "serverNowMs": 1795608000000,
+  "requests": [
+    {
+      "linkRequestId": "demo_link_request_001",
+      "status": "pending",
+      "submittedAtMs": 1795607000000,
+      "decidedAtMs": null,
+      "decisionReason": null,
+      "studentDisplayName": null
+    },
+    {
+      "linkRequestId": "demo_link_request_002",
+      "status": "approved",
+      "submittedAtMs": 1795500000000,
+      "decidedAtMs": 1795510000000,
+      "decisionReason": null,
+      "studentDisplayName": "Sam Example"
+    }
+  ]
+}

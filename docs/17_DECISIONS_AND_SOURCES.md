@@ -172,4 +172,14 @@ For a material implementation decision, add a short record with: date, decision,
 - **Verification:** backend tests with a Clerk-shaped identity (`issuer|subject`). Not yet run against a real Clerk application or Convex deployment; the owner creates those (apps/backend/README.md).
 - **Responsible:** the owner holds the Clerk application and its keys.
 
+### Record: enrollment and guardian linking (26 November 2026)
+
+- **Decision:** the person who scans a route invitation and requests enrollment is the student's own account (relationship `self`); a guardian links only through a separate school-issued guardian invitation. Approving one never creates the other. Check-in identity comes from the student's session, so the enrolling account must be the student's.
+- **Pending accounts:** a new applicant has no approved `users` row. Enrollment and link requests are keyed by the verified sign-in identity (`tokenIdentifier`); only staff approval creates the `family` account, the student, the assignment or the guardian link. Until then every tracking query answers `access_unavailable`.
+- **Tokens:** one `scopedTokens` table with an explicit purpose (`route_enrollment`, `guardian_link`, `trip_check_in`), 20-character Crockford base32 codes (100 random bits) generated only in actions, stored as SHA-256 hashes. Enrollment invitations are multi-use until expiry (one route poster serves many families; 1 hour to 30 days). Guardian invitations are single use (at most 14 days), because each names one student.
+- **Stop eligibility:** there is no geocoder yet (extra spending). The eligible stops are the approved stops of the invitation route's current version; the server rechecks the chosen stop on request and again at approval. "None of these fit" sends the request to manual review with no stop; no stop is ever created from an address.
+- **Alternatives considered:** a pending `users` row (rejected: `getUser` would start treating unapproved people as provisioned), name-matching for guardians (rejected by docs/09 §5).
+- **Affected:** docs/08 §9, `packages/contracts/src/enrollment.ts`, `apps/backend/convex/{enrollment,guardianLinks,students,audit}.ts`.
+- **Verification:** backend tests with fictional identities; live sign-in not run (no Clerk application yet).
+
 Keep documented plans, executed checks, and measured outcomes separate. A finished Markdown guide is useful implementation work; it is not a substitute for the application and pilot evidence defined in [13_TESTING_AND_ACCEPTANCE.md](13_TESTING_AND_ACCEPTANCE.md).

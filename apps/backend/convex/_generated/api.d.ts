@@ -8,19 +8,25 @@
  * @module
  */
 
+import type * as audit from "../audit.js";
 import type * as devices from "../devices.js";
 import type * as driverGrants from "../driverGrants.js";
+import type * as enrollment from "../enrollment.js";
 import type * as fleet from "../fleet.js";
+import type * as guardianLinks from "../guardianLinks.js";
 import type * as health from "../health.js";
 import type * as http from "../http.js";
 import type * as lib_authz from "../lib/authz.js";
 import type * as lib_deviceAuth from "../lib/deviceAuth.js";
+import type * as lib_family from "../lib/family.js";
 import type * as lib_routeChecks from "../lib/routeChecks.js";
 import type * as lib_routeVersions from "../lib/routeVersions.js";
 import type * as lib_staff from "../lib/staff.js";
+import type * as lib_tokens from "../lib/tokens.js";
 import type * as routes from "../routes.js";
 import type * as runs from "../runs.js";
 import type * as seed from "../seed.js";
+import type * as students from "../students.js";
 import type * as telemetry from "../telemetry.js";
 import type * as tracking from "../tracking.js";
 import type * as tripEvents from "../tripEvents.js";
@@ -33,19 +39,25 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  audit: typeof audit;
   devices: typeof devices;
   driverGrants: typeof driverGrants;
+  enrollment: typeof enrollment;
   fleet: typeof fleet;
+  guardianLinks: typeof guardianLinks;
   health: typeof health;
   http: typeof http;
   "lib/authz": typeof lib_authz;
   "lib/deviceAuth": typeof lib_deviceAuth;
+  "lib/family": typeof lib_family;
   "lib/routeChecks": typeof lib_routeChecks;
   "lib/routeVersions": typeof lib_routeVersions;
   "lib/staff": typeof lib_staff;
+  "lib/tokens": typeof lib_tokens;
   routes: typeof routes;
   runs: typeof runs;
   seed: typeof seed;
+  students: typeof students;
   telemetry: typeof telemetry;
   tracking: typeof tracking;
   tripEvents: typeof tripEvents;
