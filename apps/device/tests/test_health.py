@@ -103,12 +103,12 @@ def test_health_never_touches_the_queue_and_a_success_ends_an_offline_pause(db, 
     up = Uploader(db, board, transport, TOKEN, now_ms=Clock())
     transport.offline = True
     assert up.upload_once() == "transport_error"
-    assert up.paused_offline
+    assert up.paused_unreachable
     assert up.send_health() == "transport_error"
     assert board.snapshot()["network"]["status"] == "offline"
     transport.offline = False
     assert up.send_health() == "ok"
-    assert not up.paused_offline  # the link is back: resume uploads now
+    assert not up.paused_unreachable  # the link is back: resume uploads now
     assert board.snapshot()["network"]["status"] == "online"
     assert [db.outbox_status(i) for i in ids] == ["pending"] * 3  # health acks nothing
 
