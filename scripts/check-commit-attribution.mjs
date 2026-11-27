@@ -25,7 +25,7 @@ export function attributionLines(message) {
 
 /** Why a subject breaks the convention, or null. Git's own merge and revert subjects pass. */
 export function subjectProblem(subject) {
-  if (CONVENTIONAL.test(subject) || /^Merge /.test(subject) || /^Revert "/.test(subject)) {
+  if (CONVENTIONAL.test(subject) || subject.startsWith("Merge ") || subject.startsWith('Revert "')) {
     return null;
   }
   return (
@@ -76,5 +76,5 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     );
     process.exit(1);
   }
-  console.log(`OK: no AI attribution or non-conventional subjects in ${base}..${head}`);
+  process.stdout.write(`OK: no AI attribution or non-conventional subjects in ${base}..${head}\n`);
 }
