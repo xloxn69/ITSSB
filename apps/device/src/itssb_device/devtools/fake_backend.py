@@ -21,6 +21,13 @@ Trip events follow docs/08 §6: a known grant covering the route version
 content, and an end only for the run that was started. Modes `down` and
 `drop_response` apply to them too.
 
+QR codes, the roster and roster actions follow docs/08 §9.2 with FICTIONAL
+students (`roster_students`, per route version). Roster actions keep a
+receipt per `requestId` fingerprinted without the grant, like
+apps/backend/convex/deviceRoster.ts, and every raw body is kept in
+`action_bodies` so tests can check a retry resends the same bytes.
+`reject_actions` forces a rejection code for every new action.
+
 `GET /_stats` lists stored eventIds and every request's eventIds (test-only).
 Binds to 127.0.0.1 only. Never use it as a real backend.
 """
@@ -32,8 +39,11 @@ import contextlib
 import json
 import threading
 import time
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+
+GRANT_PATHS = ("/device/v1/qr-codes", "/device/v1/roster", "/device/v1/roster-actions")
 
 IDENTITY_FIELDS = (
     "bootId",
@@ -60,6 +70,14 @@ class FakeBackend(ThreadingHTTPServer):
             str, tuple[str, dict[str, Any]]
         ] = {}  # requestId -> (body, result)
         self.runs: dict[str, dict[str, Any]] = {}
+        self.qr_issued: list[dict[str, Any]] = []
+        self.roster_students: dict[str, list[dict[str, Any]]] = {}  # route version -> students
+        self.check_ins: dict[tuple[str, str], list[dict[str, Any]]] = {}  # (run, assignment)
+        self.action_receipts: dict[str, tuple[str, dict[str, Any]]] = {}
+        self.action_bodies: dict[str, list[bytes]] = {}
+        self.removed: set[str] = set()
+        self.reject_actions: str | None = None
+        self.qr_ttl_ms = 600_000
         super().__init__(("127.0.0.1", port), _Handler)
 
     @property
@@ -167,6 +185,139 @@ class FakeBackend(ThreadingHTTPServer):
             self.trip_requests[rid] = (content, result)
             return 200, result
 
+    # ── docs/08 §9.2 (FICTIONAL) ─────────────────────────────────────
+
+    def _route_of(self, run_id: Any) -> str | None:
+        run = self.runs.get(run_id) if isinstance(run_id, str) else None
+        return run["route"] if run else None
+
+    def qr_code(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        now = int(time.time() * 1000)
+        with self.lock:
+            routes = self.grants.get(body.get("driverOperatingGrant", ""))
+            if routes is None:
+                return _err(403, "GRANT_NOT_AUTHORIZED")
+            purpose = body.get("purpose")
+            if purpose == "trip_check_in":
+                route = self._route_of(body.get("runId"))
+                if route is None or route not in routes:
+                    return _err(403, "RUN_NOT_AUTHORIZED")
+                if self.runs[body["runId"]]["state"] != "active":
+                    return _err(403, "RUN_NOT_AUTHORIZED")
+                ttl, path = self.qr_ttl_ms, "/checkin"
+            elif purpose == "route_enrollment":
+                if body.get("routeVersionId") not in routes:
+                    return _err(403, "GRANT_NOT_AUTHORIZED")
+                ttl, path = 86_400_000, "/join"
+            else:
+                return _err(400, "INVALID_REQUEST")
+            n = len(self.qr_issued) + 1
+            token = f"FAKE{n:04d}" + "X" * 12  # 20 characters, FICTIONAL
+            self.qr_issued.append({"purpose": purpose, "token": token})
+            return 200, {
+                "schemaVersion": 1,
+                "purpose": purpose,
+                "token": token,
+                "linkPath": path,
+                "expiresAtMs": now + ttl,
+                "serverNowMs": now,
+            }
+
+    def _current(self, run_id: str, assignment_id: str) -> dict[str, Any] | None:
+        rows = self.check_ins.get((run_id, assignment_id), [])
+        return rows[-1] if rows else None
+
+    def roster(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        now = int(time.time() * 1000)
+        with self.lock:
+            routes = self.grants.get(body.get("driverOperatingGrant", ""))
+            if routes is None:
+                return _err(403, "GRANT_NOT_AUTHORIZED")
+            run_id = body.get("runId")
+            route = self._route_of(run_id)
+            if route is None or route not in routes:
+                return _err(403, "RUN_NOT_AUTHORIZED")
+            students = [
+                {**s, "checkIn": self._current(run_id, s["assignmentId"])}
+                for s in self.roster_students.get(route, [])
+                if s["assignmentId"] not in self.removed
+            ]
+            students.sort(key=lambda s: (s["stopSequence"], s["studentDisplayName"]))
+            return 200, {
+                "schemaVersion": 1,
+                "runId": run_id,
+                "routeVersionId": route,
+                "students": students,
+                "serverNowMs": now,
+            }
+
+    def roster_action(self, raw: bytes, body: dict[str, Any]) -> dict[str, Any]:
+        now = int(time.time() * 1000)
+        rid = str(body.get("requestId"))
+        content = {k: v for k, v in body.items() if k != "driverOperatingGrant"}
+        fingerprint = json.dumps(content, sort_keys=True)
+
+        def result(status: str, check_in: Any = None, **extra: Any) -> dict[str, Any]:
+            r = {"schemaVersion": 1, "requestId": rid, "status": status, "serverNowMs": now}
+            r.update({"checkIn": check_in} if status != "rejected" else extra)
+            return r
+
+        with self.lock:
+            self.action_bodies.setdefault(rid, []).append(raw)
+            if rid in self.action_receipts:
+                old, stored = self.action_receipts[rid]
+                if old != fingerprint:
+                    return result("rejected", code="request_id_conflict", message="conflict")
+                return stored
+            out = self._decide(body, result, now)
+            self.action_receipts[rid] = (fingerprint, out)
+            return out
+
+    def _decide(self, body: dict[str, Any], result: Callable[..., dict], now: int) -> dict:
+        if self.reject_actions:
+            return result("rejected", code=self.reject_actions, message=self.reject_actions)
+        routes = self.grants.get(body.get("driverOperatingGrant", ""))
+        if routes is None:
+            return result("rejected", code="grant_not_authorized", message="grant")
+        aid = body.get("assignmentId")
+        known = {s["assignmentId"] for r in routes for s in self.roster_students.get(r, [])}
+        if aid not in known:
+            return result("rejected", code="assignment_not_authorized", message="assignment")
+        kind = body.get("type")
+        if kind == "removeAssignment":
+            if aid in self.removed:
+                return result("rejected", code="already_removed", message="removed")
+            self.removed.add(aid)
+            return result("accepted")
+        if kind == "setSeatNote":
+            return result("accepted")
+        run_id = body.get("runId")
+        if self._route_of(run_id) not in routes:
+            return result("rejected", code="run_not_authorized", message="run")
+        rows = self.check_ins.setdefault((run_id, aid), [])
+        n = sum(len(v) for v in self.check_ins.values()) + 1
+        row = {
+            "checkInId": f"fake_check_in_{n:03d}",
+            "status": body.get("status"),
+            "source": "staff_recorded",
+            "recordedAtMs": body.get("capturedAtMs"),
+            "receivedAtMs": now,
+        }
+        if kind == "recordAttendance":
+            if rows:
+                return result("already_recorded", rows[0])
+            rows.append(row)
+            return result("accepted", row)
+        if not rows or rows[-1]["checkInId"] != body.get("correctsCheckInId"):
+            return result("rejected", code="correction_target_invalid", message="target")
+        row["source"] = "staff_correction"
+        rows.append(row)
+        return result("accepted", row)
+
+
+def _err(status: int, code: str) -> tuple[int, dict[str, Any]]:
+    return status, {"schemaVersion": 1, "error": {"code": code, "message": code}}
+
 
 class _Handler(BaseHTTPRequestHandler):
     server: FakeBackend
@@ -202,15 +353,42 @@ class _Handler(BaseHTTPRequestHandler):
             body = {"events": sorted(self.server.events), "requests": list(self.server.requests)}
         self._json(200, body)
 
+    def _grant_request(self, raw: bytes) -> None:
+        srv = self.server
+        if srv.mode == "down":
+            self._error(503, "TEMPORARILY_UNAVAILABLE")
+            return
+        try:
+            body = json.loads(raw)
+            assert isinstance(body, dict)  # noqa: S101
+        except (ValueError, AssertionError):
+            self._error(400, "MALFORMED_JSON")
+            return
+        if self.path == "/device/v1/qr-codes":
+            status, result = srv.qr_code(body)
+        elif self.path == "/device/v1/roster":
+            status, result = srv.roster(body)
+        else:
+            status, result = 200, srv.roster_action(raw, body)
+        if srv.mode == "drop_response":
+            self.close_connection = True
+            with contextlib.suppress(OSError):
+                self.connection.shutdown(2)
+            return
+        self._json(status, result)
+
     def do_POST(self) -> None:
         srv = self.server
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length)
-        if self.path not in ("/device/v1/telemetry", "/device/v1/trip-events"):
+        if self.path not in ("/device/v1/telemetry", "/device/v1/trip-events", *GRANT_PATHS):
             self._error(404, "NOT_FOUND")
             return
         if self.headers.get("Authorization") != f"Bearer {srv.token}" or srv.mode == "unauthorized":
             self._error(401, "UNAUTHENTICATED")
+            return
+        if self.path in GRANT_PATHS:
+            self._grant_request(raw)
             return
         if self.path == "/device/v1/trip-events":
             if srv.mode == "down":
