@@ -15,6 +15,10 @@ Shared database, authorization, and device ingestion. Spec:
 | `convex/telemetry.ts` | Idempotent per-event ingestion; late data kept as history only, including bounded history after a run ends |
 | `convex/runs.ts` | `runs.live` query (staff, the assigned student, or an approved guardian); returns null for unknown *and* forbidden runs |
 | `convex/tracking.ts` | Family queries `myAssignments`, `myRun`, `myRoute` (docs/08 §8), checked against the shared fixtures |
+| `convex/routes.ts` | Staff route library and draft review: `list`, `listDrafts`, `getDraft`, `approveDraft`, `rejectDraft`; internal `recordDraft` (docs/08 §11) |
+| `convex/fleet.ts` | Staff device and driver pages: `listDevices`, `setBusLabel`, `revokeDevice`, `listDrivers` |
+| `convex/lib/staff.ts` | `staffCaller`: the staff-role check every staff function runs first |
+| `convex/lib/routeVersions.ts` | `approvedVersionForNewRun`: the approved version a new run pins |
 | `convex/lib/authz.ts` | `getUser` / `requireUser` / `canViewRun`, the one place access rules live |
 | `convex/lib/deviceAuth.ts` | Device secrets are stored only as SHA-256 hashes |
 | `convex/auth.config.ts` | Clerk sign-in; issuer from `CLERK_JWT_ISSUER_DOMAIN` |

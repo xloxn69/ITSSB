@@ -12,6 +12,7 @@ import { ConvexError, v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx } from "./_generated/server";
 import { grantForDevice } from "./driverGrants";
+import { isApprovedForNewRuns } from "./lib/routeVersions";
 
 /**
  * Online run start and end (docs/07 §8, docs/08 §6), committed in one
@@ -138,6 +139,9 @@ async function startRun(
   const routeVersionId = ctx.db.normalizeId("routeVersions", r.routeVersionId);
   if (!routeVersionId || !grant.routeVersionIds.includes(routeVersionId)) return GRANT_DENIED;
   if (!(await ctx.db.get(routeVersionId))) return GRANT_DENIED;
+  // A version superseded by a later approval can't start a new run, even if
+  // an older grant still names it (docs/08 §11).
+  if (!(await isApprovedForNewRuns(ctx, routeVersionId))) return GRANT_DENIED;
 
   if (r.capturedAtMs > nowMs + MAX_FUTURE_SKEW_MS || r.capturedAtMs < nowMs - MAX_START_AGE_MS) {
     return fail(400, "CLOCK_OUT_OF_RANGE", "capturedAtMs is too far from the server clock.");
