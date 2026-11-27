@@ -95,6 +95,8 @@ const SEED_GUARDED_TABLES = [
   "scopedTokens",
   "enrollmentRequests",
   "guardianLinkRequests",
+  "checkIns",
+  "requestReceipts",
   "auditLog",
   "deviceHealth",
 ] as const satisfies readonly TableNames[];

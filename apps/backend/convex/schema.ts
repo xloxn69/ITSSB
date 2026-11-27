@@ -230,6 +230,11 @@ export default defineSchema({
     revokedAtMs: v.optional(v.number()),
     revokedByUserId: v.optional(v.id("users")),
     revokeReason: v.optional(v.string()),
+    /** Driver-maintained seat and operational note (docs/09 §9). Staff data; never sent to families. */
+    seatLabel: v.optional(v.string()),
+    driverNote: v.optional(v.string()),
+    /** Capture time of the change that set them; an older queued change is superseded. */
+    seatNoteCapturedAtMs: v.optional(v.number()),
   })
     .index("by_student", ["studentId"])
     .index("by_route_version", ["routeVersionId"]),
@@ -276,7 +281,49 @@ export default defineSchema({
     usedByTokenIdentifier: v.optional(v.string()),
   })
     .index("by_token_hash", ["tokenHash"])
-    .index("by_purpose", ["purpose", "issuedAtMs"]),
+    .index("by_purpose", ["purpose", "issuedAtMs"])
+    .index("by_run", ["runId"]),
+
+  /**
+   * Attendance records (docs/09 §6–§9). Append-only: a correction is a new
+   * row naming the one it corrects, so history is never erased. The current
+   * status for a student, run and phase is the newest row.
+   */
+  checkIns: defineTable({
+    runId: v.id("runs"),
+    studentId: v.id("students"),
+    assignmentId: v.id("assignments"),
+    phase: v.literal("boarding"),
+    status: v.union(v.literal("boarded"), v.literal("not_boarded")),
+    source: v.union(v.literal("student_qr_claim"), v.literal("staff_recorded"), v.literal("staff_correction")),
+    /** Student for a QR claim; the driver or staff member otherwise. */
+    recordedByUserId: v.id("users"),
+    viaDeviceId: v.optional(v.id("devices")),
+    challengeId: v.optional(v.id("scopedTokens")),
+    correctsCheckInId: v.optional(v.id("checkIns")),
+    reason: v.optional(v.string()),
+    /** When it happened (device capture time for a queued action). */
+    recordedAtMs: v.number(),
+    receivedAtMs: v.number(),
+  })
+    .index("by_run_student_phase", ["runId", "studentId", "phase"])
+    .index("by_run", ["runId"]),
+
+  /**
+   * Idempotency receipts for check-ins and driver roster actions. `scope` is
+   * `user:<id>` or `device:<id>`; the same scope and `requestId` with the
+   * same `fingerprint` returns the stored outcome, a different one conflicts.
+   */
+  requestReceipts: defineTable({
+    scope: v.string(),
+    requestId: v.string(),
+    fingerprint: v.string(),
+    status: v.union(v.literal("accepted"), v.literal("already_recorded"), v.literal("superseded"), v.literal("rejected")),
+    checkInId: v.optional(v.id("checkIns")),
+    code: v.optional(v.string()),
+    message: v.optional(v.string()),
+    atMs: v.number(),
+  }).index("by_scope_request", ["scope", "requestId"]),
 
   /**
    * A private enrollment request (docs/09 §4). Keyed by the applicant's
