@@ -849,7 +849,11 @@ def test_replaying_another_routes_request_id_reveals_nothing(tmp_path, pin_hash,
     env = Env(tmp_path, pin_hash, backend)
     env.roster()
     request_id = rid()
-    intent = {"type": "recordAttendance", "assignmentId": "demo_assignment_002", "status": "boarded"}
+    intent = {
+        "type": "recordAttendance",
+        "assignmentId": "demo_assignment_002",
+        "status": "boarded",
+    }
     assert env.action(requestId=request_id, **intent)[0] == 200
     env.tick()
     assert env.post(f"/api/runs/{env.run_id}/end", {"requestId": rid()})[1]["endSync"] == "accepted"
