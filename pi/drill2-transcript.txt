@@ -1,0 +1,85 @@
+23:10:55 run js7fbtjdhwy4vf6yv381kng6qx8k17ys nextRunSequence=50
+23:10:55 NOTE: GPS positions are FICTIONAL (fake GPSD); link loss is SIMULATED
+23:10:55 == 1 baseline: link up, GPS fix
+23:10:55   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752655627 net=online backend=ok pending=2 acked=49 rejected=0 behind=152s savedThisBoot=1
+23:11:00   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752660628 net=online backend=ok pending=1 acked=52 rejected=0 behind=1s savedThisBoot=3
+23:11:05   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752665630 net=online backend=ok pending=1 acked=55 rejected=0 behind=0s savedThisBoot=6
+23:11:10   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752670631 net=online backend=ok pending=1 acked=57 rejected=0 behind=1s savedThisBoot=8
+23:11:16   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752675633 net=online backend=ok pending=1 acked=60 rejected=0 behind=0s savedThisBoot=11
+23:11:21   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752680634 net=online backend=ok pending=1 acked=62 rejected=0 behind=1s savedThisBoot=13
+23:11:26   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752685635 net=online backend=ok pending=1 acked=65 rejected=0 behind=0s savedThisBoot=16
+23:11:31   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752690637 net=online backend=ok pending=1 acked=67 rejected=0 behind=1s savedThisBoot=18
+23:11:36   driver screen capture point: 1-baseline
+23:11:44 == 2 D07 link DOWN, GPS still valid
+23:11:44   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752703640 net=online backend=ok pending=1 acked=74 rejected=0 behind=0s savedThisBoot=25
+23:11:49   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752708642 net=online backend=no_response pending=3 acked=74 rejected=0 behind=5s savedThisBoot=27
+23:11:54   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752713643 net=online backend=unreachable pending=6 acked=74 rejected=0 behind=10s savedThisBoot=30
+23:11:59   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752718644 net=online backend=unreachable pending=8 acked=74 rejected=0 behind=15s savedThisBoot=32
+23:12:04   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752723646 net=online backend=unreachable pending=11 acked=74 rejected=0 behind=20s savedThisBoot=35
+23:12:09   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752728647 net=online backend=unreachable pending=13 acked=74 rejected=0 behind=25s savedThisBoot=37
+23:12:14   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752733648 net=online backend=unreachable pending=16 acked=74 rejected=0 behind=30s savedThisBoot=40
+23:12:19   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752738650 net=online backend=unreachable pending=18 acked=74 rejected=0 behind=35s savedThisBoot=42
+23:12:24   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752743651 net=online backend=unreachable pending=21 acked=74 rejected=0 behind=40s savedThisBoot=45
+23:12:29   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752748653 net=online backend=unreachable pending=23 acked=74 rejected=0 behind=45s savedThisBoot=47
+23:12:34   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752753654 net=online backend=unreachable pending=26 acked=74 rejected=0 behind=50s savedThisBoot=50
+23:12:39   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752758655 net=online backend=unreachable pending=28 acked=74 rejected=0 behind=55s savedThisBoot=52
+23:12:44   driver screen capture point: 2-link-down
+23:12:52   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752771659 net=online backend=unreachable pending=35 acked=74 rejected=0 behind=68s savedThisBoot=59
+23:12:57   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752776660 net=online backend=unreachable pending=37 acked=74 rejected=0 behind=73s savedThisBoot=61
+23:13:02   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752781662 net=online backend=unreachable pending=40 acked=74 rejected=0 behind=78s savedThisBoot=64
+23:13:07   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752786664 net=online backend=unreachable pending=42 acked=74 rejected=0 behind=83s savedThisBoot=66
+23:13:12   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752791665 net=online backend=unreachable pending=45 acked=74 rejected=0 behind=88s savedThisBoot=69
+23:13:17   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752796667 net=online backend=unreachable pending=47 acked=74 rejected=0 behind=93s savedThisBoot=71
+23:13:22 == 3 D08 link RESTORED with a backlog
+23:13:22   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752801668 net=online backend=unreachable pending=50 acked=74 rejected=0 behind=98s savedThisBoot=74
+23:13:26   condition met after 4.0s: boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752805670 net=online backend=ok pending=2 acked=124 rejected=0 behind=4s savedThisBoot=76
+23:13:26   first acknowledgement after restore: 4.00982676700005s
+23:13:26   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752805670 net=online backend=ok pending=2 acked=124 rejected=0 behind=4s savedThisBoot=76
+23:13:28   condition met after 2.0s: boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752807670 net=online backend=ok pending=1 acked=126 rejected=0 behind=0s savedThisBoot=77
+23:13:28 == 4 D09 GPS LOST (receiver connected, no fix), link up
+23:13:28   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752807670 net=online backend=ok pending=1 acked=126 rejected=0 behind=0s savedThisBoot=77
+23:13:33   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=no_fix lastFix=1795752807670 net=online backend=ok pending=0 acked=127 rejected=0 behind=- savedThisBoot=77
+23:13:38   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=no_fix lastFix=1795752807670 net=online backend=ok pending=0 acked=127 rejected=0 behind=- savedThisBoot=77
+23:13:43   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=no_fix lastFix=1795752807670 net=online backend=ok pending=0 acked=127 rejected=0 behind=- savedThisBoot=77
+23:13:48   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=no_fix lastFix=1795752807670 net=online backend=ok pending=0 acked=127 rejected=0 behind=- savedThisBoot=77
+23:13:53   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=no_fix lastFix=1795752807670 net=online backend=ok pending=0 acked=127 rejected=0 behind=- savedThisBoot=77
+23:13:58   driver screen capture point: 4-gps-lost
+23:14:06   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=no_fix lastFix=1795752807670 net=online backend=ok pending=0 acked=127 rejected=0 behind=- savedThisBoot=77
+23:14:11   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=no_fix lastFix=1795752807670 net=online backend=ok pending=0 acked=127 rejected=0 behind=- savedThisBoot=77
+23:14:16   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=no_fix lastFix=1795752807670 net=online backend=ok pending=0 acked=127 rejected=0 behind=- savedThisBoot=77
+23:14:21   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=no_fix lastFix=1795752807670 net=online backend=ok pending=0 acked=127 rejected=0 behind=- savedThisBoot=77
+23:14:26   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=no_fix lastFix=1795752807670 net=online backend=ok pending=0 acked=127 rejected=0 behind=- savedThisBoot=77
+23:14:31   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=no_fix lastFix=1795752807670 net=online backend=ok pending=0 acked=127 rejected=0 behind=- savedThisBoot=77
+23:14:36 == 5 GPS back
+23:14:36   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=no_fix lastFix=1795752807670 net=online backend=ok pending=0 acked=127 rejected=0 behind=- savedThisBoot=77
+23:14:41   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752880693 net=online backend=ok pending=1 acked=128 rejected=0 behind=1s savedThisBoot=79
+23:14:46   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752885694 net=online backend=ok pending=1 acked=131 rejected=0 behind=0s savedThisBoot=82
+23:14:51   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752890696 net=online backend=ok pending=1 acked=133 rejected=0 behind=1s savedThisBoot=84
+23:14:56   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752895697 net=online backend=ok pending=2 acked=135 rejected=0 behind=2s savedThisBoot=87
+23:15:01   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752900699 net=online backend=ok pending=1 acked=138 rejected=0 behind=1s savedThisBoot=89
+23:15:06 == 6 D05 link DOWN, then kill -9 mid-run
+23:15:06   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752905701 net=online backend=ok pending=1 acked=141 rejected=0 behind=0s savedThisBoot=92
+23:15:11   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752910702 net=online backend=unreachable pending=3 acked=141 rejected=0 behind=5s savedThisBoot=94
+23:15:16   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752915704 net=online backend=unreachable pending=6 acked=141 rejected=0 behind=10s savedThisBoot=97
+23:15:21   boot=e63598c9 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752920705 net=online backend=unreachable pending=8 acked=141 rejected=0 behind=15s savedThisBoot=99
+23:15:26   SIGKILL sent to the service (pid 10796); restarting
+23:15:27   boot=07c2f083 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752926792 net=online backend=unreachable pending=12 acked=141 rejected=0 behind=21s savedThisBoot=1
+23:15:32   boot=07c2f083 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752931794 net=online backend=unreachable pending=14 acked=141 rejected=0 behind=26s savedThisBoot=3
+23:15:37   boot=07c2f083 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752936795 net=online backend=unreachable pending=17 acked=141 rejected=0 behind=31s savedThisBoot=6
+23:15:42   boot=07c2f083 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752941797 net=online backend=unreachable pending=19 acked=141 rejected=0 behind=36s savedThisBoot=8
+23:15:47   driver screen capture point: 6-after-kill-offline
+23:15:55 == 7 link RESTORED; GPS stopped; drain
+23:15:55   boot=07c2f083 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752954801 net=online backend=unreachable pending=26 acked=141 rejected=0 behind=49s savedThisBoot=15
+23:16:00   boot=07c2f083 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752959803 net=online backend=ok pending=1 acked=168 rejected=0 behind=1s savedThisBoot=17
+23:16:05   boot=07c2f083 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752964804 net=online backend=ok pending=1 acked=171 rejected=0 behind=0s savedThisBoot=20
+23:16:10   boot=07c2f083 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752969806 net=online backend=ok pending=1 acked=173 rejected=0 behind=1s savedThisBoot=22
+23:16:15   boot=07c2f083 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752974807 net=online backend=ok pending=1 acked=176 rejected=0 behind=0s savedThisBoot=25
+23:16:20   boot=07c2f083 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752979809 net=online backend=ok pending=1 acked=178 rejected=0 behind=1s savedThisBoot=27
+23:16:25   boot=07c2f083 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752984810 net=online backend=ok pending=1 acked=181 rejected=0 behind=0s savedThisBoot=30
+23:16:27   condition met after 2.0s: boot=07c2f083 run=js7fbtjdhwy4vf6yv381kng6qx8k17ys gps=valid lastFix=1795752984810 net=online backend=ok pending=0 acked=182 rejected=0 behind=- savedThisBoot=30
+23:16:27   service stopped with SIGTERM (exit 0)
+23:16:27 == verify local outbox
+23:16:27   rows=182 statuses={'acknowledged': 182}
+23:16:27   unique eventIds=True
+23:16:27   runSequence 0..181 unbroken=True
+23:16:27   RESULT PASS
