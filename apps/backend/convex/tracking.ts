@@ -10,6 +10,7 @@ import {
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, type QueryCtx, query } from "./_generated/server";
+import { healthForRun } from "./health";
 import { getTrackableAssignment, getUser, listTrackableAssignments, missingUserReason } from "./lib/authz";
 import { runState } from "./schema";
 
@@ -181,13 +182,17 @@ export const myRun = query({
       };
     }
 
-    const [live, device] = await Promise.all([
+    const [live, device, health] = await Promise.all([
       ctx.db
         .query("liveState")
         .withIndex("by_run", (q) => q.eq("runId", run._id))
         .unique(),
       ctx.db.get(run.deviceId),
+      healthForRun(ctx, run),
     ]);
+    // Last time the backend heard from this bus during the run: a health
+    // heartbeat or an accepted observation, whichever came later.
+    const contacts = [live?.receivedAtMs, health?.receivedAtMs].filter((ms): ms is number => ms !== undefined);
 
     return {
       schemaVersion: SCHEMA_VERSION,
@@ -200,10 +205,11 @@ export const myRun = query({
         state: run.state,
         liveRevision: live ? (live.revision ?? 1) : 0,
         busLabel: device?.busLabel ?? FALLBACK_BUS_LABEL,
-        // Telemetry is the only device contact recorded so far; health
-        // reporting (docs/08 §7) will refine this and supply gpsStatus.
-        lastDeviceContactAtMs: live?.receivedAtMs ?? null,
-        gpsStatus: null,
+        lastDeviceContactAtMs: contacts.length > 0 ? Math.max(...contacts) : null,
+        // As last reported, with no expiry here: a query is not re-run as
+        // time passes, so clients trust it only while lastDeviceContactAtMs
+        // is recent (docs/08 §8). GPSD down on the Pi is not a fix status.
+        gpsStatus: health && health.gpsStatus !== "unknown" ? health.gpsStatus : null,
         lastPosition: live
           ? {
               eventId: live.eventId,

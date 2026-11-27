@@ -4,8 +4,8 @@
  * `AgeFormatter`, so Android families read the same meaning as iPhone
  * families. Re-derived every second, so the screen goes stale on its own.
  */
-import type { GpsStatus, RunState } from "@itssb/contracts";
-import type { Instant, ServerClock } from "./clock";
+import { type GpsStatus, POSITION_STALE_AFTER_MS, type RunState } from "@itssb/contracts";
+import { ageClockMs, type Instant, type ServerClock } from "./clock";
 import { type Freshness, positionAgeMs, positionFreshness, type TrackedRun } from "./model";
 
 export type LivePresentation =
@@ -22,7 +22,7 @@ export type LivePresentation =
 
 export function livePresentation(run: TrackedRun, clock: ServerClock, now: Instant): LivePresentation {
   if (run.state !== "active") return { kind: "not_live", state: run.state };
-  const gpsProblem = run.gpsStatus && run.gpsStatus !== "valid" ? run.gpsStatus : null;
+  const gpsProblem = run.gpsStatus && run.gpsStatus !== "valid" && contactIsRecent(run, clock, now) ? run.gpsStatus : null;
   if (!run.position) {
     return gpsProblem ? { kind: "gps_unavailable", status: gpsProblem } : { kind: "awaiting_first_position" };
   }
@@ -30,6 +30,15 @@ export function livePresentation(run: TrackedRun, clock: ServerClock, now: Insta
   if (freshness === "stale") return { kind: "stale" };
   if (gpsProblem) return { kind: "gps_unavailable", status: gpsProblem };
   return { kind: "live", freshness };
+}
+
+/**
+ * `gpsStatus` is the bus's last health report and is never expired by the
+ * backend, so it counts only while the bus was heard from recently: past the
+ * stale cutoff it may describe a bus that has since gone silent (docs/08 §8).
+ */
+function contactIsRecent(run: TrackedRun, clock: ServerClock, now: Instant): boolean {
+  return run.lastDeviceContactAtMs !== null && ageClockMs(clock, now) - run.lastDeviceContactAtMs < POSITION_STALE_AFTER_MS;
 }
 
 /**

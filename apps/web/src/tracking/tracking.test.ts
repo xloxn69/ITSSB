@@ -152,6 +152,23 @@ describe("state mapping from the tracking contract", () => {
     expect(livePresentation(run, verified, at)).toEqual({ kind: "gps_unavailable", status: "receiver_missing" });
   });
 
+  it("D09: a GPS problem is believed only while the bus's contact is recent", () => {
+    // The backend does not expire gpsStatus (a query is not re-run as time
+    // passes), so a heartbeat that stopped must not leave "connected, no
+    // signal" on screen.
+    const contact = ready.run.lastDeviceContactAtMs!;
+    const run = runFrom(withRun({ gpsStatus: "receiver_missing", lastPosition: null }));
+    const offsetMs = POSITION_STALE_AFTER_MS + 1_000;
+    const later: Instant = { wallMs: at.wallMs + offsetMs, monoMs: at.monoMs + offsetMs };
+    expect(ageClockMs(verified, later) - contact).toBeGreaterThanOrEqual(POSITION_STALE_AFTER_MS);
+    expect(livePresentation(run, verified, later)).toEqual({ kind: "awaiting_first_position" });
+  });
+
+  it("D09: no recorded contact means no GPS claim", () => {
+    const run = runFrom(withRun({ gpsStatus: "no_fix", lastPosition: null, lastDeviceContactAtMs: null }));
+    expect(livePresentation(run, verified, at)).toEqual({ kind: "awaiting_first_position" });
+  });
+
   it("stale wins over no fix", () => {
     const run = runFrom(withRun({ gpsStatus: "no_fix" }));
     const later: Instant = { wallMs: at.wallMs, monoMs: POSITION_STALE_AFTER_MS };

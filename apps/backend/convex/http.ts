@@ -1,5 +1,7 @@
 import {
+  type DeviceHealthAccepted,
   MAX_EVENTS_PER_TELEMETRY_REQUEST,
+  MAX_HEALTH_BODY_BYTES,
   MAX_TRIP_EVENT_BODY_BYTES,
   MAX_TELEMETRY_BODY_BYTES,
   SCHEMA_VERSION,
@@ -120,6 +122,48 @@ http.route({
       });
       if (outcome.ok) return json(200, outcome.body);
       return requestError(outcome.status, outcome.code, outcome.message, false);
+    } catch (error) {
+      if (isDeviceNotAuthorized(error)) {
+        return requestError(401, "UNAUTHENTICATED", "Device credential rejected.", false);
+      }
+      throw error;
+    }
+  }),
+});
+
+/** POST /device/v1/health — device heartbeat (docs/08 §7). */
+http.route({
+  path: "/device/v1/health",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    const secret = parseBearer(req.headers.get("Authorization"));
+    if (!secret) return requestError(401, "UNAUTHENTICATED", "Device credential required.", false);
+    const deviceId = await ctx.runQuery(internal.devices.byCredentialHash, {
+      credentialHash: await sha256Hex(secret),
+    });
+    if (!deviceId) return requestError(401, "UNAUTHENTICATED", "Device credential rejected.", false);
+
+    const text = await req.text();
+    if (new TextEncoder().encode(text).length > MAX_HEALTH_BODY_BYTES) {
+      return requestError(413, "BODY_TOO_LARGE", "Health body is too large.", false);
+    }
+    let body: unknown;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      return requestError(400, "MALFORMED_JSON", "Body is not valid JSON.", false);
+    }
+    const nowMs = Date.now();
+    try {
+      const outcome = await ctx.runMutation(internal.health.record, { deviceId, report: body, nowMs });
+      if (!outcome.ok) return requestError(400, outcome.code, outcome.message, false);
+      const accepted: DeviceHealthAccepted = {
+        schemaVersion: SCHEMA_VERSION,
+        status: "accepted",
+        receivedAtMs: outcome.receivedAtMs,
+        serverNowMs: nowMs,
+      };
+      return json(200, accepted);
     } catch (error) {
       if (isDeviceNotAuthorized(error)) {
         return requestError(401, "UNAUTHENTICATED", "Device credential rejected.", false);

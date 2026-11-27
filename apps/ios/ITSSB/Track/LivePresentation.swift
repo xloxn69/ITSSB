@@ -21,7 +21,8 @@ enum LivePresentation: Equatable {
     static func make(run: TrackedRun, clock: ServerClock, now: Date,
                      monotonicNow: ContinuousClock.Instant = .now) -> LivePresentation {
         guard run.state.showsLiveMarker else { return .notLive(run.state) }
-        let gpsProblem = run.gpsStatus.flatMap { $0 == .valid ? nil : $0 }
+        let gpsProblem = contactIsRecent(run, clock: clock, now: now, monotonicNow: monotonicNow)
+            ? run.gpsStatus.flatMap { $0 == .valid ? nil : $0 } : nil
         guard let position = run.position else {
             return gpsProblem.map(LivePresentation.gpsUnavailable) ?? .awaitingFirstPosition
         }
@@ -29,6 +30,16 @@ enum LivePresentation: Equatable {
         if freshness == .stale { return .stale }
         if let gpsProblem { return .gpsUnavailable(gpsProblem) }
         return .live(freshness)
+    }
+
+    /// `gpsStatus` is the bus's last health report and is never expired by the
+    /// backend, so it counts only while the bus was heard from recently: past
+    /// the stale cutoff it may describe a bus that has since gone silent.
+    private static func contactIsRecent(_ run: TrackedRun, clock: ServerClock, now: Date,
+                                        monotonicNow: ContinuousClock.Instant) -> Bool {
+        guard let contact = run.lastDeviceContactAt else { return false }
+        let age = clock.ageClock(at: now, monotonicNow: monotonicNow).timeIntervalSince(contact)
+        return age < FreshnessPolicy.staleAfter
     }
 
     /// Whether to draw the bus marker at the last position.
