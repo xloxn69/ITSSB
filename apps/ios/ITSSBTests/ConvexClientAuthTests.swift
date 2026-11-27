@@ -26,30 +26,40 @@ private struct AssignmentsQuerying: ConvexQuerying {
 
 /// Review finding: ConvexMobile's login success only installs a token; the backend must confirm it.
 final class ConvexClientAuthTests: XCTestCase {
+    private func outcome(_ fixture: String?, forcedRefreshes: Int = 0,
+                         timeout: Duration = .seconds(2)) async -> ConvexLoginOutcome {
+        let querying = AssignmentsQuerying(fixture: fixture)
+        let answer = await ConvexClientAuth.firstAnswer(querying: querying, timeout: timeout)
+        return ConvexClientAuth.outcome(for: answer, forcedRefreshesSinceLogin: forcedRefreshes)
+    }
+
     func testABackendThatSeesNoIdentityRejectsTheSignIn() async {
         // reason: unauthenticated, i.e. the token was installed but the backend saw no identity.
-        let querying = AssignmentsQuerying(fixture: "myRoute.accessUnavailable")
-        let outcome = await ConvexClientAuth.confirm(querying: querying, timeout: .seconds(2))
-        XCTAssertEqual(outcome, .rejected)
+        let result = await outcome("myRoute.accessUnavailable")
+        XCTAssertEqual(result, .rejected)
+    }
+
+    /// Re-check finding: ConvexMobile answers a rejected JWT with silence and a forced token
+    /// refresh, not an `unauthenticated` answer. That must be rejected, not a retry-only outage.
+    func testSilenceWithAForcedRefreshIsRejected() async {
+        let result = await outcome(nil, forcedRefreshes: 1, timeout: .milliseconds(50))
+        XCTAssertEqual(result, .rejected)
     }
 
     func testARecognizedButUnlinkedIdentityIsAccepted() async {
         // reason: not_permitted, signed in but not linked yet: the session is real; access is per query.
-        let outcome = await ConvexClientAuth.confirm(querying: AssignmentsQuerying(fixture: "myRun.accessUnavailable"),
-                                                     timeout: .seconds(2))
-        XCTAssertEqual(outcome, .accepted)
+        let result = await outcome("myRun.accessUnavailable")
+        XCTAssertEqual(result, .accepted)
     }
 
     func testARecognizedIdentityIsAccepted() async {
-        let outcome = await ConvexClientAuth.confirm(querying: AssignmentsQuerying(fixture: "myAssignments.ready"),
-                                                     timeout: .seconds(2))
-        XCTAssertEqual(outcome, .accepted)
+        let result = await outcome("myAssignments.ready")
+        XCTAssertEqual(result, .accepted)
     }
 
-    func testNoAnswerIsUnreachableNotRejected() async {
-        let outcome = await ConvexClientAuth.confirm(querying: AssignmentsQuerying(fixture: nil),
-                                                     timeout: .milliseconds(50))
-        XCTAssertEqual(outcome, .unreachable)
+    func testSilenceWithoutAForcedRefreshIsUnreachable() async {
+        let result = await outcome(nil, timeout: .milliseconds(50))
+        XCTAssertEqual(result, .unreachable)
     }
 
     func testOfflineTokenFetchIsUnreachable() {

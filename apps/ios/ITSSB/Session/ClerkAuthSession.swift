@@ -140,6 +140,10 @@ final class ClerkConvexTokenProvider: AuthProvider, @unchecked Sendable {
     /// Bumped on logout. A token fetched for an older generation is never used or pushed,
     /// so a late result can't sign the next person in as the previous one.
     @MainActor private var generation = 0
+    /// How many times ConvexMobile has forced a token refresh. It does that after the server
+    /// rejects a token (it reconnects and calls `loginFromCache`), so a forced refresh right
+    /// after a fresh login is the sign that the backend refused the token.
+    @MainActor private(set) var forcedRefreshes = 0
 
     init(refreshInterval: Duration = .seconds(20), backend: @escaping @MainActor () -> any ClerkBackend) {
         self.refreshInterval = refreshInterval
@@ -151,7 +155,8 @@ final class ClerkConvexTokenProvider: AuthProvider, @unchecked Sendable {
     }
 
     func loginFromCache(onIdToken: @Sendable @escaping (String?) -> Void) async throws -> String {
-        try await token(onIdToken: onIdToken)
+        await MainActor.run { forcedRefreshes += 1 }
+        return try await token(onIdToken: onIdToken)
     }
 
     func logout() async throws {

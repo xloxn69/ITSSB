@@ -10,6 +10,13 @@ private final class StubAuth: AuthSession {
     var sendError: AuthError?
     var verifyError: AuthError?
     var appleError: AuthError?
+    /// Suspends `signOut` until `finishSignOut()`, like a slow Clerk request.
+    var holdSignOut = false
+    private var heldSignOut: CheckedContinuation<Void, Never>?
+    func finishSignOut() {
+        heldSignOut?.resume()
+        heldSignOut = nil
+    }
     private(set) var calls: [String] = []
 
     func restore() async throws -> Bool {
@@ -29,7 +36,10 @@ private final class StubAuth: AuthSession {
         calls.append("apple")
         if let appleError { throw appleError }
     }
-    func signOut() async { calls.append("signOut") }
+    func signOut() async {
+        calls.append("signOut")
+        if holdSignOut { await withCheckedContinuation { heldSignOut = $0 } }
+    }
 }
 
 @MainActor
@@ -185,6 +195,26 @@ final class SessionStoreTests: XCTestCase {
         await session.signOut()
         XCTAssertEqual(session.state, .signedOut(.notSignedIn))
         XCTAssertTrue(auth.calls.contains("signOut"))
+    }
+
+    /// Re-check finding: a slow sign-out must hide protected screens at once and block a new
+    /// sign-in until cleanup finishes.
+    func testSignOutHidesProtectedScreensBeforeCleanupFinishes() async {
+        let auth = StubAuth()
+        auth.restoreResult = .success(true)
+        let session = store(auth)
+        await session.restore()
+        auth.holdSignOut = true
+        let signingOut = Task { await session.signOut() }
+        let hidden = await eventually { auth.calls.contains("signOut") }
+        XCTAssertTrue(hidden)
+        XCTAssertEqual(session.state, .signedOut(.notSignedIn), "tracking is gone while cleanup is in flight")
+        XCTAssertTrue(session.isWorking)
+        await session.submitEmail("sam.example@example.com")
+        XCTAssertFalse(auth.calls.contains { $0.hasPrefix("send") }, "no sign-in during cleanup")
+        auth.finishSignOut()
+        await signingOut.value
+        XCTAssertFalse(session.isWorking)
     }
 
     func testEmailPlausibility() {

@@ -271,6 +271,17 @@ final class ClerkConvexTokenProviderTests: XCTestCase {
         XCTAssertTrue(pushed.all.isEmpty)
     }
 
+    func testForcedRefreshesAreCounted() async throws {
+        let clerk = FakeClerk()
+        clerk.hasActiveSession = true
+        let provider = ClerkConvexTokenProvider(refreshInterval: .seconds(3600)) { clerk }
+        _ = try await provider.login(onIdToken: { _ in })
+        XCTAssertEqual(provider.forcedRefreshes, 0, "a first login is not a forced refresh")
+        _ = try await provider.loginFromCache(onIdToken: { _ in })
+        XCTAssertEqual(provider.forcedRefreshes, 1)
+        try await provider.logout()
+    }
+
     func testOfflineRefreshKeepsTheCurrentToken() async throws {
         let clerk = FakeClerk()
         clerk.hasActiveSession = true

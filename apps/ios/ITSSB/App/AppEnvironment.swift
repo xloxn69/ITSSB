@@ -22,11 +22,11 @@ struct AppEnvironment {
                                   source: ConvexLiveRunSource(client: ConvexClientQuerying(client: client)))
         }
         let backend = ClerkSDKBackend(publishableKey: publishableKey)
-        let client = ConvexClientWithAuth(deploymentUrl: deploymentUrl,
-                                          authProvider: ClerkConvexTokenProvider { backend })
+        let provider = ClerkConvexTokenProvider { backend }
+        let client = ConvexClientWithAuth(deploymentUrl: deploymentUrl, authProvider: provider)
         let querying = ConvexClientQuerying(client: client)
-        let auth = ClerkAuthSession(backend: backend, convex: ConvexClientAuth(client: client, querying: querying),
-                                    marker: DefaultsSignOutMarker())
+        let convex = ConvexClientAuth(client: client, querying: querying) { provider.forcedRefreshes }
+        let auth = ClerkAuthSession(backend: backend, convex: convex, marker: DefaultsSignOutMarker())
         return AppEnvironment(session: SessionStore(auth: auth), source: ConvexLiveRunSource(client: querying))
     }
 

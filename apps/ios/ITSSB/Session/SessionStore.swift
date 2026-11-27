@@ -175,12 +175,16 @@ final class SessionStore {
         }
     }
 
+    /// Hides protected screens at once, then cleans up. The form stays locked until cleanup
+    /// finishes, so a new sign-in can't overlap a sign-out still in flight.
     func signOut() async {
-        await auth.signOut()
         step = .email
         message = nil
         resendAvailableAt = nil
         state = auth.isConfigured ? .signedOut(.notSignedIn) : .signedOut(.signInUnavailable)
+        isWorking = true
+        await auth.signOut()
+        isWorking = false
     }
 
     // MARK: Private
@@ -254,24 +258,32 @@ protocol ConvexAuthControlling: AnyObject {
 /// `ConvexAuthControlling` over the process-wide `ConvexClientWithAuth`.
 ///
 /// ConvexMobile's `login()` succeeding only means a token was installed, so
-/// the identity is confirmed with one `tracking:myAssignments` answer: since
-/// #28, `unauthenticated` there means the backend saw no identity at all.
+/// the identity is confirmed with one `tracking:myAssignments` answer (since
+/// #28, `unauthenticated` there means the backend saw no identity). When the
+/// server rejects the token outright, ConvexMobile 0.8.2 doesn't answer the
+/// query; it reconnects and forces a token refresh. So no answer plus a forced
+/// refresh means rejected, and no answer alone means unreachable.
 @MainActor
 final class ConvexClientAuth: ConvexAuthControlling {
     private let client: ConvexClientWithAuth<String>
     private let querying: any ConvexQuerying
+    private let forcedRefreshes: @MainActor () -> Int
     static let confirmTimeout: Duration = .seconds(10)
 
-    init(client: ConvexClientWithAuth<String>, querying: any ConvexQuerying) {
+    init(client: ConvexClientWithAuth<String>, querying: any ConvexQuerying,
+         forcedRefreshes: @escaping @MainActor () -> Int) {
         self.client = client
         self.querying = querying
+        self.forcedRefreshes = forcedRefreshes
     }
 
     func login() async -> ConvexLoginOutcome {
+        let before = forcedRefreshes()
         if case let .failure(error) = await client.login() {
             return Self.outcome(forLoginError: error)
         }
-        return await Self.confirm(querying: querying, timeout: Self.confirmTimeout)
+        let answer = await Self.firstAnswer(querying: querying, timeout: Self.confirmTimeout)
+        return Self.outcome(for: answer, forcedRefreshesSinceLogin: forcedRefreshes() - before)
     }
 
     func logout() async {
@@ -285,16 +297,17 @@ final class ConvexClientAuth: ConvexAuthControlling {
         return .rejected
     }
 
-    nonisolated static func outcome(for snapshot: AssignmentsSnapshot?) -> ConvexLoginOutcome {
+    nonisolated static func outcome(for snapshot: AssignmentsSnapshot?,
+                                    forcedRefreshesSinceLogin: Int = 0) -> ConvexLoginOutcome {
         switch snapshot {
-        case nil: .unreachable
+        case nil: forcedRefreshesSinceLogin > 0 ? .rejected : .unreachable
         case .accessUnavailable(.unauthenticated): .rejected
         case .ready, .accessUnavailable(.notPermitted): .accepted
         }
     }
 
-    /// The first `tracking:myAssignments` answer, or unreachable after `timeout`.
-    nonisolated static func confirm(querying: any ConvexQuerying, timeout: Duration) async -> ConvexLoginOutcome {
+    /// The first `tracking:myAssignments` answer, or nil after `timeout`.
+    nonisolated static func firstAnswer(querying: any ConvexQuerying, timeout: Duration) async -> AssignmentsSnapshot? {
         let stream = querying.subscribe("tracking:myAssignments", args: [:], as: MyAssignmentsDTO.self) {
             try DomainMapping.assignments(from: $0)
         }
@@ -308,6 +321,6 @@ final class ConvexClientAuth: ConvexAuthControlling {
             group.cancelAll()
             return result.flatMap { $0 }
         }
-        return outcome(for: first)
+        return first
     }
 }
