@@ -174,6 +174,9 @@ http.route({
       }
       throw error;
     }
+  }),
+});
+
 /**
  * Shared front of the driver-grant device endpoints (docs/08 §9.2):
  * authenticate the device, bound and parse the body, check the schema
