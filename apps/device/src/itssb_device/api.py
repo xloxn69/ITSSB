@@ -1,9 +1,12 @@
 """Local status API on 127.0.0.1:8765 (docs/04 §12).
 
-Standard library only. Read-only for now:
+Standard library only.
 
 - `GET /health`: JSON snapshot. GPS, network, and backend are separate.
-- `GET /`: a minimal status page that loads without internet.
+- `GET /` and its assets: the built driver UI when installed, otherwise a
+  minimal status page that loads without internet.
+- `/api/*`: driver routes (driver_api.py) behind the session, Origin, and
+  CSRF checks in local_auth.py.
 
 Loopback binding is enforced at config time and again here. The Host header
 must name a loopback host, which blocks DNS-rebinding pages from reading the
@@ -21,9 +24,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from .config import is_loopback
+from .driver_api import DriverApi
 from .status import StatusBoard
 
 log = logging.getLogger(__name__)
+
+MAX_POST_BYTES = 16 * 1024
 
 
 def _host_allowed(header: str | None) -> bool:
@@ -86,9 +92,17 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:
         log.debug("local api: " + format, *args)
 
-    def _send(self, status: int, body: bytes, content_type: str) -> None:
+    def _send(
+        self,
+        status: int,
+        body: bytes,
+        content_type: str,
+        extra: list[tuple[str, str]] | None = None,
+    ) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
+        for name, value in extra or []:
+            self.send_header(name, value)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -104,27 +118,61 @@ class _Handler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.MISDIRECTED_REQUEST, {"error": "host not allowed"})
             return
         path = self.path.split("?", 1)[0]
+        driver = self.server.driver_api
         if path == "/health":
             self._json(HTTPStatus.OK, self.server.board.snapshot())
+        elif driver is not None and (driver.serves_ui or path.startswith("/api/")):
+            self._driver("GET", path, b"")
         elif path == "/":
             page = render_page(self.server.board.snapshot()).encode()
             self._send(HTTPStatus.OK, page, "text/html; charset=utf-8")
         else:
             self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
+    def do_POST(self) -> None:
+        if not _host_allowed(self.headers.get("Host")):
+            self._json(HTTPStatus.MISDIRECTED_REQUEST, {"error": "host not allowed"})
+            return
+        path = self.path.split("?", 1)[0]
+        if self.server.driver_api is None or not path.startswith("/api/"):
+            self._method_not_allowed()
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = -1
+        if not 0 <= length <= MAX_POST_BYTES:
+            self._json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": "request too large"})
+            return
+        self._driver("POST", path, self.rfile.read(length))
+
+    def _driver(self, method: str, path: str, body: bytes) -> None:
+        api = self.server.driver_api
+        assert api is not None  # noqa: S101 - callers check
+        try:
+            resp = api.handle(method, path, self.headers, body)
+        except Exception:
+            log.exception("local api %s %s failed", method, path)
+            self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "internal error"})
+            return
+        self._send(resp.status, resp.body, resp.content_type, resp.headers)
+
     def _method_not_allowed(self) -> None:
         self._json(HTTPStatus.METHOD_NOT_ALLOWED, {"error": "method not allowed"})
 
-    do_POST = do_PUT = do_PATCH = do_DELETE = _method_not_allowed
+    do_PUT = do_PATCH = do_DELETE = _method_not_allowed
 
 
 class LocalApiServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, host: str, port: int, board: StatusBoard) -> None:
+    def __init__(
+        self, host: str, port: int, board: StatusBoard, driver_api: DriverApi | None = None
+    ) -> None:
         if not is_loopback(host):
             raise ValueError("local API must bind to a loopback address")
         self.board = board
+        self.driver_api = driver_api
         super().__init__((host, port), _Handler)
 
     def start(self) -> threading.Thread:

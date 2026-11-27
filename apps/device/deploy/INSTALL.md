@@ -30,7 +30,10 @@ sudo useradd --system --home-dir /nonexistent --shell /usr/sbin/nologin itssb
 
 ## 3. Release files
 
-From a checkout of the reviewed commit:
+From a checkout of the reviewed commit. Build the driver screen on the Mac
+first (the Pi does not need Node): `cd apps/driver-ui && bun run build:device`
+puts it in `apps/device/src/itssb_device/static/`, which the copy below
+includes.
 
 ```sh
 sudo mkdir -p /opt/itssb
@@ -52,6 +55,27 @@ Set `ITSSB_DEVICE_API_ORIGIN` (the deployment's `.convex.site` URL) and
 `ITSSB_DEVICE_TOKEN` (the provisioned credential). To run without cloud upload
 for now, **delete both lines**. The placeholders are deliberately refused:
 the service exits with status 2 and does not restart.
+
+### Drivers who may unlock the touchscreen
+
+Each driver gets a PIN hash, never a stored PIN. Type the PIN on the Pi
+(it is read from stdin, so it does not appear in the process list):
+
+```sh
+PYTHONPATH=/opt/itssb/current/src /usr/bin/python3 -m itssb_device hash-pin
+```
+
+Then write the file, readable by the service but not editable by it:
+
+```sh
+sudoedit /etc/itssb/drivers.json
+#   {"drivers": [{"driverId": "<id>", "displayName": "<name>", "pinHash": "scrypt$..."}]}
+sudo chown root:itssb /etc/itssb/drivers.json
+sudo chmod 0640 /etc/itssb/drivers.json
+```
+
+To reset a forgotten PIN, replace that driver's hash and restart the service.
+Without this file the screen works but nobody can unlock it.
 
 ## 5. Install and start the unit
 

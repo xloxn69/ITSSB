@@ -13,6 +13,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from .drafts_schema import DRAFTS_MIGRATION
 from .models import Fix, TelemetryEvent
 
 MIGRATIONS: list[str] = [
@@ -53,6 +54,8 @@ MIGRATIONS: list[str] = [
         created_at_ms INTEGER NOT NULL
     );
     """,
+    # 3: route recording drafts with ordered stops (docs/05 §6)
+    DRAFTS_MIGRATION,
 ]
 
 

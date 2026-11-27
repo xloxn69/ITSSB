@@ -73,3 +73,82 @@ def test_page_escapes_values():
     board.gps_rejected("<script>")
     board.gpsd_state("connected")
     assert "<script>" not in render_page(board.snapshot())
+
+
+# ── Driver UI and API through the real HTTP server ──────────────────
+
+
+@pytest.fixture
+def driver_server(tmp_path):
+    from itssb_device.database import Database
+    from itssb_device.driver_api import DriverApi
+    from itssb_device.local_auth import SessionManager, allowed_origins
+    from itssb_device.motion import MotionJudge, ObservedFixHolder
+
+    static = tmp_path / "static"
+    static.mkdir()
+    (static / "index.html").write_text("<!doctype html><title>ITSSB Driver</title>")
+    db_path = tmp_path / "d.sqlite3"
+    Database(db_path).close()
+    board = StatusBoard("3cd44c56-c96b-4b83-a970-5414990bc25a", upload_enabled=False)
+    latest = ObservedFixHolder()
+    judge = MotionJudge(latest)
+    server = LocalApiServer("127.0.0.1", 0, board)
+    port = server.server_address[1]
+    server.driver_api = DriverApi(
+        board, SessionManager({}), judge, latest, db_path, static, allowed_origins(port)
+    )
+    server.start()
+    yield server, port
+    server.shutdown()
+    server.server_close()
+
+
+def call(port, method, path, headers=None, body=b""):
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request(method, path, body=body, headers=headers or {})
+    resp = conn.getresponse()
+    data = resp.read()
+    conn.close()
+    return resp, data
+
+
+def test_ui_page_sets_session_cookie_and_csp(driver_server):
+    _, port = driver_server
+    resp, body = call(port, "GET", "/")
+    assert resp.status == 200 and b"ITSSB Driver" in body
+    assert "HttpOnly" in resp.getheader("Set-Cookie")
+    assert "frame-ancestors 'none'" in resp.getheader("Content-Security-Policy")
+    assert resp.getheader("Access-Control-Allow-Origin") is None
+
+
+def test_post_with_foreign_host_is_refused_before_anything_else(driver_server):
+    _, port = driver_server
+    resp, _ = call(port, "POST", "/api/session/lock", {"Host": "evil.example.invalid"}, b"{}")
+    assert resp.status == 421
+
+
+def test_post_end_to_end_lock_with_session_and_csrf(driver_server):
+    _, port = driver_server
+    resp, _ = call(port, "GET", "/")
+    cookie = resp.getheader("Set-Cookie").split(";", 1)[0]
+    resp, body = call(port, "GET", "/api/session", {"Cookie": cookie})
+    csrf = json.loads(body)["csrfToken"]
+    headers = {
+        "Cookie": cookie,
+        "Origin": f"http://127.0.0.1:{port}",
+        "Content-Type": "application/json",
+        "X-ITSSB-CSRF": csrf,
+    }
+    resp, _ = call(port, "POST", "/api/session/lock", headers, b"{}")
+    assert resp.status == 200
+    resp, _ = call(
+        port, "POST", "/api/session/lock", {**headers, "Origin": "http://evil.example"}, b"{}"
+    )
+    assert resp.status == 403
+
+
+def test_post_body_limit(driver_server):
+    _, port = driver_server
+    resp, _ = call(port, "POST", "/api/session/lock", {"Content-Length": "999999"}, b"")
+    assert resp.status == 413

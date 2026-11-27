@@ -4,6 +4,7 @@ Subcommands:
   run (default)  the device service: GPS reader, recorder, local API
   watch          bench test: print GPSD fixes / rejection reasons
   outbox         print outbox rows (eventId, status, attempts; no coordinates)
+  hash-pin       print an scrypt hash of a driver PIN read from stdin, for drivers.json
   fixture-run    DEVELOPMENT ONLY: mark a fictional run active/completed locally,
                  standing in for online start until the backend has trip-events
 """
@@ -118,6 +119,19 @@ def cmd_fixture_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_hash_pin(_args: argparse.Namespace) -> int:
+    """Reads one PIN from stdin (never argv, which other users can see) and
+    prints only its hash."""
+    from .local_auth import hash_pin, valid_pin_format
+
+    pin = sys.stdin.readline().strip()
+    if not valid_pin_format(pin):
+        print("PIN must be 4-12 digits", file=sys.stderr)
+        return 2
+    print(hash_pin(pin))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="itssb-device")
     parser.add_argument(
@@ -132,6 +146,9 @@ def build_parser() -> argparse.ArgumentParser:
     o = sub.add_parser("outbox", help="print outbox rows")
     o.add_argument("--limit", type=int, default=100)
     o.set_defaults(func=cmd_outbox)
+    sub.add_parser("hash-pin", help="hash a driver PIN read from stdin").set_defaults(
+        func=cmd_hash_pin
+    )
     f = sub.add_parser("fixture-run", help="DEVELOPMENT ONLY: set a fictional local run")
     f.add_argument("action", choices=["start", "end"])
     f.add_argument("--run-id", default="demo_run_001")

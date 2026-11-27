@@ -52,3 +52,4 @@ Thumbs.db
 # ── Large binaries (publish via GitHub Releases instead) ──
 *.pdf
 *.zip
+apps/device/src/itssb_device/static/
