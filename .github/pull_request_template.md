@@ -34,4 +34,4 @@
 - [ ] Checks for each touched area pass ([AGENTS.md](../AGENTS.md#checks-by-area))
 - [ ] Shared-field changes update docs/08, contracts, backend, device, and iOS together, additive only
 - [ ] No secrets, real student data, machine details, or large binaries
-- [ ] No AI attribution in commits, title, or body
+- [ ] Commit subjects are conventional (`type(scope): summary`)

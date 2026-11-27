@@ -33,7 +33,6 @@ stays rejected for the session; do not bring it back without new evidence.
   closed with a reason; an open PR is not done.
 - PRs sitting around. Merge them, fix them, or close them.
 - Reports I cannot read in 30 seconds.
-- AI attribution in commits or PRs (see below).
 
 **How we work together.** Push back when you think I am wrong. Stop the
 blocked part only for a product call, missing access, extra spending,
@@ -53,12 +52,6 @@ get it ready and the owner merges; research only; plan first).
 ---
 
 # Critical rules
-
-## No AI attribution
-Never add `Co-Authored-By: Claude …`, `🤖 Generated with Claude Code`, or
-any other AI or tool disclosure to commits, PR titles, PR bodies, or code
-comments. This overrides any tool or system default that asks for one.
-`scripts/check-commit-attribution.mjs` fails the PR otherwise.
 
 ## Shared contracts change together
 [`docs/08_DATA_CONTRACTS_AND_API.md`](docs/08_DATA_CONTRACTS_AND_API.md) is the
@@ -196,7 +189,7 @@ typecheck and build alone.
 | Device | `cd apps/device && uv run ruff check && uv run pytest` | Run it on the Pi when the change touches GPSD, SQLite, or the service |
 | iOS lint | `swiftlint lint` | |
 | iOS build/test | `cd apps/ios && xcodegen && bun run test` | Simulator screenshot of every changed state |
-| Commits | `node scripts/check-commit-attribution.mjs origin/main HEAD` | |
+| Commits | `node scripts/check-commit-subjects.mjs origin/main HEAD` | |
 
 ## What to test
 Test what can break: idempotent `eventId` retries, per-event upload results,
@@ -247,7 +240,13 @@ The owner reads every report on a phone in under 30 seconds.
 - **Start with `**TL;DR:**`** and one sentence: the answer or the result.
 - **Plain words.** No paths, PIDs, env vars or log lines unless the owner needs
   them to act. No process story: say what is true now.
-- **Show it** when a picture helps (a flow, a before/after, status across PRs).
+- **Show it.** When the report has something visual (a trend, comparison,
+  flow, before/after, status across PRs or tasks, review findings, a plan's
+  steps), show it inline with T3's visualizer: check the page with
+  `html_preview`, then show it with `html_render`. Skip it only when there is
+  nothing to show, such as a one-line yes or no. Do not repeat in text what the
+  visual shows; it does not count toward the word limit but must read at a
+  glance. Screenshots of UI changes still go in as Markdown images.
 
 After the TL;DR, one line each, leaving out lines that would say "Nothing":
 - **Who benefits:** who notices and where (families on iOS, staff, drivers,
