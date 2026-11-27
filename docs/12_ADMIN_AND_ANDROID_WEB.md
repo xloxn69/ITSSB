@@ -118,5 +118,7 @@ The page grouping and school workflow above are recommended product design choic
 - **Staff (`#/staff/…`).** Routes (approved version, approver, stops), route review (waiting and decided drafts, path, ordered stops, checks, approve with confirmation, reject with a required reason), buses and devices (contact age that turns to "not reporting" past the stale cutoff, family-facing bus name, revoke with confirmation), and drivers. The server checks the staff role on every call (docs/08 §11).
 - **Not built yet:** enrollment, guardian linking, alerts, check-in, the service calendar, cancellations and replacements, diagnostics, and organization scoping.
 
+Every page shows a **Development** or **Staging** badge unless built with `VITE_ITSSB_ENVIRONMENT=production`; hovering it shows the release and commit ([release runbook](runbooks/release.md)).
+
 Fictional screens for every state are under `?fixture=` in development only. `bun run screenshots` in `apps/web` captures them.
 

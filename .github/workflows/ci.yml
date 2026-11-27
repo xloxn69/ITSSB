@@ -60,6 +60,9 @@ jobs:
       - name: Lint, typecheck, test (everything except iOS)
         run: bun run check
 
+      - name: Repository script tests
+        run: node --test scripts/*.test.mjs
+
   ios:
     name: iOS build & test
     runs-on: macos-latest

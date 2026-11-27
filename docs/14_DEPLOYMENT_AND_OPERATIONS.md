@@ -9,7 +9,7 @@ Use with [Pi setup](03_RASPBERRY_PI_SETUP.md), [Pi software](04_RASPBERRY_PI_SOF
 
 There are separate releases for the device service, driver UI, backend functions/schema, iOS client, web client, and prediction algorithm. Record their versions together in a release manifest. A polished screen does not establish that an old Pi understands a new protocol or that the selected APNs environment matches the app build.
 
-For each release record the source revision, dependency locks, supported `schemaVersion`, database migration version, device configuration version, model version if any, and known limitations. Store source history in a repository; store credentials through the chosen protected operational mechanism.
+For each release record the source revision, dependency locks, supported `schemaVersion`, database migration version, device configuration version, model version if any, and known limitations. Store source history in a repository; store credentials through the chosen protected operational mechanism. `scripts/release-manifest.mjs` writes that manifest for one clean commit, and web, iOS and the Pi report the release they run; see the [release runbook](runbooks/release.md).
 
 ## 2. Keep environments separate
 
@@ -116,7 +116,7 @@ There are several different things to preserve:
 - Necessary identity-provider and domain configuration.
 - Model artifacts, preprocessing, and evaluation records.
 
-Convex's data backups do not include the application code, environment variables, or pending scheduled functions. Its restore operation replaces deployment data, so rehearse restoration in an isolated target and take the appropriate current-state backup before an authorized restore. Verify available plan features and retention rather than assuming a schedule is included. See [Convex Backup & Restore](https://docs.convex.dev/database/backup-restore).
+The [Convex backup runbook](runbooks/convex-backup-restore.md) exports a snapshot and rehearses its restore in an isolated local deployment. Convex's data backups do not include the application code, environment variables, or pending scheduled functions. Its restore operation replaces deployment data, so rehearse restoration in an isolated target and take the appropriate current-state backup before an authorized restore. Verify available plan features and retention rather than assuming a schedule is included. See [Convex Backup & Restore](https://docs.convex.dev/database/backup-restore).
 
 For the Pi, use a consistent SQLite backup mechanism or an explicitly stopped, checkpointed procedure. Copying only a live database's main file can omit state associated with its journaling mode. The [SQLite online backup API](https://www.sqlite.org/backup.html) provides a supported approach for obtaining a consistent copy.
 

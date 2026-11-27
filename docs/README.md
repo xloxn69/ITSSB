@@ -44,6 +44,8 @@ Make one authorized online-started test run on the Pi produce a fresh location i
 | [16_TROUBLESHOOTING.md](16_TROUBLESHOOTING.md) | What do I check when display, GPS, services, network, or synchronization fail? |
 | [17_DECISIONS_AND_SOURCES.md](17_DECISIONS_AND_SOURCES.md) | Which choices are settled, provisional, or still open, and which official sources support them? |
 
+Owner-run procedures live under [runbooks/](runbooks/): [releases](runbooks/release.md) and [Convex backup and restore](runbooks/convex-backup-restore.md).
+
 ## How to use the instructions
 
 Each guide distinguishes **inspection**, **installable prerequisites**, **custom application work**, and **example templates**. Run a command only on the machine named by that section. Raspberry Pi commands belong on the Pi; Xcode setup belongs on a compatible Mac; backend development commands belong in the backend source checkout. This pack has not executed those commands on your hardware.
