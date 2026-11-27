@@ -1,7 +1,7 @@
 import { convexTest } from "convex-test";
 import { describe, expect, it } from "vitest";
 import { api, internal } from "./_generated/api";
-import { clerkProviders } from "./auth.config";
+import authConfig, { clerkProviders, readIssuer } from "./auth.config";
 import schema from "./schema";
 import { UNLINKED_PREFIX } from "./users";
 
@@ -13,6 +13,19 @@ const CLERK_IDENTITY = { issuer: ISSUER, subject: "user_fictional01", tokenIdent
 describe("auth.config", () => {
   it("trusts Clerk tokens for the `convex` audience from the configured issuer", () => {
     expect(clerkProviders(` ${ISSUER} `)).toEqual([{ domain: ISSUER, applicationID: "convex" }]);
+  });
+
+  it("an unset variable that throws on read (as Convex's evaluator does) means no provider, not a failed push", () => {
+    const throwing = () => {
+      throw new Error("AuthConfigMissingEnvironmentVariable: CLERK_JWT_ISSUER_DOMAIN");
+    };
+    expect(readIssuer(throwing)).toBeUndefined();
+    expect(clerkProviders(readIssuer(throwing))).toEqual([]);
+    expect(readIssuer(() => ISSUER)).toBe(ISSUER);
+  });
+
+  it("the exported config loads with the variable unset", () => {
+    expect(authConfig.providers).toEqual([]);
   });
 
   it("has no provider (nobody can sign in) when the issuer is unset", () => {

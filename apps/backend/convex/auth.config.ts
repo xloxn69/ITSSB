@@ -22,6 +22,19 @@ export function clerkProviders(issuerDomain: string | undefined): AuthConfig["pr
   return domain ? [{ domain, applicationID: "convex" }] : [];
 }
 
+/**
+ * Reads the issuer without failing the push. Convex's auth-config evaluator
+ * throws `AuthConfigMissingEnvironmentVariable` when an unset variable is
+ * read, which would stop `convex dev` on a fresh deployment.
+ */
+export function readIssuer(read: () => string | undefined): string | undefined {
+  try {
+    return read();
+  } catch {
+    return undefined;
+  }
+}
+
 export default {
-  providers: clerkProviders(process.env.CLERK_JWT_ISSUER_DOMAIN),
+  providers: clerkProviders(readIssuer(() => process.env.CLERK_JWT_ISSUER_DOMAIN)),
 } satisfies AuthConfig;
