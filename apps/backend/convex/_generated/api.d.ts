@@ -15,6 +15,7 @@ import type * as lib_deviceAuth from "../lib/deviceAuth.js";
 import type * as runs from "../runs.js";
 import type * as telemetry from "../telemetry.js";
 import type * as tracking from "../tracking.js";
+import type * as users from "../users.js";
 
 import type {
   ApiFromModules,
@@ -30,6 +31,7 @@ declare const fullApi: ApiFromModules<{
   runs: typeof runs;
   telemetry: typeof telemetry;
   tracking: typeof tracking;
+  users: typeof users;
 }>;
 
 /**
