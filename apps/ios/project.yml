@@ -40,11 +40,6 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         # Wire config into the app without hardcoding (see Config/*.xcconfig).
         ConvexURL: $(CONVEX_URL)
-        # Build identity (App/BuildInfo.swift, docs/14 §1-2).
-        CFBundleShortVersionString: $(MARKETING_VERSION)
-        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        ITSSBEnvironment: $(ITSSB_ENVIRONMENT)
-        ITSSBSourceRevision: $(ITSSB_SOURCE_REVISION)
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(ITSSB_BUNDLE_ID)

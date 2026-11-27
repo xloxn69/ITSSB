@@ -10,10 +10,4 @@ ITSSB_DEVELOPMENT_TEAM =
 // fast instead of silently talking to someone else's backend.
 CONVEX_URL = http:/$()/127.0.0.1:1
 
-// Build identity (docs/14 §1-2). A release build overrides both on the
-// xcodebuild command line (docs/runbooks/release.md). Anything but
-// "production" is treated as a non-production build.
-ITSSB_ENVIRONMENT = development
-ITSSB_SOURCE_REVISION =
-
 #include? "Secrets.xcconfig"
