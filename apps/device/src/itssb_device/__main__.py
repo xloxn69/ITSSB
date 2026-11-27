@@ -1,15 +1,20 @@
 """Entry point: `python -m itssb_device` or `itssb-device`.
 
-Milestone 1 status: this prints GPSD fixes so you can verify the receiver
-end to end. Run recording, upload, and the local API come next (docs/15).
+Subcommands:
+  run (default)  the device service: GPS reader, recorder, local API
+  watch          bench test: print GPSD fixes / rejection reasons
 """
 
 from __future__ import annotations
 
 import argparse
+import logging
+import os
 import socket
 import sys
+from pathlib import Path
 
+from .config import DEFAULT_ENV_FILE, ConfigError, load_config
 from .gps import WATCH_COMMAND, Rejected, fix_from_tpv, parse_line
 
 
@@ -34,11 +39,24 @@ def watch(host: str, port: int) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="itssb-device")
-    parser.add_argument("--gpsd-host", default="127.0.0.1")
-    parser.add_argument("--gpsd-port", type=int, default=2947)
-    args = parser.parse_args(argv)
+def _env_file(arg: str | None) -> Path:
+    return Path(arg or os.environ.get("ITSSB_ENV_FILE") or DEFAULT_ENV_FILE)
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    from .service import Service, setup_logging
+
+    logging.basicConfig(level="INFO")  # until the configured logging is installed
+    try:
+        config = load_config(env_file=_env_file(args.env_file))
+    except ConfigError as exc:
+        print(f"configuration error: {exc}", file=sys.stderr)
+        return 2
+    setup_logging(config.log_level, config.log_file)
+    return Service(config).run_forever()
+
+
+def cmd_watch(args: argparse.Namespace) -> int:
     try:
         return watch(args.gpsd_host, args.gpsd_port)
     except OSError as exc:
@@ -46,6 +64,26 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     except KeyboardInterrupt:
         return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="itssb-device")
+    parser.add_argument(
+        "--env-file", help=f"settings file (default: $ITSSB_ENV_FILE or {DEFAULT_ENV_FILE})"
+    )
+    sub = parser.add_subparsers(dest="command")
+    sub.add_parser("run", help="run the device service (default)").set_defaults(func=cmd_run)
+    w = sub.add_parser("watch", help="print GPSD fixes for bench testing")
+    w.add_argument("--gpsd-host", default="127.0.0.1")
+    w.add_argument("--gpsd-port", type=int, default=2947)
+    w.set_defaults(func=cmd_watch)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    func = getattr(args, "func", cmd_run)
+    return func(args)
 
 
 if __name__ == "__main__":
