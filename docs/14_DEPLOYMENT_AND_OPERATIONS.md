@@ -30,7 +30,7 @@ Convex supports development and production deployments, with options for preview
 | Pi `/etc/itssb/device.toml` | Device endpoint, environment label, local port, sampling/publishing settings, queue budgets, feature settings. |
 | Pi `/etc/itssb/device.env` | Device secret and any approved session-related environment inputs. |
 | Pi `/var/lib/itssb/` | Durable local database and permitted caches. |
-| Backend environment | Identity-provider configuration, permitted link domain, APNs settings, delivery credentials, optional prediction-service access. |
+| Backend environment | Identity-provider configuration (`CLERK_JWT_ISSUER_DOMAIN`, per deployment), permitted link domain, APNs settings, delivery credentials, optional prediction-service access. |
 | iOS build configuration | Backend URL, bundle identifier, associated domain, build environment, supported protocol version. |
 | Web configuration | Backend URL, permitted origin, map authorization configuration, environment label. |
 
