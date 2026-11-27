@@ -303,6 +303,15 @@ async function oneJob() {
   if (!job) throw new Error("no job");
   return { s, jobId: job._id };
 }
+/** The bus waits where `approach` left it, reporting a fresh fix at `atMs`. */
+async function keepFresh(s: Setup, atMs: number) {
+  await s.t.mutation(internal.telemetry.ingestBatch, {
+    deviceId: s.deviceId,
+    events: [event(s.runId, eastForRemaining(240), atMs - 1_000)],
+    nowMs: atMs,
+  });
+}
+
 const claim = (s: Setup, jobId: Id<"notificationJobs">, nowMs: number, leaseId = crypto.randomUUID()) =>
   s.t.mutation(internal.notificationJobs.claim, { jobId, leaseId, nowMs }).then((r) => ({ r, leaseId }));
 const job = (s: Setup, jobId: Id<"notificationJobs">) => s.t.run((ctx) => ctx.db.get(jobId));
@@ -347,6 +356,7 @@ describe("delivery jobs", () => {
       dueEarly.push((await claim(s, jobId, nowMs)).r); // not due yet
       waits.push(row.nextAttemptAtMs - nowMs);
       nowMs = row.nextAttemptAtMs;
+      await keepFresh(s, nowMs);
     }
     expect(attempts).toEqual([1, 2, 3, 4, 5]);
     expect(states).toEqual([...Array(MAX_DELIVERY_ATTEMPTS - 1).fill("retryable_failure"), "permanent_failure"]);
@@ -367,6 +377,7 @@ describe("delivery jobs", () => {
     const { s, jobId } = await oneJob();
     const first = await claim(s, jobId, s.NOW);
     expect(first.r).not.toBeNull();
+    await keepFresh(s, s.NOW + 120_000);
     await s.t.mutation(internal.notificationJobs.sweep, { nowMs: s.NOW + 120_000 });
     const second = await claim(s, jobId, s.NOW + 120_000);
     expect(second.r).toMatchObject({ attempt: 2, collapseId: (first.r as { collapseId: string }).collapseId });
@@ -666,5 +677,32 @@ describe("independent re-review cases", () => {
     const r = await s.t.mutation(internal.notificationJobs.claim, { jobId, leaseId: "l", nowMs: s.NOW });
     expect(r).toBeNull();
     expect(await s.t.run((ctx) => ctx.db.get(jobId))).toMatchObject({ state: "cancelled", endReason: "stop_reached" });
+  });
+});
+
+describe("independent review final cases", () => {
+  it("a retry after the bus went off route is not sent", async () => {
+    const { s, jobId } = await oneJob();
+    const first = await claim(s, jobId, s.NOW);
+    await s.t.mutation(internal.notificationJobs.record, {
+      jobId,
+      leaseId: first.leaseId,
+      result: { kind: "retryable", reason: "ServiceUnavailable" },
+      nowMs: s.NOW,
+    });
+    await s.t.mutation(internal.telemetry.ingestBatch, {
+      deviceId: s.deviceId,
+      events: [{ ...event(s.runId, eastForRemaining(235), s.NOW + 1_000), latitude: 34.103 }],
+      nowMs: s.NOW + 1_500,
+    });
+    const row = (await s.t.run((ctx) => ctx.db.get(jobId)))!;
+    expect((await claim(s, jobId, row.nextAttemptAtMs)).r).toBeNull();
+    expect(await s.t.run((ctx) => ctx.db.get(jobId))).toMatchObject({ state: "cancelled", endReason: "estimate_unavailable" });
+  });
+
+  it("a pending job is not sent once the bus has stopped reporting", async () => {
+    const { s, jobId } = await oneJob();
+    expect((await claim(s, jobId, s.NOW + 90_000)).r).toBeNull();
+    expect(await s.t.run((ctx) => ctx.db.get(jobId))).toMatchObject({ state: "cancelled", endReason: "estimate_unavailable" });
   });
 });

@@ -1,4 +1,4 @@
-import { MAX_DELIVERY_ATTEMPTS } from "@itssb/contracts";
+import { ALERT_MAX_INPUT_AGE_MS, MAX_DELIVERY_ATTEMPTS } from "@itssb/contracts";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -48,7 +48,7 @@ async function end(
 }
 
 /** Why this job must not be sent now, or null if it still may be. */
-async function stopReason(ctx: MutationCtx, job: Doc<"notificationJobs">): Promise<string | null> {
+async function stopReason(ctx: MutationCtx, job: Doc<"notificationJobs">, nowMs: number): Promise<string | null> {
   const [run, alert, user, token] = await Promise.all([
     ctx.db.get(job.runId),
     ctx.db.get(job.alertId),
@@ -69,6 +69,29 @@ async function stopReason(ctx: MutationCtx, job: Doc<"notificationJobs">): Promi
   const progress = await getRunProgress(ctx, run._id);
   const outcome = progress?.stops.find((o) => o.stopId === alert.stopId);
   if (outcome && (outcome.arrivedAtMs !== null || outcome.departedAtMs !== null)) return "stop_reached";
+  // "Approaching" must still be true now: the newest position is fresh and on
+  // the route, and a still-valid estimate made from it exists for this stop.
+  const live = await ctx.db
+    .query("liveState")
+    .withIndex("by_run", (q) => q.eq("runId", run._id))
+    .unique();
+  if (
+    !live ||
+    !progress ||
+    progress.lastStatus !== "on_route" ||
+    progress.lastEventId !== live.eventId ||
+    nowMs - live.capturedAtMs >= ALERT_MAX_INPUT_AGE_MS
+  ) {
+    return "estimate_unavailable";
+  }
+  const estimate = await ctx.db
+    .query("etaPredictions")
+    .withIndex("by_run_stop_generated", (q) => q.eq("runId", run._id).eq("stopId", alert.stopId))
+    .order("desc")
+    .first();
+  if (!estimate || estimate.sourceEventId !== live.eventId || nowMs >= estimate.validUntilMs) {
+    return "estimate_unavailable";
+  }
   const pref = await ctx.db
     .query("notificationPreferences")
     .withIndex("by_user_assignment", (q) => q.eq("userId", user._id).eq("assignmentId", alert.assignmentId))
@@ -108,7 +131,7 @@ export const claim = internalMutation({
       await end(ctx, job, "permanent_failure", nowMs, "attempts_exhausted");
       return null;
     }
-    const reason = await stopReason(ctx, job);
+    const reason = await stopReason(ctx, job, nowMs);
     if (reason) {
       await end(ctx, job, "cancelled", nowMs, reason);
       return null;

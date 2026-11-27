@@ -417,6 +417,8 @@ export default defineSchema({
     .index("by_guardian_request", ["guardianTokenIdentifier", "requestId"])
     .index("by_guardian", ["guardianTokenIdentifier"])
     .index("by_status", ["status", "submittedAtMs"]),
+
+  /**
    * A person's alert preference for one assignment (docs/10 §8). Separate
    * from the phone's notification permission, which `pushTokens` records.
    */
