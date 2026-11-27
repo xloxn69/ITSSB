@@ -18,13 +18,14 @@ enum LivePresentation: Equatable {
     /// Completed, cancelled, or not yet started: no live marker or countdown (docs/08 §8).
     case notLive(RunState)
 
-    static func make(run: TrackedRun, clock: ServerClock, now: Date) -> LivePresentation {
+    static func make(run: TrackedRun, clock: ServerClock, now: Date,
+                     monotonicNow: ContinuousClock.Instant = .now) -> LivePresentation {
         guard run.state.showsLiveMarker else { return .notLive(run.state) }
         let gpsProblem = run.gpsStatus.flatMap { $0 == .valid ? nil : $0 }
         guard let position = run.position else {
             return gpsProblem.map(LivePresentation.gpsUnavailable) ?? .awaitingFirstPosition
         }
-        let freshness = position.freshness(at: now, clock: clock)
+        let freshness = position.freshness(at: now, clock: clock, monotonicNow: monotonicNow)
         if freshness == .stale { return .stale }
         if let gpsProblem { return .gpsUnavailable(gpsProblem) }
         return .live(freshness)
