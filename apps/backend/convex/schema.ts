@@ -52,6 +52,9 @@ export default defineSchema({
     endedAtMs: v.optional(v.number()),
     // Optional so runs written before trip events existed stay valid.
     driverUserId: v.optional(v.id("users")),
+    /** Grant that started / ended the run; an exact retry must present it again. */
+    startGrantId: v.optional(v.id("driverGrants")),
+    endGrantId: v.optional(v.id("driverGrants")),
     serviceDate: v.optional(v.string()),
     serviceTimezone: v.optional(v.string()),
     startCapturedAtMs: v.optional(v.number()),
@@ -63,7 +66,8 @@ export default defineSchema({
   })
     .index("by_device_state", ["deviceId", "state"])
     .index("by_route_version_state", ["routeVersionId", "state"])
-    .index("by_device_start_request", ["deviceId", "startRequestId"]),
+    .index("by_device_start_request", ["deviceId", "startRequestId"])
+    .index("by_device_end_request", ["deviceId", "endRequestId"]),
 
   /**
    * A server-issued driver operating grant (docs/07 §6, docs/08 §6): proof

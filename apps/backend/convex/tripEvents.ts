@@ -37,7 +37,18 @@ const GRANT_DENIED = fail(403, "GRANT_NOT_AUTHORIZED", "The driver operating gra
 // Unknown runs and other devices' runs get the same answer (docs/08 §5).
 const RUN_DENIED = fail(403, "RUN_NOT_AUTHORIZED", "This device is not authorized for that run.");
 
-function accepted(run: Doc<"runs">, requestId: string, nowMs: number): TripEventOutcome {
+/**
+ * The accepted response for a start or end, rebuilt from the stored receipt
+ * fields, so a retry gets what the first attempt got: a start always answers
+ * `active` with `endedAtMs: null`, even if the run has ended since. Only
+ * `serverNowMs` is current; it is the server clock, not part of the receipt.
+ */
+function accepted(
+  run: Doc<"runs">,
+  operation: "startRun" | "endRun",
+  requestId: string,
+  nowMs: number,
+): TripEventOutcome {
   return {
     ok: true,
     body: {
@@ -45,13 +56,36 @@ function accepted(run: Doc<"runs">, requestId: string, nowMs: number): TripEvent
       requestId,
       status: "accepted",
       runId: run._id,
-      state: run.state,
+      state: operation === "startRun" ? "active" : "completed",
       startedAtMs: run.startedAtMs ?? run._creationTime,
-      endedAtMs: run.endedAtMs ?? null,
+      endedAtMs: operation === "startRun" ? null : (run.endedAtMs ?? null),
       serverNowMs: nowMs,
     },
   };
 }
+
+/**
+ * Every run on this device whose start or end used `requestId`. One
+ * requestId names one command: reusing it for another operation or another
+ * run is a conflict.
+ */
+async function receiptsFor(ctx: MutationCtx, device: Doc<"devices">, requestId: string) {
+  const [start, end] = await Promise.all([
+    ctx.db
+      .query("runs")
+      .withIndex("by_device_start_request", (q) =>
+        q.eq("deviceId", device._id).eq("startRequestId", requestId),
+      )
+      .unique(),
+    ctx.db
+      .query("runs")
+      .withIndex("by_device_end_request", (q) => q.eq("deviceId", device._id).eq("endRequestId", requestId))
+      .unique(),
+  ]);
+  return { start, end };
+}
+
+const REQUEST_CONFLICT = fail(409, "REQUEST_ID_CONFLICT", "This requestId was already used for a different command.");
 
 export const apply = internalMutation({
   args: {
@@ -85,23 +119,19 @@ async function startRun(
 
   // Idempotency is per device: another device reusing this requestId never
   // sees this device's run.
-  const prior = await ctx.db
-    .query("runs")
-    .withIndex("by_device_start_request", (q) =>
-      q.eq("deviceId", device._id).eq("startRequestId", r.requestId),
-    )
-    .unique();
-  if (prior) {
+  const prior = await receiptsFor(ctx, device, r.requestId);
+  if (prior.end) return REQUEST_CONFLICT;
+  if (prior.start) {
     const same =
-      prior.routeVersionId === r.routeVersionId &&
-      prior.serviceDate === r.serviceDate &&
-      prior.serviceTimezone === r.serviceTimezone &&
-      prior.startCapturedAtMs === r.capturedAtMs;
-    if (!same) {
-      return fail(409, "REQUEST_ID_CONFLICT", "This requestId was already used for a different start.");
-    }
-    // An exact retry returns the stored result even if the grant expired since.
-    return accepted(prior, r.requestId, nowMs);
+      prior.start.routeVersionId === r.routeVersionId &&
+      prior.start.serviceDate === r.serviceDate &&
+      prior.start.serviceTimezone === r.serviceTimezone &&
+      prior.start.startCapturedAtMs === r.capturedAtMs &&
+      prior.start.startGrantId === grant._id;
+    if (!same) return REQUEST_CONFLICT;
+    // An exact retry, with the same grant, returns the stored result even if
+    // that grant expired since.
+    return accepted(prior.start, "startRun", r.requestId, nowMs);
   }
 
   if (grant.expiresAtMs <= nowMs) return GRANT_DENIED;
@@ -140,6 +170,7 @@ async function startRun(
     startRequestId: r.requestId,
     startedAtMs: nowMs,
     driverUserId: grant.driverUserId,
+    startGrantId: grant._id,
     serviceDate: r.serviceDate,
     serviceTimezone: r.serviceTimezone,
     startCapturedAtMs: r.capturedAtMs,
@@ -154,7 +185,7 @@ async function startRun(
   });
   const run = await ctx.db.get(runId);
   if (!run) throw new Error("run vanished inside its own transaction");
-  return accepted(run, r.requestId, nowMs);
+  return accepted(run, "startRun", r.requestId, nowMs);
 }
 
 async function endRun(
@@ -164,19 +195,24 @@ async function endRun(
   r: EndRunRequest,
   nowMs: number,
 ): Promise<TripEventOutcome> {
+  // Check the grant before anything that depends on the run, so a device
+  // credential alone cannot probe which runs exist.
+  const grant = await grantForDevice(ctx, grantHash, device);
+  if (!grant) return GRANT_DENIED;
+
   const runId = ctx.db.normalizeId("runs", r.runId);
   const run = runId ? await ctx.db.get(runId) : null;
   if (!run || run.deviceId !== device._id) return RUN_DENIED;
 
-  const grant = await grantForDevice(ctx, grantHash, device);
-  if (!grant) return GRANT_DENIED;
-
-  if (run.endRequestId !== undefined && run.endRequestId === r.requestId) {
-    const same = run.endCapturedAtMs === r.capturedAtMs && run.lastRunSequence === r.lastRunSequence;
-    if (!same) {
-      return fail(409, "REQUEST_ID_CONFLICT", "This requestId was already used for a different end.");
-    }
-    return accepted(run, r.requestId, nowMs);
+  const prior = await receiptsFor(ctx, device, r.requestId);
+  if (prior.start || (prior.end && prior.end._id !== run._id)) return REQUEST_CONFLICT;
+  if (prior.end) {
+    const same =
+      run.endCapturedAtMs === r.capturedAtMs &&
+      run.lastRunSequence === r.lastRunSequence &&
+      run.endGrantId === grant._id;
+    if (!same) return REQUEST_CONFLICT;
+    return accepted(run, "endRun", r.requestId, nowMs);
   }
 
   if (grant.expiresAtMs <= nowMs) return GRANT_DENIED;
@@ -203,6 +239,7 @@ async function endRun(
     endCapturedAtMs: r.capturedAtMs,
     lastRunSequence: r.lastRunSequence,
     endedByDriverUserId: grant.driverUserId,
+    endGrantId: grant._id,
   });
   await ctx.db.insert("auditLog", {
     actor: { kind: "device", deviceId: device._id },
@@ -214,5 +251,5 @@ async function endRun(
   });
   const ended = await ctx.db.get(run._id);
   if (!ended) throw new Error("run vanished inside its own transaction");
-  return accepted(ended, r.requestId, nowMs);
+  return accepted(ended, "endRun", r.requestId, nowMs);
 }

@@ -382,3 +382,89 @@ describe("driverGrants.issue", () => {
     ).rejects.toThrow(/NOT_A_DRIVER/);
   });
 });
+
+/** A second driver's grant for the same Pi, scoped to route B, already expired. */
+async function otherDriversExpiredGrant(t: T, deviceId: Id<"devices">, routeB: Id<"routeVersions">) {
+  const secret = "k".repeat(64);
+  await t.run(async (ctx) => {
+    const other = await ctx.db.insert("users", { tokenIdentifier: "test|driver2", role: "driver", displayName: "Rae" });
+    await ctx.db.insert("driverGrants", {
+      tokenHash: await sha256Hex(secret),
+      deviceId,
+      driverUserId: other,
+      routeVersionIds: [routeB],
+      issuedAtMs: Date.now() - 2 * HOUR,
+      expiresAtMs: Date.now() - HOUR,
+      revoked: false,
+    });
+  });
+  return secret;
+}
+
+describe("review regressions (PR #18)", () => {
+  it("a start retry with another driver's grant does not return the run", async () => {
+    const { t, routeA, routeB, deviceA } = await setup();
+    const body = startBody(routeA);
+    await post(t, "/device/v1/trip-events", SECRET_A, body);
+    const other = await otherDriversExpiredGrant(t, deviceA, routeB);
+    const r = await post(t, "/device/v1/trip-events", SECRET_A, { ...body, driverOperatingGrant: other });
+    expect(r.status).toBe(409);
+    expect(r.body).not.toHaveProperty("runId");
+  });
+
+  it("an end retry with another driver's grant does not return the run", async () => {
+    const { t, routeA, routeB, deviceA } = await setup();
+    const runId = (await post(t, "/device/v1/trip-events", SECRET_A, startBody(routeA))).body.runId as string;
+    const end = endBody(runId);
+    await post(t, "/device/v1/trip-events", SECRET_A, end);
+    const other = await otherDriversExpiredGrant(t, deviceA, routeB);
+    const r = await post(t, "/device/v1/trip-events", SECRET_A, { ...end, driverOperatingGrant: other });
+    expect(r.status).toBe(409);
+  });
+
+  it("one requestId names one command: an end cannot reuse the start's requestId", async () => {
+    const { t, routeA } = await setup();
+    const start = startBody(routeA);
+    const runId = (await post(t, "/device/v1/trip-events", SECRET_A, start)).body.runId as string;
+    const r = await post(t, "/device/v1/trip-events", SECRET_A, endBody(runId, { requestId: start.requestId }));
+    expect(r.status).toBe(409);
+    expect(r.body.error?.code).toBe("REQUEST_ID_CONFLICT");
+    expect(await t.run(async (ctx) => (await ctx.db.query("runs").first())?.state)).toBe("active");
+  });
+
+  it("one end requestId cannot complete a second run", async () => {
+    const { t, routeA } = await setup();
+    const first = (await post(t, "/device/v1/trip-events", SECRET_A, startBody(routeA))).body.runId as string;
+    const end = endBody(first, { lastRunSequence: null });
+    await post(t, "/device/v1/trip-events", SECRET_A, end);
+    const second = (
+      await post(t, "/device/v1/trip-events", SECRET_A, startBody(routeA, { requestId: "33333333-4444-4555-8666-777777777777" }))
+    ).body.runId as string;
+    const r = await post(t, "/device/v1/trip-events", SECRET_A, { ...end, runId: second });
+    expect(r.status).toBe(409);
+    const states = await t.run(async (ctx) => (await ctx.db.query("runs").collect()).map((x) => x.state));
+    expect(states.toSorted()).toEqual(["active", "completed"]);
+  });
+
+  it("a start retry after the run ended still returns the original active response", async () => {
+    const { t, routeA } = await setup();
+    const start = startBody(routeA);
+    const first = await post(t, "/device/v1/trip-events", SECRET_A, start);
+    await post(t, "/device/v1/trip-events", SECRET_A, endBody(first.body.runId as string, { lastRunSequence: null }));
+    const retry = await post(t, "/device/v1/trip-events", SECRET_A, start);
+    const { serverNowMs: _a, ...original } = first.body;
+    const { serverNowMs: _b, ...again } = retry.body;
+    expect(again).toEqual(original);
+    expect(again).toMatchObject({ state: "active", endedAtMs: null });
+  });
+
+  it("with an invalid grant, an owned run and an unknown run look the same", async () => {
+    const { t, routeA } = await setup();
+    const runId = (await post(t, "/device/v1/trip-events", SECRET_A, startBody(routeA))).body.runId as string;
+    const forged = { driverOperatingGrant: "f".repeat(64) };
+    const owned = await post(t, "/device/v1/trip-events", SECRET_A, endBody(runId, forged));
+    const unknown = await post(t, "/device/v1/trip-events", SECRET_A, endBody("not_a_run", forged));
+    expect(owned.status).toBe(unknown.status);
+    expect(owned.body).toEqual(unknown.body);
+  });
+});
