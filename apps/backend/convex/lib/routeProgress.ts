@@ -16,9 +16,15 @@
 import type { RoutePoint, StopStatus } from "@itssb/contracts";
 
 /** Base lateral distance from the path a fix may be and still match it. */
-export const MATCH_LATERAL_M = 40;
+export const MATCH_LATERAL_M = 25;
 /** Worst reported GPS accuracy added to the lateral tolerance. */
-export const MAX_ACCURACY_ALLOWANCE_M = 50;
+export const MAX_ACCURACY_ALLOWANCE_M = 25;
+/** A fix this close to the path (plus up to 10 m of accuracy) may change stop outcomes. */
+export const CONFIDENT_LATERAL_M = 20;
+/** How far from the path a recorded stop may be and still be placed on it. */
+export const STOP_PLACEMENT_LATERAL_M = 40;
+/** An arrival also needs the fix itself this close to the stop (plus up to 20 m of accuracy). */
+export const ARRIVE_RADIUS_M = 40;
 /** How far behind accepted progress a fix may match (GPS noise). */
 export const BACKTRACK_M = 50;
 /** Fastest plausible bus speed for the forward search window. */
@@ -52,6 +58,8 @@ export interface PreparedRoute {
   totalM: number;
   /** In travel order. */
   stops: PreparedStop[];
+  /** Each stop's recorded coordinate, same order as `stops`. */
+  stopPoints: RoutePoint[];
 }
 
 export type MatchStatus = "on_route" | "off_route" | "ambiguous";
@@ -93,6 +101,11 @@ function planar(origin: RoutePoint, p: RoutePoint): [number, number] {
   return [x, y];
 }
 
+function planarDistance(a: RoutePoint, b: RoutePoint): number {
+  const [x, y] = planar(a, b);
+  return Math.hypot(x, y);
+}
+
 function segmentLength(a: RoutePoint, b: RoutePoint): number {
   const [x, y] = planar(a, b);
   return Math.hypot(x, y);
@@ -127,39 +140,46 @@ export function prepareRoute(path: RoutePoint[], stops: RouteStopInput[]): Prepa
   const placed: PreparedStop[] = [];
   let minAlong = 0;
   for (const s of ordered) {
+    // Every separate pass of the path near the stop after the previous stop,
+    // each with its closest point. The stop goes on the first pass whose
+    // closest point is past the previous stop: a stop on the same street lands
+    // at its own position, and a later stop at the same place as an earlier
+    // one (a loop's return leg) lands on the later pass.
+    const passes: { alongM: number; lateralM: number }[] = [];
+    let inPass = false;
     let nearest: { alongM: number; lateralM: number } | null = null;
-    let earliestClose: number | null = null;
     for (let i = 0; i < path.length - 1; i++) {
       if (cumM[i + 1]! < minAlong) continue;
       const proj = projectOnSegment(base, i, s);
-      if (proj.alongM < minAlong) continue;
-      if (earliestClose === null && proj.lateralM <= MATCH_LATERAL_M) earliestClose = proj.alongM;
-      if (!nearest || proj.lateralM < nearest.lateralM) nearest = proj;
-    }
-    // Earliest close pass, refined to the closest point in that pass. The
-    // next stop is searched only after this pass ends, so a later stop at the
-    // same place (a loop's return leg) lands on the later pass.
-    let alongM = nearest?.alongM ?? minAlong;
-    let passEndM = alongM;
-    if (earliestClose !== null) {
-      let best = { alongM: earliestClose, lateralM: Infinity };
-      for (let i = 0; i < path.length - 1; i++) {
-        if (cumM[i + 1]! < earliestClose) continue;
-        const proj = projectOnSegment(base, i, s);
-        if (proj.lateralM > MATCH_LATERAL_M) {
-          // The first segment past the pass: the next stop starts here.
-          passEndM = cumM[i + 1]!;
-          break;
-        }
-        if (proj.lateralM < best.lateralM) best = proj;
-        passEndM = cumM[i + 1]!;
+      if (proj.alongM < minAlong) {
+        inPass = false;
+        continue;
       }
-      alongM = best.alongM;
+      if (!nearest || proj.lateralM < nearest.lateralM) nearest = proj;
+      if (proj.lateralM > STOP_PLACEMENT_LATERAL_M) {
+        inPass = false;
+        continue;
+      }
+      const current = passes[passes.length - 1];
+      if (inPass && current) {
+        if (proj.lateralM < current.lateralM) passes[passes.length - 1] = proj;
+      } else {
+        passes.push(proj);
+        inPass = true;
+      }
     }
+    const chosen = passes.find((p) => p.alongM > minAlong + 0.5) ?? (placed.length === 0 ? passes[0] : undefined);
+    const alongM = chosen?.alongM ?? nearest?.alongM ?? minAlong;
     placed.push({ stopId: s.stopId, sequence: s.sequence!, alongM });
-    minAlong = Math.max(alongM, passEndM);
+    minAlong = alongM;
   }
-  return { points: path, cumM, totalM: cumM[cumM.length - 1]!, stops: placed };
+  return {
+    points: path,
+    cumM,
+    totalM: cumM[cumM.length - 1]!,
+    stops: placed,
+    stopPoints: ordered.map((o) => ({ latitude: o.latitude, longitude: o.longitude })),
+  };
 }
 
 /** Progress at run start: the beginning of the path, no stop reached yet. */
@@ -183,25 +203,25 @@ export function locate(route: PreparedRoute, prev: ProgressState, fix: Fix): Loc
   const upper = prev.alongM + MAX_PLAUSIBLE_SPEED_MPS * dtS + FORWARD_SLACK_M;
   const tolerance = MATCH_LATERAL_M + Math.min(fix.horizontalAccuracyM ?? MAX_ACCURACY_ALLOWANCE_M, MAX_ACCURACY_ALLOWANCE_M);
 
-  const clusters: { endM: number; best: { alongM: number; lateralM: number } }[] = [];
+  // Candidate projections, grouped by distance along the path: two groups
+  // further apart than the tolerance are two separate places (two legs of a
+  // hairpin or loop), even if path segments connect them.
+  const candidates: { alongM: number; lateralM: number }[] = [];
   for (let i = 0; i < route.points.length - 1; i++) {
     if (route.cumM[i + 1]! < lower || route.cumM[i]! > upper) continue;
     const proj = projectOnSegment(route, i, fix);
     if (proj.lateralM > tolerance || proj.alongM < lower || proj.alongM > upper) continue;
-    const last = clusters[clusters.length - 1];
-    // Adjacent matching segments belong to one pass along the path.
-    if (last && route.cumM[i]! - last.endM <= tolerance) {
-      last.endM = route.cumM[i + 1]!;
-      // Prefer the closer match; on a near tie prefer forward progress.
-      const tie = Math.abs(proj.lateralM - last.best.lateralM) <= 1;
-      if (proj.lateralM < last.best.lateralM - 1 || (tie && proj.alongM > last.best.alongM)) last.best = proj;
-    } else {
-      clusters.push({ endM: route.cumM[i + 1]!, best: proj });
-    }
+    candidates.push(proj);
   }
-  if (clusters.length === 0) return { status: "off_route" };
-  if (clusters.length > 1) return { status: "ambiguous" };
-  return { status: "on_route", alongM: clusters[0]!.best.alongM, lateralM: clusters[0]!.best.lateralM };
+  if (candidates.length === 0) return { status: "off_route" };
+  candidates.sort((a, b) => a.alongM - b.alongM);
+  let best = candidates[0]!;
+  for (let i = 1; i < candidates.length; i++) {
+    const c = candidates[i]!;
+    if (c.alongM - candidates[i - 1]!.alongM > 2 * tolerance) return { status: "ambiguous" };
+    if (c.lateralM < best.lateralM) best = c;
+  }
+  return { status: "on_route", alongM: best.alongM, lateralM: best.lateralM };
 }
 
 /**
@@ -216,12 +236,20 @@ export function advance(route: PreparedRoute, prev: ProgressState, fix: Fix): Pr
   const located = locate(route, prev, fix);
   if (located.status !== "on_route") return { ...prev, lastStatus: located.status };
   const alongM = Math.max(prev.alongM, located.alongM);
+  const accuracy = fix.horizontalAccuracyM ?? MAX_ACCURACY_ALLOWANCE_M;
+  // A loosely matched fix moves progress but never changes a stop outcome.
+  const confident = located.lateralM <= CONFIDENT_LATERAL_M + Math.min(accuracy, 10);
   const stops = prev.stops.map((outcome, i) => {
     const stop = route.stops[i]!;
     let { arrivedAtMs, departedAtMs } = outcome;
-    if (departedAtMs === null && alongM >= stop.alongM + DEPART_AFTER_M) {
+    if (!confident || departedAtMs !== null) return outcome;
+    if (alongM >= stop.alongM + DEPART_AFTER_M) {
       departedAtMs = fix.capturedAtMs;
-    } else if (arrivedAtMs === null && departedAtMs === null && alongM >= stop.alongM - ARRIVE_BEFORE_M) {
+    } else if (
+      arrivedAtMs === null &&
+      alongM >= stop.alongM - ARRIVE_BEFORE_M &&
+      planarDistance(route.stopPoints[i]!, fix) <= ARRIVE_RADIUS_M + Math.min(accuracy, 20)
+    ) {
       arrivedAtMs = fix.capturedAtMs;
     }
     return { stopId: outcome.stopId, arrivedAtMs, departedAtMs };

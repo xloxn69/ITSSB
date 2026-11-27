@@ -137,3 +137,36 @@ describe("route progress", () => {
     expect(next.alongM).toBe(0);
   });
 });
+
+describe("independent review cases", () => {
+  it("places stops on one long segment at their own positions", () => {
+    const route = prepareRoute([at(0), at(4000)], [stop("a", 0, 1000), stop("b", 1, 2500), stop("c", 2, 3500)])!;
+    expect(route.stops.map((s) => Math.round(s.alongM))).toEqual([1000, 2500, 3500]);
+  });
+
+  it("a bus on a close parallel street (35 m off, 5 m accuracy) never serves the stop", () => {
+    const route = prepareRoute(densePath(5000), [stop("a", 0, 1000), stop("b", 1, 3000)])!;
+    let state = initialProgress(route, T0);
+    let t = T0;
+    for (let d = 50; d <= 900; d += 50) state = advance(route, state, fix(d, 0, (t += 5000)));
+    for (let d = 950; d <= 1300; d += 50) state = advance(route, state, fix(d, 35, (t += 5000)));
+    expect(stopStatus(route, state, "a")).toBe("upcoming");
+    expect(state.stops[0]!.arrivedAtMs).toBeNull();
+  });
+
+  it("a fix between the two legs of a hairpin is ambiguous, not snapped forward", () => {
+    // Two long straight legs: out 1 km east, a 20 m connector north, back 1 km west.
+    const hairpin = prepareRoute([at(0), at(1000), at(1000, 20), at(0, 20)], [
+      stop("out", 0, 500),
+      stop("back", 1, 300, 20),
+    ])!;
+    let state = initialProgress(hairpin, T0);
+    let t = T0;
+    for (let d = 50; d <= 600; d += 50) state = advance(hairpin, state, fix(d, 0, (t += 5000)));
+    // Halfway between the legs, inside the forward window of both.
+    const next = advance(hairpin, state, fix(650, 10, (t += 60_000)));
+    expect(next.lastStatus).toBe("ambiguous");
+    expect(next.alongM).toBeCloseTo(600, -1);
+    expect(stopStatus(hairpin, next, "back")).toBe("upcoming");
+  });
+});
