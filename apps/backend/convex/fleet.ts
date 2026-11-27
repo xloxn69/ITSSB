@@ -1,0 +1,167 @@
+import {
+  type DeviceSummary,
+  type FleetMutationResult,
+  type ListDevicesResult,
+  type ListDriversResult,
+  MAX_BUS_LABEL_LENGTH,
+  SCHEMA_VERSION,
+} from "@itssb/contracts";
+import { v } from "convex/values";
+import { mutation, query } from "./_generated/server";
+import { accessUnavailable, audit, denied, staffCaller } from "./lib/staff";
+
+/**
+ * Staff bus/device and driver pages (docs/12 §3, docs/08 §11). Device
+ * credentials are never returned: not the secret, not its hash.
+ */
+
+const nullable = <T extends Parameters<typeof v.union>[0]>(x: T) => v.union(x, v.null());
+
+const fleetMutationResult = v.union(
+  v.object({ schemaVersion: v.literal(SCHEMA_VERSION), status: v.literal("ok"), serverNowMs: v.number() }),
+  v.object({
+    schemaVersion: v.literal(SCHEMA_VERSION),
+    status: v.literal("refused"),
+    serverNowMs: v.number(),
+    code: v.union(v.literal("not_found"), v.literal("invalid_label")),
+    message: v.string(),
+  }),
+  accessUnavailable,
+);
+
+const ok = (): FleetMutationResult => ({ schemaVersion: SCHEMA_VERSION, status: "ok", serverNowMs: Date.now() });
+const refused = (code: "not_found" | "invalid_label", message: string): FleetMutationResult => ({
+  schemaVersion: SCHEMA_VERSION,
+  status: "refused",
+  serverNowMs: Date.now(),
+  code,
+  message,
+});
+
+export const listDevices = query({
+  args: {},
+  returns: v.union(
+    v.object({
+      schemaVersion: v.literal(SCHEMA_VERSION),
+      status: v.literal("ready"),
+      serverNowMs: v.number(),
+      devices: v.array(
+        v.object({
+          deviceId: v.string(),
+          label: v.string(),
+          busLabel: nullable(v.string()),
+          revoked: v.boolean(),
+          activeRun: nullable(
+            v.object({ runId: v.string(), routeLabel: nullable(v.string()), startedAtMs: nullable(v.number()) }),
+          ),
+          lastContactAtMs: nullable(v.number()),
+        }),
+      ),
+    }),
+    accessUnavailable,
+  ),
+  handler: async (ctx): Promise<ListDevicesResult> => {
+    const caller = await staffCaller(ctx);
+    if (!caller.ok) return denied(caller.reason);
+    const devices: DeviceSummary[] = [];
+    for (const device of await ctx.db.query("devices").take(500)) {
+      const run = await ctx.db
+        .query("runs")
+        .withIndex("by_device_state", (q) => q.eq("deviceId", device._id).eq("state", "active"))
+        .first();
+      const live = run
+        ? await ctx.db
+            .query("liveState")
+            .withIndex("by_run", (q) => q.eq("runId", run._id))
+            .unique()
+        : null;
+      const versionId = run ? ctx.db.normalizeId("routeVersions", run.routeVersionId) : null;
+      const version = versionId ? await ctx.db.get(versionId) : null;
+      devices.push({
+        deviceId: device._id,
+        label: device.label,
+        busLabel: device.busLabel ?? null,
+        revoked: device.revoked,
+        activeRun: run
+          ? { runId: run._id, routeLabel: version?.label ?? null, startedAtMs: run.startedAtMs ?? null }
+          : null,
+        lastContactAtMs: live?.receivedAtMs ?? null,
+      });
+    }
+    devices.sort((a, b) => a.label.localeCompare(b.label));
+    return { schemaVersion: SCHEMA_VERSION, status: "ready", serverNowMs: Date.now(), devices };
+  },
+});
+
+/** Sets the family-facing bus name ("Bus 12") for a device. */
+export const setBusLabel = mutation({
+  args: { deviceId: v.string(), busLabel: v.string() },
+  returns: fleetMutationResult,
+  handler: async (ctx, { deviceId, busLabel }): Promise<FleetMutationResult> => {
+    const caller = await staffCaller(ctx);
+    if (!caller.ok) {
+      await audit(ctx, caller.user, "device.setBusLabel", "device", deviceId, "denied");
+      return denied(caller.reason);
+    }
+    const id = ctx.db.normalizeId("devices", deviceId);
+    const device = id ? await ctx.db.get(id) : null;
+    if (!device) return refused("not_found", "That device doesn't exist.");
+    const label = busLabel.trim();
+    if (!label || label.length > MAX_BUS_LABEL_LENGTH) {
+      return refused("invalid_label", `Use 1 to ${MAX_BUS_LABEL_LENGTH} characters.`);
+    }
+    await ctx.db.patch(device._id, { busLabel: label });
+    await audit(ctx, caller.user, "device.setBusLabel", "device", device._id, "allowed");
+    return ok();
+  },
+});
+
+/**
+ * Revokes a device credential. Its telemetry is rejected from then on
+ * (devices.byCredentialHash ignores revoked devices). Idempotent.
+ */
+export const revokeDevice = mutation({
+  args: { deviceId: v.string() },
+  returns: fleetMutationResult,
+  handler: async (ctx, { deviceId }): Promise<FleetMutationResult> => {
+    const caller = await staffCaller(ctx);
+    if (!caller.ok) {
+      await audit(ctx, caller.user, "device.revoke", "device", deviceId, "denied");
+      return denied(caller.reason);
+    }
+    const id = ctx.db.normalizeId("devices", deviceId);
+    const device = id ? await ctx.db.get(id) : null;
+    if (!device) return refused("not_found", "That device doesn't exist.");
+    if (!device.revoked) {
+      await ctx.db.patch(device._id, { revoked: true });
+      await audit(ctx, caller.user, "device.revoke", "device", device._id, "allowed");
+    }
+    return ok();
+  },
+});
+
+export const listDrivers = query({
+  args: {},
+  returns: v.union(
+    v.object({
+      schemaVersion: v.literal(SCHEMA_VERSION),
+      status: v.literal("ready"),
+      serverNowMs: v.number(),
+      drivers: v.array(v.object({ userId: v.string(), displayName: v.string() })),
+    }),
+    accessUnavailable,
+  ),
+  handler: async (ctx): Promise<ListDriversResult> => {
+    const caller = await staffCaller(ctx);
+    if (!caller.ok) return denied(caller.reason);
+    const drivers = (
+      await ctx.db
+        .query("users")
+        .withIndex("by_role", (q) => q.eq("role", "driver"))
+        .take(500)
+    )
+      .map((u) => ({ userId: u._id as string, displayName: u.displayName }))
+      .toSorted((a, b) => a.displayName.localeCompare(b.displayName));
+    return { schemaVersion: SCHEMA_VERSION, status: "ready", serverNowMs: Date.now(), drivers };
+  },
+});

@@ -17,13 +17,25 @@ export const runState = v.union(
 
 export const role = v.union(v.literal("staff"), v.literal("driver"), v.literal("family"));
 
+export const routeDirection = v.union(v.literal("to_school"), v.literal("from_school"));
+
+/** One stop in a recorded draft, in travel order. */
+export const draftStop = v.object({
+  label: v.string(),
+  latitude: v.number(),
+  longitude: v.number(),
+  instructions: v.optional(v.string()),
+});
+
 export default defineSchema({
   /** People. Linked to the identity provider by `tokenIdentifier`. */
   users: defineTable({
     tokenIdentifier: v.string(),
     role,
     displayName: v.string(),
-  }).index("by_token", ["tokenIdentifier"]),
+  })
+    .index("by_token", ["tokenIdentifier"])
+    .index("by_role", ["role"]),
 
   /**
    * An enrolled Pi. The bearer credential is never stored, only its SHA-256
@@ -129,14 +141,56 @@ export default defineSchema({
   routeVersions: defineTable({
     label: v.string(),
     path: v.array(v.object({ latitude: v.number(), longitude: v.number() })),
-  }),
+    // Approval metadata. Optional so versions created before route review existed stay valid.
+    routeId: v.optional(v.id("routes")),
+    versionNumber: v.optional(v.number()),
+    sourceDraftId: v.optional(v.id("routeDrafts")),
+    approvedByUserId: v.optional(v.id("users")),
+    approvedAtMs: v.optional(v.number()),
+    effectiveFromMs: v.optional(v.number()),
+  }).index("by_route", ["routeId"]),
 
   stops: defineTable({
     routeVersionId: v.id("routeVersions"),
     label: v.string(),
     latitude: v.number(),
     longitude: v.number(),
+    /** Travel order within the version, from 0. */
+    sequence: v.optional(v.number()),
+    instructions: v.optional(v.string()),
   }).index("by_route_version", ["routeVersionId"]),
+
+  /**
+   * A stable route (docs/07 `routes`). Its approved versions are immutable;
+   * `currentVersionId` is the one a new run pins (lib/routeVersions.ts).
+   */
+  routes: defineTable({
+    label: v.string(),
+    direction: routeDirection,
+    currentVersionId: v.optional(v.id("routeVersions")),
+    createdAtMs: v.number(),
+  }),
+
+  /**
+   * A driver-recorded route awaiting staff review (docs/12 §4). Approval
+   * copies it into a new immutable `routeVersions` row; the draft is never
+   * shown to families.
+   */
+  routeDrafts: defineTable({
+    /** The route this revises, or absent for a new route. */
+    routeId: v.optional(v.id("routes")),
+    label: v.string(),
+    direction: routeDirection,
+    path: v.array(v.object({ latitude: v.number(), longitude: v.number() })),
+    stops: v.array(draftStop),
+    status: v.union(v.literal("submitted"), v.literal("approved"), v.literal("rejected")),
+    recordedByDeviceId: v.optional(v.id("devices")),
+    submittedAtMs: v.number(),
+    reviewedByUserId: v.optional(v.id("users")),
+    reviewedAtMs: v.optional(v.number()),
+    decisionReason: v.optional(v.string()),
+    approvedVersionId: v.optional(v.id("routeVersions")),
+  }).index("by_status", ["status", "submittedAtMs"]),
 
   /** A student record. `userId` is the student's own account, if they have one. */
   students: defineTable({
@@ -150,7 +204,9 @@ export default defineSchema({
     routeVersionId: v.id("routeVersions"),
     stopId: v.id("stops"),
     status: v.union(v.literal("approved"), v.literal("revoked")),
-  }).index("by_student", ["studentId"]),
+  })
+    .index("by_student", ["studentId"])
+    .index("by_route_version", ["routeVersionId"]),
 
   /** A school-approved guardian → student link. Never created by a name search. */
   guardianLinks: defineTable({
