@@ -129,7 +129,16 @@ export interface DraftDetail extends DraftSummary {
 export interface DeviceSnapshot {
   schemaVersion: number;
   generatedAtMs: number;
-  process: { version: string; bootId: string; startedAtMs?: number; uptimeS: number };
+  process: {
+    version: string;
+    bootId: string;
+    startedAtMs?: number;
+    uptimeS: number;
+    /** development | staging | production; absent on older device software. */
+    environment?: string;
+    /** Installed release (RELEASE.json), null for a checkout; absent on older device software. */
+    release?: { version: string; sourceRevision: string | null } | null;
+  };
   gps: GpsPart;
   network: NetworkPart;
   backend: BackendPart;

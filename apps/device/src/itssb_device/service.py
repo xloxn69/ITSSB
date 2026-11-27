@@ -74,7 +74,9 @@ class Service:
         self.config = config
         self.boot_id = str(uuid.uuid4())
         self.stop_event = threading.Event()
-        self.board = StatusBoard(self.boot_id, upload_enabled=config.upload_enabled)
+        self.board = StatusBoard(
+            self.boot_id, upload_enabled=config.upload_enabled, environment=config.environment
+        )
         self.latest = ObservedFixHolder()
         self.judge = MotionJudge(self.latest)
         self.latest.judge = self.judge

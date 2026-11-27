@@ -111,3 +111,40 @@ def test_example_file_parses_but_its_placeholders_are_refused():
     assert set(values) == {"ITSSB_DEVICE_API_ORIGIN", "ITSSB_DEVICE_TOKEN"}
     with pytest.raises(ConfigError, match="placeholder"):
         load_config({}, env_file=example)
+
+
+# ── Environment label (docs/14 §2) ───────────────────────────────────
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+def test_environment_set_but_empty_is_refused(value, tmp_path):
+    with pytest.raises(ConfigError, match="ITSSB_ENVIRONMENT"):
+        load_config({"ITSSB_ENVIRONMENT": value}, env_file=tmp_path / "none.env")
+
+
+def test_environment_empty_in_the_env_file_is_refused(tmp_path):
+    env_file = tmp_path / "device.env"
+    env_file.write_text("ITSSB_ENVIRONMENT=\n")
+    with pytest.raises(ConfigError, match="ITSSB_ENVIRONMENT"):
+        load_config({}, env_file=env_file)
+
+
+def test_environment_defaults_to_development_never_production(tmp_path):
+    assert load_config({}, env_file=tmp_path / "none.env").environment == "development"
+
+
+@pytest.mark.parametrize("value", ["development", "staging", "production"])
+def test_environment_accepts_the_three_names(value, tmp_path):
+    env = {"ITSSB_ENVIRONMENT": value}
+    assert load_config(env, env_file=tmp_path / "none.env").environment == value
+
+
+@pytest.mark.parametrize("value", ["prod", "Production ", "live", "dev"])
+def test_environment_typo_is_refused_not_guessed(value, tmp_path):
+    with pytest.raises(ConfigError, match="ITSSB_ENVIRONMENT"):
+        load_config({"ITSSB_ENVIRONMENT": value}, env_file=tmp_path / "none.env")
+
+
+def test_environment_is_in_the_redacted_view(tmp_path):
+    config = load_config({"ITSSB_ENVIRONMENT": "staging"}, env_file=tmp_path / "none.env")
+    assert config.redacted()["environment"] == "staging"

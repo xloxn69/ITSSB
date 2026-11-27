@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cloudIndicator, gpsIndicator, networkIndicator, queueIndicator, serviceIndicator, storageIndicator } from "./indicators.js";
+import { cloudIndicator, environmentLabel, gpsIndicator, networkIndicator, queueIndicator, serviceIndicator, storageIndicator } from "./indicators.js";
 import { observed, snapshot } from "./testing.js";
 
 const validFix = snapshot({
@@ -112,5 +112,28 @@ describe("when the device service stops answering", () => {
     const o = observed(validFix, 7_000);
     expect(serviceIndicator(o).detail).toBe("The device service last answered 7 s ago. Nothing below is current.");
     expect(gpsIndicator(o).level).toBe("unknown");
+  });
+});
+
+const labelFor = (environment: string) =>
+  environmentLabel(observed(snapshot({ process: { version: "0.1.0", bootId: "b", uptimeS: 1, environment } })));
+
+describe("environmentLabel (docs/14 §2)", () => {
+  it("labels a development or staging device and nothing in production", () => {
+    const at = labelFor;
+    expect(at("development")).toBe("Development device");
+    expect(at("staging")).toBe("Staging device");
+    expect(at("production")).toBeNull();
+  });
+
+  it("says nothing it can't know: an older device without the field, or no answer", () => {
+    expect(environmentLabel(observed(snapshot()))).toBeNull();
+    expect(environmentLabel({ ...observed(snapshot()), snapshot: null })).toBeNull();
+  });
+
+  it("drops the label once the device stops answering, instead of showing a cached one", () => {
+    const dev = snapshot({ process: { version: "0.1.0", bootId: "b", uptimeS: 1, environment: "development" } });
+    expect(environmentLabel({ ...observed(dev), pollFailed: true })).toBeNull();
+    expect(environmentLabel(observed(dev, 60_000))).toBeNull();
   });
 });

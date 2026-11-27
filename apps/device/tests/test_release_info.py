@@ -43,3 +43,11 @@ def test_unreadable_release_file_is_null_not_a_crash(tmp_path, monkeypatch):
     monkeypatch.setattr(release, "RELEASE_FILE", path)
     release.load_release.cache_clear()
     assert StatusBoard(boot_id="b", upload_enabled=False).snapshot()["process"]["release"] is None
+
+
+def test_health_names_the_environment():
+    board = StatusBoard(boot_id="b", upload_enabled=False, environment="staging")
+    assert board.snapshot()["process"]["environment"] == "staging"
+    assert StatusBoard(boot_id="b", upload_enabled=False).snapshot()["process"]["environment"] == (
+        "development"
+    )
