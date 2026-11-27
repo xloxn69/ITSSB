@@ -13,6 +13,16 @@ private final class FakeClerk: ClerkBackend {
     var verifyError: AuthError?
     var token: String? = "token-1"
     var tokenError: Error?
+    /// When false, `signOut` fails like an offline request and the session stays.
+    var signOutReachesClerk = true
+    /// Suspends `convexToken` until `releaseToken()`, to race it against logout.
+    var holdToken = false
+    private var heldTokens: [CheckedContinuation<Void, Never>] = []
+    func releaseToken() {
+        holdToken = false
+        heldTokens.forEach { $0.resume() }
+        heldTokens = []
+    }
     private(set) var calls: [String] = []
     private(set) var tokenRequests = 0
 
@@ -35,10 +45,12 @@ private final class FakeClerk: ClerkBackend {
     }
     func signOut() async throws {
         calls.append("signOut")
+        guard signOutReachesClerk else { throw AuthError.network }
         hasActiveSession = false
     }
     func convexToken() async throws -> String? {
         tokenRequests += 1
+        if holdToken { await withCheckedContinuation { heldTokens.append($0) } }
         if let tokenError { throw tokenError }
         return hasActiveSession ? token : nil
     }
@@ -46,20 +58,26 @@ private final class FakeClerk: ClerkBackend {
 
 @MainActor
 private final class FakeConvex: ConvexAuthControlling {
-    var accepts = true
+    var outcome = ConvexLoginOutcome.accepted
     private(set) var calls: [String] = []
-    func login() async -> Bool {
+    func login() async -> ConvexLoginOutcome {
         calls.append("login")
-        return accepts
+        return outcome
     }
     func logout() async { calls.append("logout") }
+}
+
+@MainActor
+private final class MemoryMarker: SignOutMarker {
+    var isSignedOut = false
 }
 
 @MainActor
 final class ClerkAuthSessionTests: XCTestCase {
     private let clerk = FakeClerk()
     private let convex = FakeConvex()
-    private lazy var session = ClerkAuthSession(backend: clerk, convex: convex)
+    private let marker = MemoryMarker()
+    private lazy var session = ClerkAuthSession(backend: clerk, convex: convex, marker: marker)
 
     func testRestoreWithoutASessionIsSignedOutAndSkipsConvex() async throws {
         let restored = try await session.restore()
@@ -94,7 +112,7 @@ final class ClerkAuthSessionTests: XCTestCase {
     /// Clerk accepted the person but Convex refused the token (no `convex` template or issuer):
     /// sign out of Clerk too, so the app is never "signed in" while every query says signed out.
     func testConvexRejectingTheTokenSignsOutOfClerk() async {
-        convex.accepts = false
+        convex.outcome = .rejected
         do {
             try await session.verifyEmailCode("123456")
             XCTFail("expected an error")
@@ -131,6 +149,49 @@ final class ClerkAuthSessionTests: XCTestCase {
         await session.signOut()
         XCTAssertEqual(convex.calls, ["logout"])
         XCTAssertEqual(clerk.calls, ["signOut"])
+        XCTAssertFalse(marker.isSignedOut, "a completed sign-out needs no marker")
+    }
+
+    /// Review blocker: Clerk keeps its session when the sign-out request fails offline.
+    /// The next launch must not restore it on a shared phone.
+    func testOfflineSignOutIsNeverRestored() async throws {
+        clerk.hasActiveSession = true
+        clerk.signOutReachesClerk = false
+        await session.signOut()
+        XCTAssertTrue(marker.isSignedOut)
+
+        // Next launch, still offline: still signed out, Convex never authenticated.
+        let offline = try await session.restore()
+        XCTAssertFalse(offline)
+        XCTAssertFalse(convex.calls.contains("login"))
+        XCTAssertTrue(marker.isSignedOut)
+
+        // Next launch, online: the pending sign-out completes and the marker clears.
+        clerk.signOutReachesClerk = true
+        let online = try await session.restore()
+        XCTAssertFalse(online)
+        XCTAssertFalse(clerk.hasActiveSession)
+        XCTAssertFalse(marker.isSignedOut)
+    }
+
+    func testSigningInAgainClearsTheMarker() async throws {
+        marker.isSignedOut = true
+        try await session.verifyEmailCode("123456")
+        XCTAssertFalse(marker.isSignedOut)
+    }
+
+    /// Review finding: an offline token fetch is not a rejection, and the Clerk session is kept.
+    func testUnreachableTrackingKeepsTheClerkSession() async {
+        clerk.hasActiveSession = true
+        convex.outcome = .unreachable
+        do {
+            _ = try await session.restore()
+            XCTFail("expected an error")
+        } catch {
+            XCTAssertEqual(error as? AuthError, .trackingUnreachable)
+        }
+        XCTAssertFalse(clerk.calls.contains("signOut"))
+        XCTAssertTrue(clerk.hasActiveSession)
     }
 
     func testClerkErrorsPassThroughUnchanged() async {
@@ -184,6 +245,30 @@ final class ClerkConvexTokenProviderTests: XCTestCase {
         let cleared = await eventually { pushed.all.last == .some(nil) }
         XCTAssertTrue(cleared)
         try await provider.logout()
+    }
+
+    /// Review finding: a token fetch that finishes after logout must not restart refreshing
+    /// or be pushed into the next person's session.
+    func testLogoutDuringATokenFetchDropsTheLateResult() async throws {
+        let clerk = FakeClerk()
+        clerk.hasActiveSession = true
+        clerk.holdToken = true
+        let pushed = Pushed()
+        let provider = ClerkConvexTokenProvider(refreshInterval: .milliseconds(10)) { clerk }
+        let login = Task { try await provider.login(onIdToken: { pushed.append($0) }) }
+        _ = await eventually { clerk.tokenRequests == 1 }
+        try await provider.logout()
+        clerk.releaseToken()
+        do {
+            _ = try await login.value
+            XCTFail("a login overtaken by logout must not succeed")
+        } catch {
+            XCTAssertTrue(error is ClerkConvexTokenProvider.NoSession)
+        }
+        let requests = clerk.tokenRequests
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertEqual(clerk.tokenRequests, requests, "no refresh loop was started")
+        XCTAssertTrue(pushed.all.isEmpty)
     }
 
     func testOfflineRefreshKeepsTheCurrentToken() async throws {

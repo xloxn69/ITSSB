@@ -35,6 +35,8 @@ enum AuthError: Error, Equatable {
     case codeExpired
     case tooManyAttempts
     case network
+    /// Signed in with the provider, but the tracking service couldn't be reached to confirm it.
+    case trackingUnreachable
     /// The provider signed the person in, but the tracking backend refused the session
     /// (for example the `convex` JWT template or the issuer isn't set up yet).
     case trackingRejected
@@ -52,6 +54,7 @@ enum AuthError: Error, Equatable {
         case .codeExpired: "That code has expired. Send a new one."
         case .tooManyAttempts: "Too many tries. Wait a minute, then try again."
         case .network: "Couldn't reach the sign-in service. Check your connection and try again."
+        case .trackingUnreachable: "You're signed in, but the tracking service couldn't be reached. Try again."
         case .trackingRejected:
             "You signed in, but the tracking service didn't accept the session, so you've been signed out. "
                 + "Your school's setup may not be finished."
@@ -196,6 +199,10 @@ final class SessionStore {
         defer { isWorking = false }
         do {
             try await body()
+        } catch AuthError.trackingUnreachable {
+            // The provider session is kept; retrying restores it once the connection is back.
+            changeEmail()
+            state = .restoreFailed
         } catch let error as AuthError {
             if error == .trackingRejected { changeEmail() }
             show(error)
@@ -225,30 +232,82 @@ final class SessionStore {
     #endif
 }
 
-/// Controls the Convex client's authentication. `ConvexClientWithAuth` in the
+/// What the tracking backend made of a sign-in.
+enum ConvexLoginOutcome: Equatable {
+    /// The backend recognizes the identity (it may still have no access: that is decided per query).
+    case accepted
+    /// The backend answered as if no one were signed in (for example a JWT template or issuer mismatch).
+    case rejected
+    /// No answer: offline, or the token couldn't be fetched.
+    case unreachable
+}
+
+/// Controls the Convex client's authentication. `ConvexClientAuth` in the
 /// app; a fake in tests.
 @MainActor
 protocol ConvexAuthControlling: AnyObject {
-    /// Authenticates with a fresh provider token. Returns false if Convex refused.
-    func login() async -> Bool
+    /// Installs a fresh provider token, then confirms the backend recognizes the identity.
+    func login() async -> ConvexLoginOutcome
     func logout() async
 }
 
 /// `ConvexAuthControlling` over the process-wide `ConvexClientWithAuth`.
+///
+/// ConvexMobile's `login()` succeeding only means a token was installed, so
+/// the identity is confirmed with one `tracking:myAssignments` answer: since
+/// #28, `unauthenticated` there means the backend saw no identity at all.
 @MainActor
 final class ConvexClientAuth: ConvexAuthControlling {
     private let client: ConvexClientWithAuth<String>
+    private let querying: any ConvexQuerying
+    static let confirmTimeout: Duration = .seconds(10)
 
-    init(client: ConvexClientWithAuth<String>) {
+    init(client: ConvexClientWithAuth<String>, querying: any ConvexQuerying) {
         self.client = client
+        self.querying = querying
     }
 
-    func login() async -> Bool {
-        if case .success = await client.login() { return true }
-        return false
+    func login() async -> ConvexLoginOutcome {
+        if case let .failure(error) = await client.login() {
+            return Self.outcome(forLoginError: error)
+        }
+        return await Self.confirm(querying: querying, timeout: Self.confirmTimeout)
     }
 
     func logout() async {
         await client.logout()
+    }
+
+    /// A token that couldn't be fetched offline is unreachable, not a rejection.
+    nonisolated static func outcome(forLoginError error: Error) -> ConvexLoginOutcome {
+        if let auth = error as? AuthError, auth == .network { return .unreachable }
+        if error is URLError { return .unreachable }
+        return .rejected
+    }
+
+    nonisolated static func outcome(for snapshot: AssignmentsSnapshot?) -> ConvexLoginOutcome {
+        switch snapshot {
+        case nil: .unreachable
+        case .accessUnavailable(.unauthenticated): .rejected
+        case .ready, .accessUnavailable(.notPermitted): .accepted
+        }
+    }
+
+    /// The first `tracking:myAssignments` answer, or unreachable after `timeout`.
+    nonisolated static func confirm(querying: any ConvexQuerying, timeout: Duration) async -> ConvexLoginOutcome {
+        let stream = querying.subscribe("tracking:myAssignments", args: [:], as: MyAssignmentsDTO.self) {
+            try DomainMapping.assignments(from: $0)
+        }
+        let first = await withTaskGroup(of: AssignmentsSnapshot?.self) { group -> AssignmentsSnapshot? in
+            group.addTask { try? await stream.first(where: { _ in true }) }
+            group.addTask {
+                try? await Task.sleep(for: timeout)
+                return nil
+            }
+            let result = await group.next()
+            group.cancelAll()
+            return result.flatMap { $0 }
+        }
+        return outcome(for: first)
     }
 }

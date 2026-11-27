@@ -153,6 +153,15 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertNotEqual(session.state, .signedIn)
     }
 
+    func testSignedInButTrackingUnreachableIsRetryable() async {
+        let auth = StubAuth()
+        auth.appleError = .trackingUnreachable
+        let session = store(auth)
+        await session.signInWithApple()
+        XCTAssertEqual(session.state, .restoreFailed, "retry restores the kept provider session")
+        XCTAssertFalse(auth.calls.contains("signOut"))
+    }
+
     func testCancelledAppleSignInShowsNothing() async {
         let auth = StubAuth()
         auth.appleError = .cancelled

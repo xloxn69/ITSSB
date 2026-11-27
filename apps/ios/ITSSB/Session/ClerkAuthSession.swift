@@ -21,6 +21,30 @@ protocol ClerkBackend: AnyObject {
     func convexToken() async throws -> String?
 }
 
+/// Remembers, on this phone, that the person signed out. Clerk clears its
+/// stored session only after its sign-out request succeeds, so an offline
+/// sign-out would otherwise come back on the next online launch.
+@MainActor
+protocol SignOutMarker: AnyObject {
+    var isSignedOut: Bool { get set }
+}
+
+/// `SignOutMarker` in UserDefaults. It is a flag, not a credential.
+@MainActor
+final class DefaultsSignOutMarker: SignOutMarker {
+    private let defaults: UserDefaults
+    private let key = "itssb.signedOutPendingClerk"
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    var isSignedOut: Bool {
+        get { defaults.bool(forKey: key) }
+        set { defaults.set(newValue, forKey: key) }
+    }
+}
+
 /// `AuthSession` over Clerk, with the Convex client authenticated by the
 /// Clerk token (docs/06 §4, backend `auth.config.ts`).
 @MainActor
@@ -28,17 +52,25 @@ final class ClerkAuthSession: AuthSession {
     let isConfigured = true
     private let backend: any ClerkBackend
     private let convex: any ConvexAuthControlling
+    private let marker: any SignOutMarker
     static let loadTimeout: Duration = .seconds(10)
 
-    init(backend: any ClerkBackend, convex: any ConvexAuthControlling) {
+    init(backend: any ClerkBackend, convex: any ConvexAuthControlling, marker: any SignOutMarker) {
         self.backend = backend
         self.convex = convex
+        self.marker = marker
     }
 
     var accountLabel: String? { backend.accountLabel }
 
     func restore() async throws -> Bool {
         guard await backend.waitUntilLoaded(timeout: Self.loadTimeout) else { throw AuthError.network }
+        if marker.isSignedOut {
+            // A sign-out that didn't reach Clerk: finish it now, and never restore that session.
+            if backend.hasActiveSession { try? await backend.signOut() }
+            if !backend.hasActiveSession { marker.isSignedOut = false }
+            return false
+        }
         guard backend.hasActiveSession else { return false }
         try await authenticateConvex()
         return true
@@ -54,23 +86,37 @@ final class ClerkAuthSession: AuthSession {
 
     func verifyEmailCode(_ code: String) async throws {
         guard try await backend.verifyEmailCode(code) else { throw AuthError.needsMoreInfo }
+        marker.isSignedOut = false
         try await authenticateConvex()
     }
 
     func signInWithApple() async throws {
         guard try await backend.signInWithApple() else { throw AuthError.needsMoreInfo }
+        marker.isSignedOut = false
         try await authenticateConvex()
     }
 
     func signOut() async {
+        // Mark first: if Clerk can't be reached, the next launch still treats this phone as signed out.
+        marker.isSignedOut = true
         await convex.logout()
         try? await backend.signOut()
+        if !backend.hasActiveSession { marker.isSignedOut = false }
     }
 
-    /// Signed in with Clerk; now Convex must accept the token. If it doesn't, sign out of
-    /// Clerk too, so the app never sits "signed in" while every query says signed out.
+    /// Signed in with Clerk; now the backend must recognize the identity.
+    /// - Rejected (the backend answers as if no one signed in): sign out of Clerk too, so the
+    ///   app never sits "signed in" while every query says signed out.
+    /// - Unreachable: keep the Clerk session and report a retryable connection problem.
     private func authenticateConvex() async throws {
-        guard await convex.login() else {
+        switch await convex.login() {
+        case .accepted:
+            return
+        case .unreachable:
+            await convex.logout()
+            throw AuthError.trackingUnreachable
+        case .rejected:
+            await convex.logout()
             try? await backend.signOut()
             throw AuthError.trackingRejected
         }
@@ -91,6 +137,9 @@ final class ClerkConvexTokenProvider: AuthProvider, @unchecked Sendable {
     private let backend: @MainActor () -> any ClerkBackend
     private let refreshInterval: Duration
     @MainActor private var refreshTask: Task<Void, Never>?
+    /// Bumped on logout. A token fetched for an older generation is never used or pushed,
+    /// so a late result can't sign the next person in as the previous one.
+    @MainActor private var generation = 0
 
     init(refreshInterval: Duration = .seconds(20), backend: @escaping @MainActor () -> any ClerkBackend) {
         self.refreshInterval = refreshInterval
@@ -113,7 +162,9 @@ final class ClerkConvexTokenProvider: AuthProvider, @unchecked Sendable {
 
     @MainActor
     private func token(onIdToken: @Sendable @escaping (String?) -> Void) async throws -> String {
-        guard let token = try await backend().convexToken() else { throw NoSession() }
+        let current = generation
+        let token = try await backend().convexToken()
+        guard current == generation, let token else { throw NoSession() }
         startRefreshing(onIdToken: onIdToken)
         return token
     }
@@ -123,12 +174,15 @@ final class ClerkConvexTokenProvider: AuthProvider, @unchecked Sendable {
         refreshTask?.cancel()
         let interval = refreshInterval
         let backend = backend
-        refreshTask = Task { @MainActor in
+        let current = generation
+        refreshTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: interval)
-                guard !Task.isCancelled else { return }
                 do {
-                    guard let token = try await backend().convexToken() else {
+                    let token = try await backend().convexToken()
+                    // Logged out (or restarted) while fetching: drop this result.
+                    guard !Task.isCancelled, let self, self.generation == current else { return }
+                    guard let token else {
                         onIdToken(nil) // Signed out elsewhere: Convex drops the identity.
                         return
                     }
@@ -142,6 +196,7 @@ final class ClerkConvexTokenProvider: AuthProvider, @unchecked Sendable {
 
     @MainActor
     private func stopRefreshing() {
+        generation += 1
         refreshTask?.cancel()
         refreshTask = nil
     }
