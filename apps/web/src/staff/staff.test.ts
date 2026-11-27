@@ -2,7 +2,7 @@ import { POSITION_STALE_AFTER_MS } from "@itssb/contracts";
 import { describe, expect, it } from "vitest";
 import { staffFixtureSource } from "../dev/staffFixtures";
 import { approvalBlocker, contactStatus } from "./format";
-import { mutationOutcome, queryState } from "./source";
+import { credentialOutcome, mutationOutcome, queryState } from "./source";
 
 describe("queryState", () => {
   it("separates ready, not found, denial, and malformed answers", () => {
@@ -70,5 +70,40 @@ describe("staff fixtures follow the server's review rules", () => {
     });
     const routes = await new Promise((resolve) => source.watch("routes:list", {}, resolve, () => {}));
     expect(routes).toMatchObject({ routes: expect.arrayContaining([expect.objectContaining({ label: "Route 9 Morning" })]) });
+  });
+});
+
+describe("credentialOutcome", () => {
+  const secret = "f".repeat(64);
+  it("shows a secret only for a well-formed issued answer", () => {
+    expect(credentialOutcome({ schemaVersion: 1, status: "issued", deviceId: "d1", deviceSecret: secret })).toEqual({
+      kind: "issued",
+      deviceId: "d1",
+      deviceSecret: secret,
+    });
+    expect(credentialOutcome({ schemaVersion: 1, status: "issued", deviceId: "d1" }).kind).toBe("failed");
+    expect(credentialOutcome({ schemaVersion: 1, status: "issued", deviceId: "d1", deviceSecret: "short" }).kind).toBe("failed");
+    expect(credentialOutcome({ schemaVersion: 1, status: "ok" }).kind).toBe("failed");
+  });
+
+  it("passes refusals and denials through without a secret", () => {
+    expect(credentialOutcome({ schemaVersion: 1, status: "refused", code: "revoked", message: "Revoked." })).toEqual({
+      kind: "refused",
+      message: "Revoked.",
+    });
+    expect(credentialOutcome({ schemaVersion: 1, status: "access_unavailable", reason: "not_permitted" })).toEqual({
+      kind: "access_unavailable",
+      reason: "not_permitted",
+    });
+  });
+});
+
+describe("fixture credential actions", () => {
+  it("rotation issues a new fictional secret and refuses a revoked device", async () => {
+    const source = staffFixtureSource("staff");
+    const rotated = credentialOutcome(await source.act("fleet:rotateDeviceCredential", { deviceId: "demo_device_001" }));
+    expect(rotated.kind).toBe("issued");
+    const refused = credentialOutcome(await source.act("fleet:rotateDeviceCredential", { deviceId: "demo_device_004" }));
+    expect(refused.kind).toBe("refused");
   });
 });

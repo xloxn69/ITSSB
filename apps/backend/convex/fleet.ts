@@ -1,13 +1,18 @@
 import {
+  type CredentialIssuedResult,
+  type CredentialRefusalCode,
   type DeviceSummary,
   type FleetMutationResult,
   type ListDevicesResult,
   type ListDriversResult,
   MAX_BUS_LABEL_LENGTH,
+  MAX_DEVICE_LABEL_LENGTH,
   SCHEMA_VERSION,
 } from "@itssb/contracts";
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { action, internalMutation, mutation, query } from "./_generated/server";
+import { generateDeviceSecret, sha256Hex } from "./lib/deviceAuth";
 import { accessUnavailable, audit, denied, staffCaller } from "./lib/staff";
 
 /**
@@ -163,5 +168,143 @@ export const listDrivers = query({
       .map((u) => ({ userId: u._id as string, displayName: u.displayName }))
       .toSorted((a, b) => a.displayName.localeCompare(b.displayName));
     return { schemaVersion: SCHEMA_VERSION, status: "ready", serverNowMs: Date.now(), drivers };
+  },
+});
+
+// ── Device credentials (docs/14 §4, docs/11 §3) ─────────────────────────
+//
+// Issuing is an action so the secret comes from real randomness; the
+// authorization check, the write and the audit row happen together in one
+// internal mutation, which sees the caller's identity. The secret is returned
+// once, to the staff member who asked, and never stored or logged.
+
+const credentialRefused = v.object({
+  schemaVersion: v.literal(SCHEMA_VERSION),
+  status: v.literal("refused"),
+  serverNowMs: v.number(),
+  code: v.union(v.literal("not_found"), v.literal("revoked"), v.literal("invalid_label")),
+  message: v.string(),
+});
+
+const credentialIssuedResult = v.union(
+  v.object({
+    schemaVersion: v.literal(SCHEMA_VERSION),
+    status: v.literal("issued"),
+    serverNowMs: v.number(),
+    deviceId: v.string(),
+    deviceSecret: v.string(),
+  }),
+  credentialRefused,
+  accessUnavailable,
+);
+
+const credentialWriteResult = v.union(
+  v.object({ status: v.literal("ok"), deviceId: v.string() }),
+  credentialRefused,
+  accessUnavailable,
+);
+type CredentialWriteResult =
+  | { status: "ok"; deviceId: string }
+  | Exclude<CredentialIssuedResult, { status: "issued" }>;
+
+const credentialRefusal = (code: CredentialRefusalCode, message: string): CredentialWriteResult => ({
+  schemaVersion: SCHEMA_VERSION,
+  status: "refused",
+  serverNowMs: Date.now(),
+  code,
+  message,
+});
+
+function issued(write: CredentialWriteResult, deviceSecret: string): CredentialIssuedResult {
+  if (write.status !== "ok") return write;
+  return { schemaVersion: SCHEMA_VERSION, status: "issued", serverNowMs: Date.now(), deviceId: write.deviceId, deviceSecret };
+}
+
+/**
+ * Replaces a device's credential. The old secret stops working at once; the
+ * device keeps its identity, bus and any active run. Install the new secret
+ * on the Pi in a maintenance window (docs/runbooks/device-credentials.md);
+ * until then its uploads are refused and wait in its outbox. A revoked device
+ * stays revoked: provision a new device instead.
+ */
+export const rotateDeviceCredential = action({
+  args: { deviceId: v.string() },
+  returns: credentialIssuedResult,
+  handler: async (ctx, { deviceId }): Promise<CredentialIssuedResult> => {
+    const deviceSecret = generateDeviceSecret();
+    const write: CredentialWriteResult = await ctx.runMutation(internal.fleet.applyRotation, {
+      deviceId,
+      credentialHash: await sha256Hex(deviceSecret),
+    });
+    return issued(write, deviceSecret);
+  },
+});
+
+export const applyRotation = internalMutation({
+  args: { deviceId: v.string(), credentialHash: v.string() },
+  returns: credentialWriteResult,
+  handler: async (ctx, { deviceId, credentialHash }): Promise<CredentialWriteResult> => {
+    const caller = await staffCaller(ctx);
+    if (!caller.ok) {
+      await audit(ctx, caller.user, "device.rotateCredential", "device", deviceId, "denied");
+      return denied(caller.reason);
+    }
+    const id = ctx.db.normalizeId("devices", deviceId);
+    const device = id ? await ctx.db.get(id) : null;
+    if (!device || device.revoked) {
+      // A refused attempt by staff is audited too, so it can be traced.
+      await audit(ctx, caller.user, "device.rotateCredential", "device", deviceId, "denied");
+      return device
+        ? credentialRefusal("revoked", "This device is revoked. Provision a new device instead.")
+        : credentialRefusal("not_found", "That device doesn't exist.");
+    }
+    await ctx.db.patch(device._id, { credentialHash });
+    await audit(ctx, caller.user, "device.rotateCredential", "device", device._id, "allowed");
+    return { status: "ok", deviceId: device._id };
+  },
+});
+
+/** Creates a device with its own credential (docs/14 §4 step 1-2). */
+export const provisionDevice = action({
+  args: { label: v.string(), busLabel: v.optional(v.string()) },
+  returns: credentialIssuedResult,
+  handler: async (ctx, args): Promise<CredentialIssuedResult> => {
+    const deviceSecret = generateDeviceSecret();
+    const write: CredentialWriteResult = await ctx.runMutation(internal.fleet.createDevice, {
+      ...args,
+      credentialHash: await sha256Hex(deviceSecret),
+    });
+    return issued(write, deviceSecret);
+  },
+});
+
+export const createDevice = internalMutation({
+  args: { label: v.string(), busLabel: v.optional(v.string()), credentialHash: v.string() },
+  returns: credentialWriteResult,
+  handler: async (ctx, { label, busLabel, credentialHash }): Promise<CredentialWriteResult> => {
+    const caller = await staffCaller(ctx);
+    if (!caller.ok) {
+      await audit(ctx, caller.user, "device.provision", "device", undefined, "denied");
+      return denied(caller.reason);
+    }
+    const name = label.trim();
+    const bus = busLabel?.trim() || undefined;
+    if (!name || name.length > MAX_DEVICE_LABEL_LENGTH || (bus && bus.length > MAX_BUS_LABEL_LENGTH)) {
+      await audit(ctx, caller.user, "device.provision", "device", undefined, "denied");
+    }
+    if (!name || name.length > MAX_DEVICE_LABEL_LENGTH) {
+      return credentialRefusal("invalid_label", `Use 1 to ${MAX_DEVICE_LABEL_LENGTH} characters for the device name.`);
+    }
+    if (bus && bus.length > MAX_BUS_LABEL_LENGTH) {
+      return credentialRefusal("invalid_label", `Use at most ${MAX_BUS_LABEL_LENGTH} characters for the bus name.`);
+    }
+    const deviceId = await ctx.db.insert("devices", {
+      label: name,
+      credentialHash,
+      revoked: false,
+      ...(bus ? { busLabel: bus } : {}),
+    });
+    await audit(ctx, caller.user, "device.provision", "device", deviceId, "allowed");
+    return { status: "ok", deviceId };
   },
 });

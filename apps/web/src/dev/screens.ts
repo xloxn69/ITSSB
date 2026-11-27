@@ -1,7 +1,14 @@
 import { FIXTURE_SCENARIOS } from "./fixtureSource";
 
 /** Every fictional screen the screenshot script captures. */
-export const FIXTURE_SCREENS: { name: string; path: string; ready?: string }[] = [
+export const FIXTURE_SCREENS: {
+  name: string;
+  path: string;
+  ready?: string;
+  /** Clicked in order after `ready` (confirm dialogs are accepted); then `after` is awaited. */
+  click?: string[];
+  after?: string;
+}[] = [
   // Without VITE_CONVEX_URL / VITE_CLERK_PUBLISHABLE_KEY the app fails closed.
   { name: "not-configured", path: "", ready: "main h1" },
   ...FIXTURE_SCENARIOS.map((s) => ({
@@ -17,6 +24,27 @@ export const FIXTURE_SCREENS: { name: string; path: string; ready?: string }[] =
   { name: "staff-draft-rejected", path: "?fixture=staff#/staff/review/demo_draft_004", ready: "main h2" },
   { name: "staff-draft-missing", path: "?fixture=staff#/staff/review/nope", ready: "main h2" },
   { name: "staff-devices", path: "?fixture=staff#/staff/devices", ready: "article" },
+  {
+    name: "staff-device-add",
+    path: "?fixture=staff#/staff/devices",
+    ready: "article",
+    click: [".add-device summary"],
+    after: ".add-device form",
+  },
+  {
+    name: "staff-device-credential",
+    path: "?fixture=staff#/staff/devices",
+    ready: "article",
+    click: ["article button:has-text('Replace credential')"],
+    after: ".secret-panel",
+  },
+  {
+    name: "staff-device-add-refused",
+    path: "?fixture=staff#/staff/devices",
+    ready: "article",
+    click: [".add-device summary", ".add-device button[type=submit]"],
+    after: ".add-device [role=status]",
+  },
   { name: "staff-drivers", path: "?fixture=staff#/staff/drivers", ready: "main li" },
   { name: "staff-empty-routes", path: "?fixture=staff-empty#/staff/routes", ready: "main p.muted + p, main section p" },
   { name: "staff-empty-review", path: "?fixture=staff-empty#/staff/review", ready: "main section p" },

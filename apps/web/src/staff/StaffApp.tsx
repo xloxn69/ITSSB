@@ -11,10 +11,13 @@ import { type ReactNode, useEffect, useState } from "react";
 import { DraftDiagram } from "./DraftDiagram";
 import { approvalBlocker, contactStatus, DIRECTION_LABEL, dateTime } from "./format";
 import {
+  type CredentialOutcome,
+  credentialOutcome,
   type MutationOutcome,
   mutationOutcome,
   type QueryState,
   queryState,
+  type StaffActionName,
   type StaffMutationName,
   type StaffQueryName,
   type StaffSource,
@@ -358,6 +361,94 @@ function DraftReview({ source, draft }: { source: StaffSource; draft: DraftDetai
   );
 }
 
+/** Runs a credential action; the issued secret lives only in this component's state. */
+function useCredentialAction(source: StaffSource) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<CredentialOutcome | null>(null);
+  async function run(name: StaffActionName, args: Record<string, string>) {
+    setBusy(true);
+    setResult(null);
+    try {
+      setResult(credentialOutcome(await source.act(name, args)));
+    } catch {
+      setResult({ kind: "failed", message: "No answer from the server. Reload to see whether a credential was issued." });
+    } finally {
+      setBusy(false);
+    }
+  }
+  return { busy, result, run, clear: () => setResult(null) };
+}
+
+/**
+ * The one time a device secret is visible. It is not stored anywhere in the
+ * browser; dismissing the panel discards it.
+ */
+function SecretPanel({ label, secret, onDone }: { label: string; secret: string; onDone: () => void }) {
+  return (
+    <div className="card stack secret-panel" role="alert" style={{ gap: "var(--space-sm)" }}>
+      <h3>New credential for {label}</h3>
+      <p className="small">
+        Shown once. Put it in the Pi&apos;s <code>/etc/itssb/device.env</code> as <code>ITSSB_DEVICE_TOKEN</code>, then
+        restart the device service. Don&apos;t paste it into chat, email, or a screenshot.
+      </p>
+      <input className="secret" readOnly value={secret} aria-label="Device credential" onFocus={(e) => e.currentTarget.select()} />
+      <button type="button" className="btn" onClick={onDone} style={{ alignSelf: "flex-start" }}>
+        I&apos;ve installed it, hide it
+      </button>
+    </div>
+  );
+}
+
+function CredentialResult({ result, label, onDone }: { result: CredentialOutcome | null; label: string; onDone: () => void }) {
+  if (!result) return null;
+  if (result.kind === "issued") return <SecretPanel label={label} secret={result.deviceSecret} onDone={onDone} />;
+  return <Outcome outcome={result} />;
+}
+
+function AddDevice({ source }: { source: StaffSource }) {
+  const [label, setLabel] = useState("");
+  const [busLabel, setBusLabel] = useState("");
+  const [issuedFor, setIssuedFor] = useState("");
+  const { busy, result, run, clear } = useCredentialAction(source);
+  return (
+    <details className="card stack add-device" style={{ gap: "var(--space-sm)" }}>
+      <summary>
+        <strong>Add a device</strong>
+      </summary>
+      <p className="muted small">Each Pi gets its own credential. Never copy one SD card image to two buses.</p>
+      <form
+        className="row"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setIssuedFor(label.trim());
+          void run("fleet:provisionDevice", { label, busLabel });
+        }}
+      >
+        <label style={{ flex: "1 1 12rem" }}>
+          Device name
+          <input value={label} maxLength={80} onChange={(e) => setLabel(e.target.value)} placeholder="Pi in Bus 9" />
+        </label>
+        <label style={{ flex: "1 1 8rem" }}>
+          Bus name families see (optional)
+          <input value={busLabel} maxLength={40} onChange={(e) => setBusLabel(e.target.value)} placeholder="Bus 9" />
+        </label>
+        <button type="submit" className="btn btn-primary" disabled={busy} style={{ alignSelf: "flex-end" }}>
+          Add device
+        </button>
+      </form>
+      <CredentialResult
+        result={result}
+        label={issuedFor}
+        onDone={() => {
+          clear();
+          setLabel("");
+          setBusLabel("");
+        }}
+      />
+    </details>
+  );
+}
+
 // MARK: Devices
 
 function useNow(): number {
@@ -375,6 +466,7 @@ function DevicesPage({ source }: { source: StaffSource }) {
     <section className="card stack">
       <h1>Buses &amp; devices</h1>
       <p className="muted small">A device that stops reporting is shown as not reporting, never as a moving bus.</p>
+      {state.kind === "ready" && <AddDevice source={source} />}
       <Loaded state={state}>
         {({ devices, serverNowMs }) =>
           devices.length === 0 ? (
@@ -413,9 +505,23 @@ function DeviceRow({
   const contact = contactStatus(device.lastContactAtMs, serverNowMs, receivedAtWallMs, now, device.revoked);
   const [label, setLabel] = useState(device.busLabel ?? "");
   const { busy, outcome, run } = useMutation(source);
+  const credential = useCredentialAction(source);
   const revoke = () => {
-    if (window.confirm(`Revoke "${device.label}"? Its reports will be rejected until it is enrolled again.`)) {
+    if (
+      window.confirm(
+        `Revoke "${device.label}"? Its reports are rejected from now on. A revoked device can't be restored: provision a new one.`,
+      )
+    ) {
       void run("fleet:revokeDevice", { deviceId: device.deviceId }, "Revoked.");
+    }
+  };
+  const rotate = () => {
+    if (
+      window.confirm(
+        `Replace the credential for "${device.label}"? The current one stops working now. The Pi keeps recording and its uploads wait until you install the new credential.`,
+      )
+    ) {
+      void credential.run("fleet:rotateDeviceCredential", { deviceId: device.deviceId });
     }
   };
   return (
@@ -451,12 +557,16 @@ function DeviceRow({
           <button type="submit" className="btn" disabled={busy} style={{ alignSelf: "flex-end" }}>
             Save name
           </button>
+          <button type="button" className="btn" disabled={busy || credential.busy} onClick={rotate} style={{ alignSelf: "flex-end" }}>
+            Replace credential
+          </button>
           <button type="button" className="btn" disabled={busy} onClick={revoke} style={{ alignSelf: "flex-end" }}>
             Revoke device
           </button>
         </form>
       )}
       <Outcome outcome={outcome} />
+      <CredentialResult result={credential.result} label={device.label} onDone={credential.clear} />
     </article>
   );
 }

@@ -12,7 +12,7 @@ import type {
   RouteSummary,
 } from "@itssb/contracts";
 import { myRouteReady } from "@itssb/contracts/fixtures";
-import type { StaffMutationName, StaffQueryName, StaffSource } from "../staff/source";
+import type { StaffActionName, StaffMutationName, StaffQueryName, StaffSource } from "../staff/source";
 
 export const STAFF_VARIANTS = ["staff", "staff-empty", "staff-denied", "staff-error", "staff-loading"] as const;
 export type StaffVariant = (typeof STAFF_VARIANTS)[number];
@@ -248,7 +248,32 @@ export function staffFixtureSource(variant: StaffVariant): StaffSource {
     }
   }
 
+  /** Fictional, obviously fake secrets: never a real credential. */
+  let issuedCount = 0;
+  const fakeSecret = () => `fixture0not0a0real0device0secret${String(++issuedCount).padStart(32, "0")}`;
+
+  function act(name: StaffActionName, args: Record<string, string>): unknown {
+    if (variant === "staff-denied") return env({ status: "access_unavailable", reason: "not_permitted" });
+    switch (name) {
+      case "fleet:provisionDevice": {
+        const label = args.label?.trim() ?? "";
+        if (!label || label.length > 80) return refuse("invalid_label", "Use 1 to 80 characters for the device name.");
+        const deviceId = `demo_device_new_${state.devices.length + 1}`;
+        state.devices.push({ deviceId, label, busLabel: args.busLabel?.trim() || null, revoked: false, activeRun: null, lastContactAtMs: null });
+        changed();
+        return env({ status: "issued", deviceId, deviceSecret: fakeSecret() });
+      }
+      case "fleet:rotateDeviceCredential": {
+        const device = state.devices.find((x) => x.deviceId === args.deviceId);
+        if (!device) return refuse("not_found", "That device doesn't exist.");
+        if (device.revoked) return refuse("revoked", "This device is revoked. Provision a new device instead.");
+        return env({ status: "issued", deviceId: device.deviceId, deviceSecret: fakeSecret() });
+      }
+    }
+  }
+
   return {
+    act: async (name, args) => act(name, args),
     watch(name, args, onValue, onError) {
       if (variant === "staff-loading") return () => {};
       if (variant === "staff-error") {
