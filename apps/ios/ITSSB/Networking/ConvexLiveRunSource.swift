@@ -18,6 +18,15 @@ protocol ConvexQuerying: Sendable {
     func mutation<T: Decodable, Value: Sendable>(
         _ name: String, as type: T.Type, transform: @escaping @Sendable (T) throws -> Value
     ) async throws -> Value
+
+    /// The websocket link: `true` connected, `false` connecting.
+    func connectionStates() -> AsyncStream<Bool>
+}
+
+extension ConvexQuerying {
+    func connectionStates() -> AsyncStream<Bool> {
+        AsyncStream { $0.yield(true) }
+    }
 }
 
 /// `LiveRunSource` over the family tracking queries (docs/08 §8).
@@ -36,6 +45,10 @@ struct ConvexLiveRunSource: LiveRunSource {
         self.client = client
         self.now = now
         self.serverTime = ServerTimeService(client: client, now: now)
+    }
+
+    func connection() -> AsyncStream<Bool> {
+        client.connectionStates()
     }
 
     func assignments() -> AsyncThrowingStream<AssignmentsSnapshot, Error> {
@@ -219,6 +232,17 @@ final class ConvexClientQuerying: ConvexQuerying, @unchecked Sendable {
 
     init(client: ConvexClient) {
         self.client = client
+    }
+
+    func connectionStates() -> AsyncStream<Bool> {
+        let publisher = client.watchWebSocketState()
+        return AsyncStream { continuation in
+            let box = CancellableBox()
+            box.cancellable = publisher.sink { state in
+                continuation.yield(state == .connected)
+            }
+            continuation.onTermination = { _ in box.cancellable?.cancel() }
+        }
     }
 
     func subscribe<T: Decodable, Value: Sendable>(

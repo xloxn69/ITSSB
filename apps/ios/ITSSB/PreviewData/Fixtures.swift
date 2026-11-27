@@ -69,6 +69,8 @@ enum PreviewScenario: String, CaseIterable, Sendable {
     case stale
     case awaitingPosition
     case gpsUnavailable
+    /// A recent position, but the phone has just lost its own connection (I25).
+    case offline
     case noActiveRun
     case accessUnavailable
     case sessionExpired
@@ -79,6 +81,14 @@ enum PreviewScenario: String, CaseIterable, Sendable {
 /// stream starts, so the age keeps advancing on screen.
 struct PreviewLiveRunSource: LiveRunSource {
     var scenario: PreviewScenario = .live
+
+    func connection() -> AsyncStream<Bool> {
+        let scenario = scenario
+        return AsyncStream { continuation in
+            continuation.yield(true)
+            if scenario == .offline { continuation.yield(false) }
+        }
+    }
 
     func assignments() -> AsyncThrowingStream<AssignmentsSnapshot, Error> {
         let scenario = scenario
@@ -102,7 +112,7 @@ struct PreviewLiveRunSource: LiveRunSource {
             switch scenario {
             case .loading, .accessUnavailable, .sessionExpired:
                 break
-            case .live: ready(PreviewFixtures.run(position: PreviewFixtures.position(capturedSecondsAgo: 4)))
+            case .live, .offline: ready(PreviewFixtures.run(position: PreviewFixtures.position(capturedSecondsAgo: 4)))
             case .eta, .alerts:
                 let position = PreviewFixtures.position(capturedSecondsAgo: 4)
                 ready(PreviewFixtures.run(position: position, stopStatus: .upcoming,

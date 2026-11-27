@@ -216,4 +216,33 @@ final class TrackViewModelTests: XCTestCase {
         XCTAssertEqual(model.selectedAssignmentId, "a_alex")
         XCTAssertNil(model.pendingAssignmentId)
     }
+
+    /// I25: the phone losing its own connection is its own state, never blamed
+    /// on the bus. Connecting before the first connection is not "lost".
+    func testConnectionLostOnlyAfterHavingConnected() async {
+        let source = MockLiveRunSource()
+        let model = await started(source)
+        _ = await eventually { source.connectionSubscriptionCount == 1 }
+        source.setConnected(false)  // still starting up
+        try? await Task.sleep(for: .milliseconds(20))
+        XCTAssertFalse(model.connectionLost)
+        source.setConnected(true)
+        source.setConnected(false)
+        let lost = await eventually { model.connectionLost }
+        XCTAssertTrue(lost)
+        source.setConnected(true)
+        let back = await eventually { !model.connectionLost }
+        XCTAssertTrue(back)
+    }
+
+    func testStopForgetsTheConnectionState() async {
+        let source = MockLiveRunSource()
+        let model = await started(source)
+        _ = await eventually { source.connectionSubscriptionCount == 1 }
+        source.setConnected(true)
+        source.setConnected(false)
+        _ = await eventually { model.connectionLost }
+        model.stop()
+        XCTAssertFalse(model.connectionLost)
+    }
 }

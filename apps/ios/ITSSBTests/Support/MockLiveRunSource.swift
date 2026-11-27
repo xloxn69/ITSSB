@@ -8,6 +8,20 @@ final class MockLiveRunSource: LiveRunSource, @unchecked Sendable {
     private var runStreams: [(String, AsyncThrowingStream<RunSnapshot, Error>.Continuation)] = []
     private var routeStreams: [(String, AsyncThrowingStream<RouteSnapshot, Error>.Continuation)] = []
     private(set) var cancelledRuns: [String] = []
+    private var connectionStreams: [AsyncStream<Bool>.Continuation] = []
+
+    func connection() -> AsyncStream<Bool> {
+        let (stream, continuation) = AsyncStream<Bool>.makeStream()
+        lock.withLock { connectionStreams.append(continuation) }
+        return stream
+    }
+
+    /// Reports the phone's link to the backend as the SDK would.
+    func setConnected(_ connected: Bool) {
+        lock.withLock { connectionStreams.last }?.yield(connected)
+    }
+
+    var connectionSubscriptionCount: Int { lock.withLock { connectionStreams.count } }
 
     func assignments() -> AsyncThrowingStream<AssignmentsSnapshot, Error> {
         let (stream, continuation) = AsyncThrowingStream<AssignmentsSnapshot, Error>.makeStream()

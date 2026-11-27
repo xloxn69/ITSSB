@@ -70,4 +70,11 @@ final class LivePresentationTests: XCTestCase {
         XCTAssertFalse(LivePresentation.live(.fresh).dimsMarker)
         XCTAssertTrue(LivePresentation.stale.dimsMarker)
     }
+
+    /// While the phone is offline nothing is called fresh (same rule as web).
+    func testDisconnectedPhoneNeverShowsFresh() {
+        XCTAssertEqual(present(run(secondsAgo: 5)).whileDisconnected(true), .live(.aging))
+        XCTAssertEqual(present(run(secondsAgo: 5)).whileDisconnected(false), .live(.fresh))
+        XCTAssertEqual(present(run(secondsAgo: 200)).whileDisconnected(true), .stale)
+    }
 }

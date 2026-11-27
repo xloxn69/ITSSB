@@ -42,6 +42,12 @@ enum LivePresentation: Equatable {
         return age < FreshnessPolicy.staleAfter
     }
 
+    /// While the phone's own link is down no update can arrive, so nothing is
+    /// called fresh: at best the bus is "waiting for an update" (same as web).
+    func whileDisconnected(_ connectionLost: Bool) -> LivePresentation {
+        connectionLost && self == .live(.fresh) ? .live(.aging) : self
+    }
+
     /// Whether to draw the bus marker at the last position.
     var showsMarker: Bool {
         switch self {

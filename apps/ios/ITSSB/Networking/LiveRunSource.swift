@@ -11,6 +11,18 @@ protocol LiveRunSource: Sendable {
     func assignments() -> AsyncThrowingStream<AssignmentsSnapshot, Error>
     func run(assignmentId: String) -> AsyncThrowingStream<RunSnapshot, Error>
     func route(assignmentId: String) -> AsyncThrowingStream<RouteSnapshot, Error>
+    /// The phone's live link to the backend: `true` connected, `false`
+    /// reconnecting. Subscriptions do not fail when the link drops; they go
+    /// quiet, so this is the only way to tell "my phone is offline" from
+    /// "the bus stopped reporting" (docs/06 I25).
+    func connection() -> AsyncStream<Bool>
+}
+
+extension LiveRunSource {
+    /// Sources with no network (fixtures, previews) are always connected.
+    func connection() -> AsyncStream<Bool> {
+        AsyncStream { $0.yield(true) }
+    }
 }
 
 /// Failures a source reports. Each maps to a distinct screen: an expired
