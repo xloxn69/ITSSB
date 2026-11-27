@@ -1,7 +1,7 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
-import type { Doc } from "./_generated/dataModel";
-import { internalAction, internalMutation, type QueryCtx } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
+import { internalAction, internalMutation, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { generateDeviceSecret, sha256Hex } from "./lib/deviceAuth";
 
 /**
@@ -49,7 +49,28 @@ export const insert = internalMutation({
     ttlMs: v.number(),
     nowMs: v.number(),
   },
-  handler: async (ctx, { tokenHash, deviceId, driverUserId, routeVersionIds, ttlMs, nowMs }) => {
+  handler: async (ctx, args) => await insertGrant(ctx, args),
+});
+
+/** Checks and inserts one grant; shared by `insert` and the dev seed's single transaction. */
+export async function insertGrant(
+  ctx: MutationCtx,
+  {
+    tokenHash,
+    deviceId,
+    driverUserId,
+    routeVersionIds,
+    ttlMs,
+    nowMs,
+  }: {
+    tokenHash: string;
+    deviceId: Id<"devices">;
+    driverUserId: Id<"users">;
+    routeVersionIds: Id<"routeVersions">[];
+    ttlMs: number;
+    nowMs: number;
+  },
+): Promise<number> {
     if (!(ttlMs > 0 && ttlMs <= MAX_GRANT_TTL_MS)) throw new ConvexError({ code: "INVALID_TTL" });
     if (routeVersionIds.length === 0) throw new ConvexError({ code: "NO_ROUTE_VERSIONS" });
     const [device, driver] = await Promise.all([ctx.db.get(deviceId), ctx.db.get(driverUserId)]);
@@ -77,8 +98,7 @@ export const insert = internalMutation({
       atMs: nowMs,
     });
     return expiresAtMs;
-  },
-});
+}
 
 export const revoke = internalMutation({
   args: { grantId: v.id("driverGrants") },

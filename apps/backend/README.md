@@ -18,6 +18,7 @@ Shared database, authorization, and device ingestion. Spec:
 | `convex/lib/authz.ts` | `getUser` / `requireUser` / `canViewRun`, the one place access rules live |
 | `convex/lib/deviceAuth.ts` | Device secrets are stored only as SHA-256 hashes |
 | `convex/auth.config.ts` | Clerk sign-in; issuer from `CLERK_JWT_ISSUER_DOMAIN` |
+| `convex/seed.ts` | `seed:dev`: fictional route, driver, bus/device, student, guardian; dev deployments only |
 | `convex/users.ts` | `linkIdentity`: attach a verified identity to an approved person |
 
 Still to build: driver sign-in on the Pi (`/device/v1/driver-session`), health,
@@ -62,3 +63,23 @@ links allow.
 5. **Link an account.** Sign in once from a client, read the user ID from the
    Clerk dashboard, then link it to an approved person:
    `bunx convex run users:linkIdentity '{"userId":"<users id>","tokenIdentifier":"<issuer>|<Clerk user id>"}'`.
+
+## Dev seed (fictional data, development deployment only)
+
+`seed:dev` creates one fictional route version with two stops, a driver, a
+bus/device, a student with an approved assignment, and a guardian with an
+approved link, and issues a 16-hour driver grant. It refuses to run unless
+the deployment has `ITSSB_ALLOW_DEV_SEED=true`, and refuses a database that
+already has data.
+
+```sh
+bunx convex env set ITSSB_ALLOW_DEV_SEED true   # dev deployment only
+bunx convex run seed:dev
+```
+
+It prints the device secret and the driver grant **once** (only hashes are
+stored). Put the secret in the Pi's `/etc/itssb/device.env` as
+`ITSSB_DEVICE_TOKEN`, with `ITSSB_DEVICE_API_ORIGIN` set to the deployment's
+`.convex.site` URL. Then link your Clerk sign-in to the seeded guardian or
+student with `users:linkIdentity` (see "Owner steps" above, step 5). Issue a
+fresh grant later with `bunx convex run driverGrants:issue`.
