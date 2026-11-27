@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from . import __version__
+from .release import load_release
 
 # A valid fix older than this (by local receipt time) no longer counts as `valid`.
 GPS_FRESH_S = 5.0
@@ -179,6 +180,8 @@ class StatusBoard:
                 "generatedAtMs": self._now_ms(),
                 "process": {
                     "version": __version__,
+                    # Installed release (RELEASE.json), or null for a checkout.
+                    "release": load_release(),
                     "bootId": self.boot_id,
                     "startedAtMs": self._started_ms,
                     "uptimeS": int(self._mono() - self._started_mono),
