@@ -1,0 +1,449 @@
+import { MAX_DELIVERY_ATTEMPTS } from "@itssb/contracts";
+import { convexTest } from "convex-test";
+import { describe, expect, it } from "vitest";
+import { api, internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
+import { sha256Hex } from "./lib/deviceAuth";
+import { BASELINE_V1 } from "./lib/eta";
+import schema from "./schema";
+
+/**
+ * Server-side approaching alerts and their delivery outbox (docs/10 §8–10).
+ * Fictional people and coordinates only. Ingest and the worker take `nowMs`
+ * explicitly; it is relative to the real clock because queries use it.
+ */
+
+const modules = import.meta.glob("./**/*.ts");
+
+const BASE = { latitude: 34.1, longitude: -83.99 };
+const M_PER_DEG_LAT = (6_371_000 * Math.PI) / 180;
+const M_PER_DEG_LON = M_PER_DEG_LAT * Math.cos((BASE.latitude * Math.PI) / 180);
+const at = (east: number) => ({ latitude: BASE.latitude, longitude: BASE.longitude + east / M_PER_DEG_LON });
+
+const STUDENT = "test|student";
+const GUARDIAN = "test|guardian";
+const STRANGER = "test|stranger";
+const GRANT = "g".repeat(64);
+const STOPS_EAST = [1000, 2500, 3500];
+const TOKEN_A = "a1".repeat(32);
+const TOKEN_B = "b2".repeat(32);
+
+async function setup() {
+  const t = convexTest(schema, modules);
+  const NOW = Date.now();
+  const ids = await t.run(async (ctx) => {
+    const studentUser = await ctx.db.insert("users", { tokenIdentifier: STUDENT, role: "family", displayName: "Sam" });
+    const guardianUser = await ctx.db.insert("users", { tokenIdentifier: GUARDIAN, role: "family", displayName: "Pat" });
+    await ctx.db.insert("users", { tokenIdentifier: STRANGER, role: "family", displayName: "Lee" });
+    const driver = await ctx.db.insert("users", { tokenIdentifier: "test|driver", role: "driver", displayName: "Dana" });
+    const routeVersionId = await ctx.db.insert("routeVersions", {
+      label: "Route 17 Morning",
+      path: Array.from({ length: 401 }, (_, i) => at(i * 10)),
+    });
+    const stopIds: Id<"stops">[] = [];
+    for (const [sequence, east] of STOPS_EAST.entries()) {
+      stopIds.push(await ctx.db.insert("stops", { routeVersionId, label: `Stop ${sequence + 1}`, sequence, ...at(east) }));
+    }
+    const studentId = await ctx.db.insert("students", { displayName: "Sam Example", userId: studentUser });
+    const assignmentId = await ctx.db.insert("assignments", {
+      studentId,
+      routeVersionId,
+      stopId: stopIds[2]!,
+      status: "approved",
+    });
+    const guardianLinkId = await ctx.db.insert("guardianLinks", {
+      guardianUserId: guardianUser,
+      studentId,
+      status: "approved",
+    });
+    const deviceId = await ctx.db.insert("devices", { label: "Bench Pi", credentialHash: "x", revoked: false });
+    await ctx.db.insert("driverGrants", {
+      tokenHash: await sha256Hex(GRANT),
+      deviceId,
+      driverUserId: driver,
+      routeVersionIds: [routeVersionId],
+      issuedAtMs: NOW - 3600_000,
+      expiresAtMs: NOW + 3600_000,
+      revoked: false,
+    });
+    const runId = await ctx.db.insert("runs", {
+      deviceId,
+      routeVersionId,
+      state: "active",
+      startRequestId: "64869872-aaf9-4e4f-99df-621722bbac06",
+      startedAtMs: NOW - 300_000,
+      startCapturedAtMs: NOW - 300_000,
+    });
+    return { assignmentId, deviceId, runId, guardianLinkId, studentUser, guardianUser };
+  });
+  return { t, NOW, ...ids };
+}
+
+type Setup = Awaited<ReturnType<typeof setup>>;
+
+let seq = 0;
+function event(runId: string, east: number, capturedAtMs: number) {
+  seq += 1;
+  return {
+    eventId: crypto.randomUUID(),
+    bootId: "3cd44c56-c96b-4b83-a970-5414990bc25a",
+    sequence: seq,
+    runSequence: seq,
+    runId,
+    capturedAtMs,
+    ...at(east),
+    speedMps: 8,
+    headingDegrees: 90,
+    horizontalAccuracyM: 5,
+    fixMode: 3 as const,
+  };
+}
+
+/** Distance east at which the baseline puts the assigned (third) stop `seconds` away. */
+function eastForRemaining(seconds: number) {
+  // Stop 1 departed, stop 2 still ahead: one dwell is counted.
+  return STOPS_EAST[2]! - (seconds - BASELINE_V1.dwellMs / 1000) * BASELINE_V1.cruiseSpeedMps;
+}
+
+/** Drives the bus from the start to `east`, ending at `endCapturedAtMs`. */
+async function driveTo(s: Setup, east: number, endCapturedAtMs: number) {
+  const events = [];
+  const steps = Math.ceil(east / 50);
+  for (let i = 1; i <= steps; i++) {
+    events.push(event(s.runId, Math.min(east, i * 50), endCapturedAtMs - (steps - i) * 5_000));
+  }
+  for (let i = 0; i < events.length; i += 40) {
+    const batch = events.slice(i, i + 40);
+    await s.t.mutation(internal.telemetry.ingestBatch, {
+      deviceId: s.deviceId,
+      events: batch,
+      nowMs: batch.at(-1)!.capturedAtMs + 1_000,
+    });
+  }
+}
+
+async function enable(s: Setup, who: string, minutes = 5, enabled = true) {
+  return await s.t.withIdentity({ tokenIdentifier: who }).mutation(api.notifications.setPreferences, {
+    requestId: crypto.randomUUID(),
+    assignmentId: s.assignmentId,
+    approachingEnabled: enabled,
+    approachingMinutes: minutes,
+  });
+}
+
+async function register(s: Setup, who: string, token: string, installationId = crypto.randomUUID()) {
+  return await s.t.withIdentity({ tokenIdentifier: who }).mutation(api.notifications.registerDevice, {
+    installationId,
+    apnsToken: token,
+    environment: "sandbox",
+    permission: "authorized",
+  });
+}
+
+const alerts = (s: Setup) => s.t.run((ctx) => ctx.db.query("alerts").collect());
+const jobs = (s: Setup) => s.t.run((ctx) => ctx.db.query("notificationJobs").collect());
+
+/** Bus approaching: the assigned stop is 4 minutes away at `nowMs`. */
+async function approach(s: Setup) {
+  await driveTo(s, eastForRemaining(240), s.NOW - 2_000);
+}
+
+describe("notification preferences", () => {
+  it("saves and reads the caller's own preference; defaults are off", async () => {
+    const s = await setup();
+    const student = s.t.withIdentity({ tokenIdentifier: STUDENT });
+    const before = await student.query(api.notifications.myPreference, { assignmentId: s.assignmentId });
+    expect(before).toMatchObject({
+      status: "ready",
+      preference: { approachingEnabled: false, approachingMinutes: 5, updatedAtMs: null },
+    });
+    expect(await enable(s, STUDENT, 7)).toMatchObject({ status: "saved", preference: { approachingMinutes: 7 } });
+    const after = await student.query(api.notifications.myPreference, { assignmentId: s.assignmentId });
+    expect(after).toMatchObject({ preference: { approachingEnabled: true, approachingMinutes: 7 } });
+    // The guardian's preference is separate.
+    const guardian = await s.t
+      .withIdentity({ tokenIdentifier: GUARDIAN })
+      .query(api.notifications.myPreference, { assignmentId: s.assignmentId });
+    expect(guardian).toMatchObject({ preference: { approachingEnabled: false } });
+  });
+
+  it("refuses a stranger and an out-of-range threshold", async () => {
+    const s = await setup();
+    expect(await enable(s, STRANGER)).toMatchObject({ status: "access_unavailable", reason: "not_permitted" });
+    expect(await enable(s, STUDENT, 0)).toMatchObject({ status: "invalid" });
+    expect(await enable(s, STUDENT, 31)).toMatchObject({ status: "invalid" });
+    expect(await enable(s, STUDENT, 2.5)).toMatchObject({ status: "invalid" });
+  });
+});
+
+describe("approaching alerts", () => {
+  it("creates one alert per recipient when a fresh estimate enters the threshold", async () => {
+    const s = await setup();
+    await enable(s, STUDENT);
+    await enable(s, GUARDIAN);
+    await register(s, STUDENT, TOKEN_A);
+    await register(s, GUARDIAN, TOKEN_B);
+    await approach(s);
+    const rows = await alerts(s);
+    expect(rows.map((a) => a.userId).toSorted()).toEqual([s.studentUser, s.guardianUser].toSorted());
+    expect(rows.every((a) => a.type === "approaching" && a.runId === s.runId)).toBe(true);
+    const j = await jobs(s);
+    expect(j).toHaveLength(2);
+    expect(j.every((x) => x.state === "pending" && x.attempts === 0)).toBe(true);
+  });
+
+  it("an estimate moving back and forth across the threshold still yields one alert", async () => {
+    const s = await setup();
+    await enable(s, STUDENT);
+    await register(s, STUDENT, TOKEN_A);
+    // The bus waits at a light 5:05 from the stop. Upload lag makes the
+    // estimate measured from server time read 5:04, 4:57, 5:04, 4:57, …
+    const east = eastForRemaining(305);
+    await driveTo(s, east, s.NOW - 120_000);
+    for (let i = 0; i < 8; i++) {
+      const captured = s.NOW - 100_000 + i * 10_000;
+      const lag = i % 2 === 0 ? 1_000 : 8_000;
+      await s.t.mutation(internal.telemetry.ingestBatch, {
+        deviceId: s.deviceId,
+        events: [event(s.runId, east, captured)],
+        nowMs: captured + lag,
+      });
+    }
+    expect(await alerts(s)).toHaveLength(1);
+    expect(await jobs(s)).toHaveLength(1);
+  });
+
+  it("no alert while the estimate is above the threshold or the preference is off", async () => {
+    const s = await setup();
+    await enable(s, STUDENT, 3);
+    await enable(s, GUARDIAN, 5, false);
+    await register(s, STUDENT, TOKEN_A);
+    await register(s, GUARDIAN, TOKEN_B);
+    await approach(s); // 4 minutes away
+    expect(await alerts(s)).toEqual([]);
+  });
+
+  it("stale input never creates an alert, even when the estimate is inside the threshold", async () => {
+    const s = await setup();
+    await enable(s, STUDENT);
+    await register(s, STUDENT, TOKEN_A);
+    // A drained offline batch: positions captured a minute before upload.
+    const east = eastForRemaining(240);
+    const events = [];
+    for (let d = 50; d <= east; d += 50) events.push(event(s.runId, d, s.NOW - 300_000 + d * 100));
+    events.push(event(s.runId, east, s.NOW - 60_000));
+    for (let i = 0; i < events.length; i += 40) {
+      await s.t.mutation(internal.telemetry.ingestBatch, {
+        deviceId: s.deviceId,
+        events: events.slice(i, i + 40),
+        nowMs: s.NOW,
+      });
+    }
+    expect(await alerts(s)).toEqual([]);
+  });
+
+  it("an alert is kept in the inbox even with no registered push token", async () => {
+    const s = await setup();
+    await enable(s, STUDENT);
+    await approach(s);
+    expect(await alerts(s)).toHaveLength(1);
+    expect(await jobs(s)).toEqual([]);
+    const inbox = await s.t.withIdentity({ tokenIdentifier: STUDENT }).query(api.notifications.myAlerts, {});
+    expect(inbox).toMatchObject({ status: "ready", alerts: [{ type: "approaching", stopLabel: "Stop 3" }] });
+    if (inbox.status !== "ready") return;
+    expect(inbox.alerts[0]!.predictionGeneratedAtMs).toBeGreaterThan(0);
+    const other = await s.t.withIdentity({ tokenIdentifier: GUARDIAN }).query(api.notifications.myAlerts, {});
+    expect(other).toMatchObject({ status: "ready", alerts: [] });
+  });
+});
+
+describe("delivery jobs", () => {
+  async function oneJob() {
+    const s = await setup();
+    await enable(s, STUDENT);
+    await register(s, STUDENT, TOKEN_A);
+    await approach(s);
+    const [job] = await jobs(s);
+    if (!job) throw new Error("no job");
+    return { s, jobId: job._id };
+  }
+  const claim = (s: Setup, jobId: Id<"notificationJobs">, nowMs: number, leaseId = crypto.randomUUID()) =>
+    s.t.mutation(internal.notificationJobs.claim, { jobId, leaseId, nowMs }).then((r) => ({ r, leaseId }));
+  const job = (s: Setup, jobId: Id<"notificationJobs">) => s.t.run((ctx) => ctx.db.get(jobId));
+
+  it("claims once per lease; the payload carries no student details", async () => {
+    const { s, jobId } = await oneJob();
+    const first = await claim(s, jobId, s.NOW);
+    expect(first.r).toMatchObject({ token: TOKEN_A, environment: "sandbox", attempt: 1 });
+    expect(JSON.stringify(first.r)).not.toMatch(/Sam|Stop 3/);
+    expect((await claim(s, jobId, s.NOW + 1_000)).r).toBeNull();
+    await s.t.mutation(internal.notificationJobs.record, {
+      jobId,
+      leaseId: first.leaseId,
+      result: { kind: "accepted" },
+      nowMs: s.NOW + 2_000,
+    });
+    expect(await job(s, jobId)).toMatchObject({ state: "provider_accepted" });
+    // Accepted is final: nothing claims or resends it.
+    expect((await claim(s, jobId, s.NOW + 600_000)).r).toBeNull();
+  });
+
+  it("retries are bounded and back off", async () => {
+    const { s, jobId } = await oneJob();
+    let nowMs = s.NOW;
+    const waits: number[] = [];
+    for (let attempt = 1; attempt <= MAX_DELIVERY_ATTEMPTS; attempt++) {
+      const c = await claim(s, jobId, nowMs);
+      expect(c.r).toMatchObject({ attempt });
+      await s.t.mutation(internal.notificationJobs.record, {
+        jobId,
+        leaseId: c.leaseId,
+        result: { kind: "retryable", reason: "ServiceUnavailable" },
+        nowMs,
+      });
+      const row = (await job(s, jobId))!;
+      if (attempt < MAX_DELIVERY_ATTEMPTS) {
+        expect(row.state).toBe("retryable_failure");
+        expect((await claim(s, jobId, nowMs)).r).toBeNull(); // not due yet
+        waits.push(row.nextAttemptAtMs - nowMs);
+        nowMs = row.nextAttemptAtMs;
+      } else {
+        expect(row.state).toBe("permanent_failure");
+      }
+    }
+    expect(waits).toEqual(waits.toSorted((a, b) => a - b));
+    expect((await claim(s, jobId, nowMs + 3600_000)).r).toBeNull();
+  });
+
+  it("a job past its expiry is expired, never sent, even by the recovery sweep", async () => {
+    const { s, jobId } = await oneJob();
+    const row = (await job(s, jobId))!;
+    await s.t.mutation(internal.notificationJobs.sweep, { nowMs: row.expiresAtMs + 1 });
+    expect(await job(s, jobId)).toMatchObject({ state: "expired" });
+    expect((await claim(s, jobId, row.expiresAtMs + 2)).r).toBeNull();
+  });
+
+  it("a lease that expired mid-send is reclaimed by the sweep with the same job identity", async () => {
+    const { s, jobId } = await oneJob();
+    const first = await claim(s, jobId, s.NOW);
+    expect(first.r).not.toBeNull();
+    await s.t.mutation(internal.notificationJobs.sweep, { nowMs: s.NOW + 120_000 });
+    const second = await claim(s, jobId, s.NOW + 120_000);
+    expect(second.r).toMatchObject({ attempt: 2, collapseId: (first.r as { collapseId: string }).collapseId });
+    // The stale lease can no longer record a result.
+    await s.t.mutation(internal.notificationJobs.record, {
+      jobId,
+      leaseId: first.leaseId,
+      result: { kind: "accepted" },
+      nowMs: s.NOW + 121_000,
+    });
+    expect(await job(s, jobId)).toMatchObject({ state: "in_progress" });
+  });
+
+  it("completing the run through a trip event stops its pending jobs", async () => {
+    const { s, jobId } = await oneJob();
+    const outcome = await s.t.mutation(internal.tripEvents.apply, {
+      deviceId: s.deviceId,
+      grantHash: await sha256Hex(GRANT),
+      request: {
+        schemaVersion: 1,
+        requestId: "9b1f3c2e-5d4a-4e6b-8c7d-0a1b2c3d4e5f",
+        type: "endRun",
+        driverOperatingGrant: GRANT,
+        runId: s.runId,
+        capturedAtMs: Date.now() - 500,
+        lastRunSequence: seq,
+      },
+      nowMs: Date.now(),
+    });
+    expect(outcome).toMatchObject({ status: 200 });
+    expect(await job(s, jobId)).toMatchObject({ state: "cancelled", endReason: "run_not_active" });
+    expect((await claim(s, jobId, Date.now())).r).toBeNull();
+  });
+
+  it("a run cancelled between enqueue and send is not sent", async () => {
+    const { s, jobId } = await oneJob();
+    await s.t.run((ctx) => ctx.db.patch(s.runId, { state: "cancelled" }));
+    expect((await claim(s, jobId, s.NOW)).r).toBeNull();
+    expect(await job(s, jobId)).toMatchObject({ state: "cancelled", endReason: "run_not_active" });
+  });
+
+  it("a revoked guardian link stops the guardian's job and hides the alert", async () => {
+    const s = await setup();
+    await enable(s, GUARDIAN);
+    await register(s, GUARDIAN, TOKEN_B);
+    await approach(s);
+    const [j] = await jobs(s);
+    await s.t.run((ctx) => ctx.db.patch(s.guardianLinkId, { status: "revoked" }));
+    expect((await claim(s, j!._id, s.NOW)).r).toBeNull();
+    expect(await job(s, j!._id)).toMatchObject({ state: "cancelled", endReason: "access_revoked" });
+    const inbox = await s.t.withIdentity({ tokenIdentifier: GUARDIAN }).query(api.notifications.myAlerts, {});
+    expect(inbox).toMatchObject({ status: "ready", alerts: [] });
+  });
+
+  it("a revoked assignment stops the job", async () => {
+    const { s, jobId } = await oneJob();
+    await s.t.run((ctx) => ctx.db.patch(s.assignmentId, { status: "revoked" }));
+    expect((await claim(s, jobId, s.NOW)).r).toBeNull();
+    expect(await job(s, jobId)).toMatchObject({ state: "cancelled", endReason: "access_revoked" });
+  });
+
+  it("turning the preference off before send stops the job", async () => {
+    const { s, jobId } = await oneJob();
+    await enable(s, STUDENT, 5, false);
+    expect((await claim(s, jobId, s.NOW)).r).toBeNull();
+    expect(await job(s, jobId)).toMatchObject({ state: "cancelled", endReason: "preference_off" });
+  });
+
+  it("a token that moved to another account is not used for the first", async () => {
+    const { s, jobId } = await oneJob();
+    // The same phone signs in as the guardian and registers the same token.
+    await register(s, GUARDIAN, TOKEN_A);
+    expect((await claim(s, jobId, s.NOW)).r).toBeNull();
+    expect(await job(s, jobId)).toMatchObject({ state: "cancelled", endReason: "token_inactive" });
+  });
+
+  it("a permanent token failure disables the token", async () => {
+    const { s, jobId } = await oneJob();
+    const c = await claim(s, jobId, s.NOW);
+    await s.t.mutation(internal.notificationJobs.record, {
+      jobId,
+      leaseId: c.leaseId,
+      result: { kind: "permanent_token", reason: "Unregistered" },
+      nowMs: s.NOW,
+    });
+    expect(await job(s, jobId)).toMatchObject({ state: "permanent_failure" });
+    const tokens = await s.t.run((ctx) => ctx.db.query("pushTokens").collect());
+    expect(tokens.map((x) => x.active)).toEqual([false]);
+  });
+});
+
+describe("device registration", () => {
+  it("re-registering an installation replaces its token; denied permission disables push", async () => {
+    const s = await setup();
+    const installationId = crypto.randomUUID();
+    expect(await register(s, STUDENT, TOKEN_A, installationId)).toMatchObject({ status: "registered", pushEnabled: true });
+    await register(s, STUDENT, TOKEN_B, installationId);
+    const rows = await s.t.run((ctx) => ctx.db.query("pushTokens").collect());
+    expect(rows.filter((r) => r.active).map((r) => r.token)).toEqual([TOKEN_B]);
+    const denied = await s.t.withIdentity({ tokenIdentifier: STUDENT }).mutation(api.notifications.registerDevice, {
+      installationId,
+      apnsToken: null,
+      environment: "sandbox",
+      permission: "denied",
+    });
+    expect(denied).toMatchObject({ status: "registered", pushEnabled: false });
+  });
+
+  it("refuses a malformed token and a signed-out caller", async () => {
+    const s = await setup();
+    expect(await register(s, STUDENT, "not-hex")).toMatchObject({ status: "invalid" });
+    const r = await s.t.mutation(api.notifications.registerDevice, {
+      installationId: crypto.randomUUID(),
+      apnsToken: TOKEN_A,
+      environment: "sandbox",
+      permission: "authorized",
+    });
+    expect(r).toMatchObject({ status: "access_unavailable", reason: "unauthenticated" });
+  });
+});
