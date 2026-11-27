@@ -45,6 +45,8 @@ export const FIXTURE_SCREENS: {
     click: [".add-device summary", ".add-device button[type=submit]"],
     after: ".add-device [role=status]",
   },
+  { name: "staff-diagnostics", path: "?fixture=staff#/staff/diagnostics", ready: "article" },
+  { name: "staff-empty-diagnostics", path: "?fixture=staff-empty#/staff/diagnostics", ready: "main section p" },
   { name: "staff-drivers", path: "?fixture=staff#/staff/drivers", ready: "main li" },
   { name: "staff-empty-routes", path: "?fixture=staff-empty#/staff/routes", ready: "main p.muted + p, main section p" },
   { name: "staff-empty-review", path: "?fixture=staff-empty#/staff/review", ready: "main section p" },

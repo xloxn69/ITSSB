@@ -1,5 +1,7 @@
 import {
   type CredentialIssuedResult,
+  type DeviceDiagnostics,
+  type DiagnosticsResult,
   type CredentialRefusalCode,
   type DeviceSummary,
   type FleetMutationResult,
@@ -14,6 +16,12 @@ import { internal } from "./_generated/api";
 import { action, internalMutation, mutation, query } from "./_generated/server";
 import { generateDeviceSecret, sha256Hex } from "./lib/deviceAuth";
 import { accessUnavailable, audit, denied, staffCaller } from "./lib/staff";
+import { RAW_GPS_RETENTION_DAYS } from "./retention";
+
+// The Convex runtime provides `process.env`.
+declare const process: { env: Record<string, string | undefined> };
+/** A deployment variable, or null when it isn't set. */
+const env = (name: string) => process.env[name]?.trim() || null;
 
 /**
  * Staff bus/device and driver pages (docs/12 §3, docs/08 §11). Device
@@ -306,5 +314,117 @@ export const createDevice = internalMutation({
     });
     await audit(ctx, caller.user, "device.provision", "device", deviceId, "allowed");
     return { status: "ok", deviceId };
+  },
+});
+
+/**
+ * Staff diagnostics (docs/12 §11): which release the deployment runs, the
+ * retention policy and its last sweep, and per device: contact age, run IDs,
+ * and the software version and upload queue from its latest heartbeat.
+ */
+export const diagnostics = query({
+  args: {},
+  returns: v.union(
+    v.object({
+      schemaVersion: v.literal(SCHEMA_VERSION),
+      status: v.literal("ready"),
+      serverNowMs: v.number(),
+      deployment: v.object({
+        release: nullable(v.string()),
+        environment: nullable(v.string()),
+        contractSchemaVersion: v.number(),
+      }),
+      retention: v.object({
+        rawGpsDays: v.number(),
+        lastSweepAtMs: nullable(v.number()),
+        lastSweepDeleted: nullable(v.string()),
+      }),
+      devices: v.array(
+        v.object({
+          deviceId: v.string(),
+          label: v.string(),
+          busLabel: nullable(v.string()),
+          revoked: v.boolean(),
+          activeRunId: nullable(v.string()),
+          lastContactAtMs: nullable(v.number()),
+          softwareVersion: nullable(v.string()),
+          pendingCount: nullable(v.number()),
+          oldestPendingCapturedAtMs: nullable(v.number()),
+          lastRun: nullable(
+            v.object({
+              runId: v.string(),
+              state: v.union(v.literal("scheduled"), v.literal("active"), v.literal("completed"), v.literal("cancelled")),
+              endedAtMs: nullable(v.number()),
+            }),
+          ),
+        }),
+      ),
+    }),
+    accessUnavailable,
+  ),
+  handler: async (ctx): Promise<DiagnosticsResult> => {
+    const caller = await staffCaller(ctx);
+    if (!caller.ok) return denied(caller.reason);
+    const devices: DeviceDiagnostics[] = [];
+    for (const device of await ctx.db.query("devices").take(500)) {
+      const latest = async (state: "active" | "completed" | "cancelled") =>
+        ctx.db
+          .query("runs")
+          .withIndex("by_device_state", (q) => q.eq("deviceId", device._id).eq("state", state))
+          .order("desc")
+          .first();
+      const active = await latest("active");
+      const ended = [await latest("completed"), await latest("cancelled")]
+        .filter((r) => r !== null)
+        .toSorted((a, b) => (b.endedAtMs ?? b._creationTime) - (a.endedAtMs ?? a._creationTime));
+      const lastRun = active ?? ended[0] ?? null;
+      const live = lastRun
+        ? await ctx.db
+            .query("liveState")
+            .withIndex("by_run", (q) => q.eq("runId", lastRun._id))
+            .unique()
+        : null;
+      // Contact is any receipt from the device. The live position alone is not
+      // enough: a backlog upload is stored without moving it.
+      const health = await ctx.db
+        .query("deviceHealth")
+        .withIndex("by_device", (q) => q.eq("deviceId", device._id))
+        .unique();
+      const contacts = [health?.receivedAtMs, live?.receivedAtMs].filter((x): x is number => x !== undefined);
+      devices.push({
+        deviceId: device._id,
+        label: device.label,
+        busLabel: device.busLabel ?? null,
+        revoked: device.revoked,
+        activeRunId: active?._id ?? null,
+        lastContactAtMs: contacts.length ? Math.max(...contacts) : null,
+        softwareVersion: health?.appVersion ?? null,
+        pendingCount: health?.pendingCount ?? null,
+        oldestPendingCapturedAtMs: health?.oldestPendingCapturedAtMs ?? null,
+        lastRun: lastRun ? { runId: lastRun._id, state: lastRun.state, endedAtMs: lastRun.endedAtMs ?? null } : null,
+      });
+    }
+    devices.sort((a, b) => a.label.localeCompare(b.label));
+    const sweep = await ctx.db
+      .query("auditLog")
+      .withIndex("by_resource", (q) => q.eq("resourceType", "retention").eq("resourceId", "rawGps"))
+      .order("desc")
+      .first();
+    return {
+      schemaVersion: SCHEMA_VERSION,
+      status: "ready",
+      serverNowMs: Date.now(),
+      deployment: {
+        release: env("ITSSB_RELEASE"),
+        environment: env("ITSSB_ENVIRONMENT"),
+        contractSchemaVersion: SCHEMA_VERSION,
+      },
+      retention: {
+        rawGpsDays: RAW_GPS_RETENTION_DAYS,
+        lastSweepAtMs: sweep?.atMs ?? null,
+        lastSweepDeleted: sweep?.reason ?? null,
+      },
+      devices,
+    };
   },
 });

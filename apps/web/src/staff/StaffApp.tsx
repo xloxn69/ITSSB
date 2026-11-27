@@ -1,5 +1,6 @@
 import type {
   DeviceSummary,
+  DiagnosticsResult,
   DraftDetail,
   GetDraftResult,
   ListDevicesResult,
@@ -9,7 +10,7 @@ import type {
 } from "@itssb/contracts";
 import { type ReactNode, useEffect, useState } from "react";
 import { DraftDiagram } from "./DraftDiagram";
-import { approvalBlocker, contactStatus, DIRECTION_LABEL, dateTime } from "./format";
+import { approvalBlocker, contactStatus, DIRECTION_LABEL, dateTime, sweepSummary } from "./format";
 import {
   type CredentialOutcome,
   credentialOutcome,
@@ -35,6 +36,7 @@ export function StaffApp({ source }: { source: StaffSource }) {
     ["review", "Route review"],
     ["devices", "Buses & devices"],
     ["drivers", "Drivers"],
+    ["diagnostics", "Diagnostics"],
   ];
   return (
     <div className="stack">
@@ -50,6 +52,7 @@ export function StaffApp({ source }: { source: StaffSource }) {
       {page === "review" && parts[2] && <DraftPage source={source} draftId={parts[2]} />}
       {page === "devices" && <DevicesPage source={source} />}
       {page === "drivers" && <DriversPage source={source} />}
+      {page === "diagnostics" && <DiagnosticsPage source={source} />}
     </div>
   );
 }
@@ -591,6 +594,98 @@ function DriversPage({ source }: { source: StaffSource }) {
             </ul>
           )
         }
+      </Loaded>
+    </section>
+  );
+}
+
+// MARK: Diagnostics
+
+const RUN_STATE_LABEL = { scheduled: "Scheduled", active: "Active", completed: "Completed", cancelled: "Cancelled" } as const;
+
+/** Limited support view (docs/12 §11): IDs, ages and versions only. */
+function DiagnosticsPage({ source }: { source: StaffSource }) {
+  const { state, receivedAtWallMs } = useStaffQuery<Ready<DiagnosticsResult>>(source, "fleet:diagnostics");
+  const now = useNow();
+  return (
+    <section className="card stack">
+      <h1>Diagnostics</h1>
+      <p className="muted small">
+        Run IDs, contact ages and versions for support. No positions, addresses or credentials are shown here.
+      </p>
+      <Loaded state={state}>
+        {({ deployment, retention, devices, serverNowMs }) => (
+          <div className="stack">
+            <dl className="facts">
+              <dt>Backend release</dt>
+              <dd>{deployment.release ?? "Not recorded on this deployment"}</dd>
+              <dt>Environment</dt>
+              <dd>{deployment.environment ?? "Not recorded"}</dd>
+              <dt>Contract version</dt>
+              <dd>{deployment.contractSchemaVersion}</dd>
+              <dt>Raw GPS kept</dt>
+              <dd>{retention.rawGpsDays} days after a run ends</dd>
+              <dt>Last cleanup</dt>
+              <dd>
+                {retention.lastSweepAtMs === null
+                  ? "Nothing deleted yet"
+                  : `${dateTime(retention.lastSweepAtMs)}: ${sweepSummary(retention.lastSweepDeleted) ?? "details unreadable"}`}
+              </dd>
+            </dl>
+            {devices.length === 0 ? (
+              <Empty text="No devices are enrolled yet." />
+            ) : (
+              <div className="stack" style={{ gap: "var(--space-md)" }}>
+                {devices.map((d) => {
+                  const contact = contactStatus(d.lastContactAtMs, serverNowMs, receivedAtWallMs, now, d.revoked);
+                  return (
+                    <article key={d.deviceId} className="card stack" style={{ gap: "var(--space-sm)" }}>
+                      <h2>
+                        {d.label}
+                        {d.busLabel && <span className="muted"> · {d.busLabel}</span>}
+                      </h2>
+                      <p className="status">
+                        <span className={`dot tone-${contact.tone}`} aria-hidden />
+                        <span>{contact.text}</span>
+                      </p>
+                      <dl className="facts small">
+                        <dt>Device ID</dt>
+                        <dd className="mono">{d.deviceId}</dd>
+                        <dt>Software</dt>
+                        <dd>{d.softwareVersion ? `v${d.softwareVersion}` : "Not reported"}</dd>
+                        <dt>Waiting to upload</dt>
+                        <dd>
+                          {d.pendingCount === null
+                            ? "Not reported"
+                            : d.pendingCount === 0
+                              ? "Nothing"
+                              : `${d.pendingCount}, oldest captured ${dateTime(d.oldestPendingCapturedAtMs)}`}
+                        </dd>
+                        <dt>Active run</dt>
+                        <dd className="mono">{d.activeRunId ?? "None"}</dd>
+                        <dt>Most recent run</dt>
+                        <dd>
+                          {d.lastRun ? (
+                            <>
+                              {RUN_STATE_LABEL[d.lastRun.state]}
+                              {d.lastRun.endedAtMs !== null && `, ended ${dateTime(d.lastRun.endedAtMs)}`}
+                              <div className="muted mono">{d.lastRun.runId}</div>
+                            </>
+                          ) : (
+                            "No runs"
+                          )}
+                        </dd>
+                      </dl>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+            <p className="muted small">
+              Software and upload queue come from each device&apos;s latest heartbeat; read them with its contact age.
+            </p>
+          </div>
+        )}
       </Loaded>
     </section>
   );

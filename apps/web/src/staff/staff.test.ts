@@ -1,7 +1,7 @@
 import { POSITION_STALE_AFTER_MS } from "@itssb/contracts";
 import { describe, expect, it } from "vitest";
 import { staffFixtureSource } from "../dev/staffFixtures";
-import { approvalBlocker, contactStatus } from "./format";
+import { approvalBlocker, contactStatus, sweepSummary } from "./format";
 import { credentialOutcome, mutationOutcome, queryState } from "./source";
 
 describe("queryState", () => {
@@ -105,5 +105,14 @@ describe("fixture credential actions", () => {
     expect(rotated.kind).toBe("issued");
     const refused = credentialOutcome(await source.act("fleet:rotateDeviceCredential", { deviceId: "demo_device_004" }));
     expect(refused.kind).toBe("refused");
+  });
+});
+
+describe("sweepSummary", () => {
+  it("says what a retention sweep deleted, and nothing for an unreadable record", () => {
+    expect(sweepSummary("telemetry:1440,live:2")).toBe("1440 positions and 2 last-known positions deleted");
+    expect(sweepSummary("telemetry:1,live:1")).toBe("1 position and 1 last-known position deleted");
+    expect(sweepSummary("garbage")).toBeNull();
+    expect(sweepSummary(null)).toBeNull();
   });
 });

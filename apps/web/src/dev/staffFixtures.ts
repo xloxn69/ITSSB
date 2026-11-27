@@ -185,6 +185,32 @@ export function staffFixtureSource(variant: StaffVariant): StaffSource {
         return env({ status: "ready", devices: state.devices });
       case "fleet:listDrivers":
         return env({ status: "ready", drivers: state.drivers });
+      case "fleet:diagnostics":
+        return env({
+          status: "ready",
+          deployment: { release: "2026.11.27-0f1c2d3", environment: "development", contractSchemaVersion: 1 },
+          retention: {
+            rawGpsDays: 30,
+            lastSweepAtMs: variant === "staff-empty" ? null : Date.now() - 6 * 60 * 60_000,
+            lastSweepDeleted: variant === "staff-empty" ? null : "telemetry:1440,live:2",
+          },
+          devices: state.devices.map((d, i) => ({
+            deviceId: d.deviceId,
+            label: d.label,
+            busLabel: d.busLabel,
+            revoked: d.revoked,
+            activeRunId: d.activeRun?.runId ?? null,
+            lastContactAtMs: d.lastContactAtMs,
+            softwareVersion: d.lastContactAtMs === null ? null : "0.1.0",
+            pendingCount: d.lastContactAtMs === null ? null : i === 1 ? 37 : 0,
+            oldestPendingCapturedAtMs: i === 1 ? Date.now() - 7 * 60_000 : null,
+            lastRun: d.activeRun
+              ? { runId: d.activeRun.runId, state: "active", endedAtMs: null }
+              : i === 2
+                ? { runId: "demo_run_031", state: "completed", endedAtMs: Date.now() - 26 * 60 * 60_000 }
+                : null,
+          })),
+        });
     }
   }
 

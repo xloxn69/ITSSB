@@ -11,6 +11,7 @@
 import type * as audit from "../audit.js";
 import type * as checkIns from "../checkIns.js";
 import type * as deviceRoster from "../deviceRoster.js";
+import type * as crons from "../crons.js";
 import type * as devices from "../devices.js";
 import type * as driverGrants from "../driverGrants.js";
 import type * as enrollment from "../enrollment.js";
@@ -26,6 +27,7 @@ import type * as lib_routeChecks from "../lib/routeChecks.js";
 import type * as lib_routeVersions from "../lib/routeVersions.js";
 import type * as lib_staff from "../lib/staff.js";
 import type * as lib_tokens from "../lib/tokens.js";
+import type * as retention from "../retention.js";
 import type * as routes from "../routes.js";
 import type * as runs from "../runs.js";
 import type * as seed from "../seed.js";
@@ -45,6 +47,7 @@ declare const fullApi: ApiFromModules<{
   audit: typeof audit;
   checkIns: typeof checkIns;
   deviceRoster: typeof deviceRoster;
+  crons: typeof crons;
   devices: typeof devices;
   driverGrants: typeof driverGrants;
   enrollment: typeof enrollment;
@@ -60,6 +63,7 @@ declare const fullApi: ApiFromModules<{
   "lib/routeVersions": typeof lib_routeVersions;
   "lib/staff": typeof lib_staff;
   "lib/tokens": typeof lib_tokens;
+  retention: typeof retention;
   routes: typeof routes;
   runs: typeof runs;
   seed: typeof seed;
