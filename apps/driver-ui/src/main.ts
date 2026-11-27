@@ -1,61 +1,95 @@
-import { tokensCss, touchTarget } from "@itssb/ui";
+import { fetchSnapshot } from "./api.js";
+import { type ActionId, type ScreenId, selectScreen } from "./screens.js";
+import type { DeviceSnapshot, Observed } from "./snapshot.js";
+import { css } from "./styles.js";
+import { dashboardView, diagnosticsView, drivingView, type Nav, offlineView, startupView, statusBar } from "./views.js";
 
 /**
- * First driver screen: a truthful status page (docs/15 "next session" step 5).
- * GPS, internet, and cloud authorization are shown separately; one green icon
- * must never stand in for all three. The full 24-screen flow is docs/05.
+ * Driver touchscreen shell (docs/05). The device service owns run state; this
+ * page only shows its latest snapshot and asks for screens. A reload fetches
+ * a fresh snapshot and lands on whatever screen that state allows.
  */
 
-type Check = "ok" | "problem" | "unknown";
-interface Health {
-  gps: Check;
-  internet: Check;
-  cloud: Check;
-}
+const POLL_MS = 1_000;
 
 const style = document.createElement("style");
-style.textContent = `${tokensCss()}
-  body { margin: 0; font: 20px/1.4 system-ui, sans-serif;
-         background: var(--color-background); color: var(--color-text-primary); }
-  main { padding: var(--space-xl); display: grid; gap: var(--space-lg); }
-  .row { display: flex; align-items: center; gap: var(--space-md); min-height: ${touchTarget.driver}px;
-         padding: 0 var(--space-lg); border-radius: var(--radius-card); background: var(--color-surface); }
-  .dot { width: 16px; height: 16px; border-radius: 50%; }
-  .ok { background: var(--color-status-fresh); }
-  .problem { background: var(--color-status-stale); }
-  .unknown { background: var(--color-status-unknown); }`;
+style.textContent = css;
 document.head.append(style);
 
-const LABELS: Record<keyof Health, string> = { gps: "GPS fix", internet: "Internet", cloud: "Cloud access" };
-const WORDS: Record<Check, string> = { ok: "OK", problem: "Problem", unknown: "Checking…" };
+let snapshot: DeviceSnapshot | null = null;
+let receivedAt: number | null = null; // performance.now() when `snapshot` arrived
+let pollFailed = false;
+let requested: ScreenId | null = null;
 
-function render(health: Health): void {
+function observed(): Observed {
+  return {
+    snapshot,
+    elapsedMs: receivedAt === null ? null : performance.now() - receivedAt,
+    pollFailed,
+  };
+}
+
+const nav: Nav = {
+  go(screen) {
+    requested = screen;
+    render();
+  },
+  action(_id: ActionId) {
+    // Action screens arrive with their device endpoints; until then every
+    // action is disabled by the service's capability report.
+  },
+};
+
+function render(): void {
   const app = document.querySelector<HTMLElement>("#app");
   if (!app) return;
-  app.replaceChildren(
-    ...(Object.keys(LABELS) as (keyof Health)[]).map((key) => {
-      const row = document.createElement("div");
-      row.className = "row";
-      const dot = document.createElement("span");
-      dot.className = `dot ${health[key]}`;
-      const text = document.createElement("span");
-      text.textContent = `${LABELS[key]}: ${WORDS[health[key]]}`;
-      row.append(dot, text);
-      return row;
-    }),
-  );
+  const o = observed();
+  const screen = selectScreen(o, requested);
+  const view =
+    screen === "D01"
+      ? startupView(o)
+      : screen === "D13"
+        ? drivingView(o, nav)
+        : screen === "D21"
+          ? diagnosticsView(o, nav)
+          : screen === "D22"
+            ? offlineView(o, nav)
+            : dashboardView(o, nav);
+  view.dataset["screen"] = screen;
+  swap(app, 0, statusBar(o, nav));
+  swap(app, 1, view);
+}
+
+/**
+ * Replaces a region only when its content changed. Rebuilding the DOM under
+ * a finger every second would drop taps that land mid-rebuild.
+ */
+function swap(app: HTMLElement, index: number, next: HTMLElement): void {
+  const current = app.children[index];
+  if (current === undefined) app.append(next);
+  else if (current.outerHTML !== next.outerHTML) current.replaceWith(next);
 }
 
 async function poll(): Promise<void> {
   try {
-    const res = await fetch("/api/health", { cache: "no-store" });
-    render(res.ok ? ((await res.json()) as Health) : { gps: "unknown", internet: "unknown", cloud: "unknown" });
+    snapshot = await fetchSnapshot();
+    receivedAt = performance.now();
+    pollFailed = false;
   } catch {
-    // The local device service itself is unreachable.
-    render({ gps: "unknown", internet: "unknown", cloud: "unknown" });
+    pollFailed = true;
+  }
+  render();
+}
+
+async function pollForever(): Promise<void> {
+  // One request at a time: a slow answer never stacks up overlapping polls.
+  for (;;) {
+    await poll();
+    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
   }
 }
 
-render({ gps: "unknown", internet: "unknown", cloud: "unknown" });
-void poll();
-setInterval(() => void poll(), 2000);
+render();
+void pollForever();
+// Ages advance between polls even if the service goes quiet.
+setInterval(render, 1_000);

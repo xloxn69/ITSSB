@@ -16,5 +16,7 @@ describe("tokens", () => {
     expect(css).toContain("--color-text-primary: #16181B;");
     expect(css).toContain("prefers-color-scheme: dark");
     expect(css).toContain("--space-lg: 16px;");
+    expect(css).toContain("--font-size-body: 20px;");
+    expect(css).toContain("--touch-driver-primary: 80px;");
   });
 });
