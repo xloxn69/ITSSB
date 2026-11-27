@@ -82,6 +82,9 @@ th { color: var(--color-text-secondary); font-weight: 600; font-size: 0.875rem; 
 .badge { display: inline-block; padding: var(--space-xxs) var(--space-sm); border-radius: var(--radius-sm);
   background: var(--color-surface-muted); font-size: 0.8125rem; font-weight: 600; }
 .env-badge { margin-left: var(--space-sm); letter-spacing: 0; }
+.secret-panel { border-color: var(--color-status-aging); }
+.secret { width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.875rem; }
+.add-device summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
 .row { display: flex; gap: var(--space-md); align-items: center; flex-wrap: wrap; }
 .spread { justify-content: space-between; }
 label { display: flex; flex-direction: column; gap: var(--space-xs); }

@@ -21,9 +21,17 @@ try {
   for (const [size, viewport] of Object.entries(widths)) {
     for (const colorScheme of ["light", "dark"] as const) {
       const page = await browser.newPage({ viewport, colorScheme, deviceScaleFactor: 2 });
+      // Screens with `click` steps accept every confirmation dialog.
+      page.on("dialog", (dialog) => void dialog.accept());
       for (const screen of FIXTURE_SCREENS) {
+        // A fresh load per screen, so one screen's clicks never leak into the next.
+        await page.goto("about:blank");
         await page.goto(`http://localhost:5181/${screen.path}`);
         await page.waitForSelector(screen.ready ?? "main h1, main h2");
+        for (const selector of screen.click ?? []) {
+          await page.locator(selector).first().click();
+        }
+        if (screen.after) await page.waitForSelector(screen.after);
         await page.waitForTimeout(150);
         await page.screenshot({ path: join(outDir, `${screen.name}-${size}-${colorScheme}.png`), fullPage: true });
       }

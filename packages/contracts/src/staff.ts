@@ -181,3 +181,33 @@ export interface DriverSummary {
 }
 
 export type ListDriversResult = Ready<{ drivers: DriverSummary[] }> | AccessUnavailable;
+
+// MARK: fleet:provisionDevice, fleet:rotateDeviceCredential (actions)
+
+/** Internal device names ("Bench Pi"); at most this many characters. */
+export const MAX_DEVICE_LABEL_LENGTH = 80;
+
+export const CREDENTIAL_REFUSAL_CODES = ["not_found", "revoked", "invalid_label"] as const;
+export type CredentialRefusalCode = (typeof CREDENTIAL_REFUSAL_CODES)[number];
+
+/**
+ * A device credential issued to the staff member who asked. `deviceSecret`
+ * appears in this response only: the server keeps its SHA-256 hash, so it can
+ * never be shown again. The previous secret, if any, stopped working.
+ */
+export type CredentialIssuedResult =
+  | {
+      schemaVersion: typeof SCHEMA_VERSION;
+      status: "issued";
+      serverNowMs: number;
+      deviceId: string;
+      deviceSecret: string;
+    }
+  | {
+      schemaVersion: typeof SCHEMA_VERSION;
+      status: "refused";
+      serverNowMs: number;
+      code: CredentialRefusalCode;
+      message: string;
+    }
+  | AccessUnavailable;

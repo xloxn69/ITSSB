@@ -14,6 +14,9 @@ export type StaffQueryName =
 
 export type StaffMutationName = "routes:approveDraft" | "routes:rejectDraft" | "fleet:setBusLabel" | "fleet:revokeDevice";
 
+/** Convex actions: they return a one-time device secret (docs/14 §4). */
+export type StaffActionName = "fleet:provisionDevice" | "fleet:rotateDeviceCredential";
+
 export interface StaffSource {
   watch(
     name: StaffQueryName,
@@ -22,6 +25,7 @@ export interface StaffSource {
     onError: (error: unknown) => void,
   ): Unsubscribe;
   mutate(name: StaffMutationName, args: Record<string, string>): Promise<unknown>;
+  act(name: StaffActionName, args: Record<string, string>): Promise<unknown>;
 }
 
 export type QueryState<T> =
@@ -65,4 +69,24 @@ export function mutationOutcome(raw: unknown, doneMessage: string): MutationOutc
   }
   if (env.status === "ok" || env.status === "approved" || env.status === "rejected") return { kind: "done", message: doneMessage };
   return { kind: "failed", message: "The server's answer couldn't be read. Nothing is assumed." };
+}
+
+/** A credential the server just issued, or why it didn't. */
+export type CredentialOutcome = { kind: "issued"; deviceId: string; deviceSecret: string } | MutationOutcome;
+
+/**
+ * Reads `fleet:provisionDevice` / `fleet:rotateDeviceCredential`. Only a
+ * well-formed `issued` answer shows a secret; anything else is a refusal,
+ * a denial, or a failure that assumes nothing.
+ */
+export function credentialOutcome(raw: unknown): CredentialOutcome {
+  const env = (raw ?? {}) as { schemaVersion?: unknown; status?: unknown; deviceId?: unknown; deviceSecret?: unknown };
+  if (env.schemaVersion === 1 && env.status === "issued") {
+    if (typeof env.deviceId === "string" && typeof env.deviceSecret === "string" && env.deviceSecret.length >= 32) {
+      return { kind: "issued", deviceId: env.deviceId, deviceSecret: env.deviceSecret };
+    }
+    return { kind: "failed", message: "The server's answer couldn't be read. Nothing is assumed." };
+  }
+  const outcome = mutationOutcome(raw, "");
+  return outcome.kind === "done" ? { kind: "failed", message: "The server's answer couldn't be read. Nothing is assumed." } : outcome;
 }
