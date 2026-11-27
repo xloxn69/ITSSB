@@ -405,8 +405,8 @@ Types: `packages/contracts/src/enrollment.ts`; fixtures `enrollment.*.json`, `gu
 | `enrollment:listInvitations` (query) | staff | `{}` | `ready` with `invitations` (never the token or its hash). |
 | `enrollment:revokeInvitation` (mutation) | staff | `{ invitationId }` | `revoked` (idempotent) or `refused` `not_found`. |
 | `enrollment:listRequests` (query) | staff | `{}` | `ready` with pending requests first, including the private `address` and the route's current `eligibleStops`. |
-| `enrollment:approve` (mutation) | staff | `{ enrollmentRequestId, stopId }` | `approved` with `assignmentId`; or `refused` (`not_found`, `already_decided`, `stop_not_eligible`, `route_unavailable`, `account_conflict`). The stop must be in the route's current version. |
-| `enrollment:reject` (mutation) | staff | `{ enrollmentRequestId, reason }` | `rejected`; or `refused` (`reason_required`, …). |
+| `enrollment:approve` (mutation) | staff | `{ enrollmentRequestId, stopId }` | `approved` with `assignmentId`; or `refused` (`not_found`, `already_decided`, `stop_not_eligible`, `route_unavailable`, `account_conflict`: the sign-in is a staff or driver account, or already belongs to a differently named student). The stop must be in the route's current version. |
+| `enrollment:reject` (mutation) | staff | `{ enrollmentRequestId, reason }` | `rejected`; or `refused` (`reason_required`, …). The reason is kept on the request and shown to the family, never copied into the audit log. |
 | `guardianLinks:listRequests` / `approve` / `reject` | staff | `{}` / `{ linkRequestId }` / `{ linkRequestId, reason }` | As enrollment; `approve` returns `guardianLinkId`. |
 | `guardianLinks:revoke` (mutation) | staff | `{ guardianLinkId, reason }` | `revoked`; future tracking reads stop at once. |
 | `students:list` (query) | staff | `{}` | `ready` with `students` (assignments and guardian links; no addresses). |

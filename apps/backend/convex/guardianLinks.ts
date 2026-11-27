@@ -228,7 +228,8 @@ export const reject = mutation({
     const why = boundedText(reason, MAX_REASON_LENGTH);
     if (!why) return refusedDecision("reason_required", "Give the guardian a reason.");
     await ctx.db.patch(r._id, { status: "rejected", reviewedByUserId: caller.user._id, reviewedAtMs: now(), decisionReason: why });
-    await audit(ctx, caller.user, "guardianLink.reject", "guardianLinkRequests", r._id, "allowed", { reason: why, source: "staff_web" });
+    // The free-text reason stays on the private request.
+    await audit(ctx, caller.user, "guardianLink.reject", "guardianLinkRequests", r._id, "allowed", { source: "staff_web" });
     return { schemaVersion: SCHEMA_VERSION, status: "rejected", serverNowMs: now() };
   },
 });

@@ -259,6 +259,11 @@ export const listRequests = query({
   },
 });
 
+function sameName(a: string, b: string): boolean {
+  const norm = (x: string) => x.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+  return norm(a) === norm(b);
+}
+
 async function pendingRequest(ctx: MutationCtx, raw: string) {
   const id = ctx.db.normalizeId("enrollmentRequests", raw);
   return id ? await ctx.db.get(id) : null;
@@ -292,6 +297,15 @@ export const approve = mutation({
       .query("students")
       .withIndex("by_user", (q) => q.eq("userId", account._id))
       .first();
+    // The enrolling account is the student's own (docs/17). An account that
+    // already belongs to one student never gains a second, differently named
+    // one: that would hand the first student's guardians the other's route.
+    if (existingStudent && sameName(existingStudent.displayName, r.studentName) === false) {
+      return refusedDecision(
+        "account_conflict",
+        `This sign-in already belongs to ${existingStudent.displayName}. Each student enrolls with their own account.`,
+      );
+    }
     const studentId = existingStudent?._id ?? (await ctx.db.insert("students", { displayName: r.studentName, userId: account._id }));
 
     const t = now();
@@ -324,7 +338,8 @@ export const reject = mutation({
     const why = boundedText(reason, MAX_REASON_LENGTH);
     if (!why) return refusedDecision("reason_required", "Give the family a reason.");
     await ctx.db.patch(r._id, { status: "rejected", reviewedByUserId: caller.user._id, reviewedAtMs: now(), decisionReason: why });
-    await audit(ctx, caller.user, "enrollment.reject", "enrollmentRequests", r._id, "allowed", { reason: why, source: "staff_web" });
+    // The free-text reason stays on the private request: it may mention the address.
+    await audit(ctx, caller.user, "enrollment.reject", "enrollmentRequests", r._id, "allowed", { source: "staff_web" });
     return { schemaVersion: SCHEMA_VERSION, status: "rejected", serverNowMs: now() };
   },
 });
