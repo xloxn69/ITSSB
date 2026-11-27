@@ -2,7 +2,8 @@
 # Runs the iOS unit tests on a simulator, without code signing.
 #
 # Test timeouts are on so a hung async test fails by name instead of stalling
-# the whole run. CONVEX_URL points at a closed port, so any test that forgets
+# the whole run. CONVEX_URL points at a closed port and the Clerk key is empty,
+# so sign-in is never configured and any test that forgets
 # to mock the network fails immediately rather than reaching a real server.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -41,4 +42,5 @@ xcodebuild test \
   -maximum-test-execution-time-allowance 120 \
   CODE_SIGNING_ALLOWED=NO \
   CONVEX_URL='http://127.0.0.1:1' \
+  CLERK_PUBLISHABLE_KEY='' \
   -quiet

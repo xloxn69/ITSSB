@@ -38,7 +38,7 @@ struct TrackView: View {
         case .sessionExpired:
             StateMessage(title: "You're signed out", systemImage: "person.crop.circle.badge.exclamationmark",
                          detail: "Your session ended, so bus information is hidden. Sign in again to continue.",
-                         action: ("Sign in", onSignIn))
+                         action: ("Sign in again", onSignIn))
         case .failed(let text):
             StateMessage(title: "Couldn't load your bus", systemImage: "wifi.exclamationmark",
                          detail: text, action: ("Try again", { model.retry() }))
@@ -229,6 +229,4 @@ private struct StateMessage: View {
 #Preview("Access unavailable") { TrackView(source: PreviewLiveRunSource(scenario: .accessUnavailable)) }
 #Preview("Session expired") { TrackView(source: PreviewLiveRunSource(scenario: .sessionExpired)) }
 #Preview("Failed") { TrackView(source: PreviewLiveRunSource(scenario: .failed)) }
-#Preview("Sign-in unavailable") {
-    SignInRequiredView(reason: .signInUnavailable, error: nil) {}
-}
+#Preview("Sign-in not set up") { SignInNotConfiguredView() }

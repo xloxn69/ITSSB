@@ -24,7 +24,7 @@ xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --ba
 
 xcodebuild build -project ITSSB.xcodeproj -scheme ITSSB -configuration Debug \
   -destination "platform=iOS Simulator,id=$UDID" -derivedDataPath build/DerivedData \
-  CODE_SIGNING_ALLOWED=NO -quiet
+  CODE_SIGNING_ALLOWED=NO CLERK_PUBLISHABLE_KEY='' -quiet
 APP="build/DerivedData/Build/Products/Debug-iphonesimulator/ITSSB.app"
 BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")"
 xcrun simctl install "$UDID" "$APP"
@@ -44,6 +44,10 @@ for APPEARANCE in light dark; do
                   accessUnavailable sessionExpired failed; do
     shoot "$scenario" -ITSSBScenario "$scenario"
   done
-  # The real configuration: no identity provider yet, so sign-in is unavailable.
+  for auth in notConfigured restoring restoreFailed email emailInvalid sending code codeWrong \
+              trackingRejected account; do
+    shoot "auth-$auth" -ITSSBAuthScenario "$auth"
+  done
+  # The real build with no Clerk key: sign-in isn't set up.
   shoot signInUnavailable
 done
