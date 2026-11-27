@@ -4,15 +4,18 @@ import SwiftUI
 
 struct TrackView: View {
     @State private var model: TrackViewModel
+    let onSignIn: () -> Void
 
-    init(source: any LiveRunSource) {
+    init(source: any LiveRunSource, onSignIn: @escaping () -> Void = {}) {
         _model = State(initialValue: TrackViewModel(source: source))
+        self.onSignIn = onSignIn
     }
 
     var body: some View {
         content
             .background(AppColors.background)
-            .task { await model.refresh() }
+            .onAppear { model.start() }
+            .onDisappear { model.stop() }
     }
 
     @ViewBuilder
@@ -25,27 +28,47 @@ struct TrackView: View {
             message("No trip right now", systemImage: "bus", detail: "Your bus isn't running a route at the moment.")
         case .accessUnavailable:
             message("Tracking not available", systemImage: "lock",
-                    detail: "Your account isn't linked to a route yet. Your school can approve it.")
+                    detail: "Your account isn't linked to an approved route. Your school can approve it.")
+        case .sessionExpired:
+            ContentUnavailableView {
+                Label("Signed out", systemImage: "person.crop.circle.badge.exclamationmark")
+            } description: {
+                Text("Your session ended. Sign in again to see your bus.")
+            } actions: {
+                Button("Sign in", action: onSignIn)
+            }
         case .failed(let text):
-            message("Something went wrong", systemImage: "exclamationmark.triangle", detail: text)
-        case .tracking(let position):
-            tracking(position)
+            ContentUnavailableView {
+                Label("Something went wrong", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(text)
+            } actions: {
+                Button("Try again") { model.retry() }
+            }
+        case let .tracking(_, run, clock):
+            tracking(run, clock: clock)
         }
     }
 
-    private func tracking(_ position: LivePosition) -> some View {
-        let coordinate = CLLocationCoordinate2D(latitude: position.latitude, longitude: position.longitude)
-        return Map(initialPosition: .camera(MapCamera(centerCoordinate: coordinate, distance: 1500))) {
-            Annotation("Bus", coordinate: coordinate) {
-                Image(systemName: "bus.fill")
-                    .foregroundStyle(AppColors.onBrand)
-                    .padding(AppSpacing.sm)
-                    .background(AppColors.brand, in: .circle)
+    @ViewBuilder
+    private func tracking(_ run: TrackedRun, clock: ServerClock) -> some View {
+        if let position = run.position {
+            let coordinate = CLLocationCoordinate2D(latitude: position.latitude, longitude: position.longitude)
+            Map(initialPosition: .camera(MapCamera(centerCoordinate: coordinate, distance: 1500))) {
+                Annotation(run.busLabel, coordinate: coordinate) {
+                    Image(systemName: "bus.fill")
+                        .foregroundStyle(AppColors.onBrand)
+                        .padding(AppSpacing.sm)
+                        .background(AppColors.brand, in: .circle)
+                }
             }
-        }
-        .safeAreaInset(edge: .bottom) {
-            FreshnessCard(position: position)
-                .padding(AppSpacing.screen)
+            .safeAreaInset(edge: .bottom) {
+                FreshnessCard(position: position, clock: clock)
+                    .padding(AppSpacing.screen)
+            }
+        } else {
+            message("Waiting for the bus", systemImage: "location.slash",
+                    detail: "The trip has started, but the bus hasn't reported a location yet.")
         }
     }
 
@@ -58,10 +81,11 @@ struct TrackView: View {
 /// age keeps advancing even when no new update arrives.
 struct FreshnessCard: View {
     let position: LivePosition
+    var clock: ServerClock = .deviceOnly
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
-            let freshness = position.freshness(at: context.date)
+            let freshness = position.freshness(at: context.date, clock: clock)
             HStack(spacing: AppSpacing.md) {
                 Image(systemName: icon(for: freshness))
                     .foregroundStyle(color(for: freshness))
@@ -69,7 +93,7 @@ struct FreshnessCard: View {
                     Text(label(for: freshness))
                         .font(AppFonts.headline)
                         .foregroundStyle(AppColors.textPrimary)
-                    Text(AgeFormatter.updatedText(age: position.age(at: context.date)))
+                    Text(AgeFormatter.updatedText(age: position.age(at: context.date, clock: clock)))
                         .font(AppFonts.numeric)
                         .foregroundStyle(AppColors.textSecondary)
                 }
@@ -105,5 +129,5 @@ struct FreshnessCard: View {
     }
 }
 
-#Preview("Fresh") { TrackView(source: PreviewLiveRunSource()) }
-#Preview("Stale") { TrackView(source: PreviewLiveRunSource(capturedSecondsAgo: 300)) }
+#Preview("Live") { TrackView(source: PreviewLiveRunSource(scenario: .live)) }
+#Preview("Stale") { TrackView(source: PreviewLiveRunSource(scenario: .stale)) }

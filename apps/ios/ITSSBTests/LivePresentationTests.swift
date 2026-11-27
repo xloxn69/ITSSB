@@ -1,0 +1,54 @@
+import XCTest
+@testable import ITSSB
+
+final class LivePresentationTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_795_609_100)
+
+    private func run(state: RunState = .active, secondsAgo: TimeInterval?, gps: GpsStatus? = .valid) -> TrackedRun {
+        PreviewFixtures.run(state: state,
+                            position: secondsAgo.map { PreviewFixtures.position(capturedSecondsAgo: $0, now: now) },
+                            gpsStatus: gps)
+    }
+
+    private func present(_ run: TrackedRun, at date: Date? = nil) -> LivePresentation {
+        LivePresentation.make(run: run, clock: .deviceOnly, now: date ?? now)
+    }
+
+    func testFreshAgingStale() {
+        XCTAssertEqual(present(run(secondsAgo: 5)), .live(.fresh))
+        XCTAssertEqual(present(run(secondsAgo: 45)), .live(.aging))
+        XCTAssertEqual(present(run(secondsAgo: 121)), .stale)
+    }
+
+    func testBecomesStaleWithoutAnUpdate() {
+        let tracked = run(secondsAgo: 5)
+        XCTAssertEqual(present(tracked), .live(.fresh))
+        XCTAssertEqual(present(tracked, at: now.addingTimeInterval(200)), .stale)
+    }
+
+    func testNoPositionNeverShowsAMarker() {
+        let presentation = present(run(secondsAgo: nil, gps: nil))
+        XCTAssertEqual(presentation, .awaitingFirstPosition)
+        XCTAssertFalse(presentation.showsMarker)
+    }
+
+    func testGpsUnavailableIsDistinct() {
+        XCTAssertEqual(present(run(secondsAgo: nil, gps: .noFix)), .gpsUnavailable(.noFix))
+        let withOld = present(run(secondsAgo: 10, gps: .receiverMissing))
+        XCTAssertEqual(withOld, .gpsUnavailable(.receiverMissing))
+        XCTAssertTrue(withOld.dimsMarker)
+    }
+
+    func testEndedRunHasNoLiveMarker() {
+        for state in [RunState.completed, .cancelled, .scheduled] {
+            let presentation = present(run(state: state, secondsAgo: 5))
+            XCTAssertEqual(presentation, .notLive(state))
+            XCTAssertFalse(presentation.showsMarker)
+        }
+    }
+
+    func testOnlyLiveIsUndimmed() {
+        XCTAssertFalse(LivePresentation.live(.fresh).dimsMarker)
+        XCTAssertTrue(LivePresentation.stale.dimsMarker)
+    }
+}
