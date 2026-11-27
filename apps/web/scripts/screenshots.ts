@@ -33,6 +33,9 @@ try {
         await page.goto("about:blank");
         await page.goto(`http://localhost:${port}/${screen.path}`);
         await page.waitForSelector(screen.ready ?? "main h1, main h2");
+        for (const [selector, value] of screen.steps?.fill ?? []) await page.fill(selector, value);
+        for (const selector of screen.steps?.check ?? []) await page.check(selector);
+        if (screen.steps?.click) await page.click(screen.steps.click);
         for (const selector of screen.click ?? []) {
           await page.locator(selector).first().click();
         }

@@ -100,6 +100,9 @@ input, select, textarea { font: inherit; min-height: 44px; padding: var(--space-
 .flush { margin: 0; }
 .check-row { flex-direction: row; flex-wrap: nowrap; align-items: center; gap: var(--space-sm); }
 .check-row input { min-height: auto; width: auto; flex: none; padding: 0; }
+/* A radio or checkbox with its text on one line, left aligned, 44px tall. */
+label.choice { flex-direction: row; align-items: center; gap: var(--space-sm); min-height: 44px; }
+label.choice input { min-height: auto; width: auto; margin: 0; flex: none; }
 @media (max-width: 40rem) {
   .responsive-table thead { display: none; }
   .responsive-table tr { display: block; border-bottom: 1px solid var(--color-border); padding: var(--space-sm) 0; }

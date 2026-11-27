@@ -1,10 +1,18 @@
 import { FIXTURE_SCENARIOS } from "./fixtureSource";
 
 /** Every fictional screen the screenshot script captures. */
+/** Optional steps run before the capture: fill inputs, check boxes, then click. */
+export interface ScreenSteps {
+  fill?: [selector: string, value: string][];
+  check?: string[];
+  click?: string;
+}
+
 export const FIXTURE_SCREENS: {
   name: string;
   path: string;
   ready?: string;
+  steps?: ScreenSteps;
   /** Clicked in order after `ready` (confirm dialogs are accepted); then `after` is awaited. */
   click?: string[];
   after?: string;
@@ -16,6 +24,61 @@ export const FIXTURE_SCREENS: {
     path: `?fixture=${s}`,
     ready: s === "loading" ? "[aria-busy=true]" : "main h2",
   })),
+  { name: "family-actions-track", path: "?fixture=family-flows", ready: "main h2" },
+  { name: "family-join-code", path: "?fixture=family-flows#/join", ready: "main input" },
+  { name: "family-join-form", path: "join?token=DEMX-7K2M-9QXR-4TVW-8ZPN&fixture=family-flows", ready: "form h2" },
+  { name: "family-join-expired", path: "join?token=EXPX-7K2M-9QXR-4TVW-8ZPN&fixture=family-flows", ready: "main section h2 + p" },
+  { name: "family-join-wrong-purpose", path: "join?token=GRDX-7K2M-9QXR-4TVW-8ZPN&fixture=family-flows", ready: "main section h2 + p" },
+  {
+    name: "family-join-sent",
+    path: "join?token=DEMX-7K2M-9QXR-4TVW-8ZPN&fixture=family-flows",
+    ready: "form h2",
+    steps: { fill: [["form input >> nth=0", "Alex Fictional"], ["form input >> nth=1", "12 Fictional Lane"]], check: ["input[value=demo_stop_001]"], click: "button[type=submit]" },
+    after: "text=Request sent",
+  },
+  {
+    name: "family-join-refused",
+    path: "join?token=DEMX-7K2M-9QXR-4TVW-8ZPN&fixture=family-flows",
+    ready: "form h2",
+    steps: { fill: [["form input >> nth=0", "Refuse Example"], ["form input >> nth=1", "12 Fictional Lane"]], check: ["input[value=none]"], click: "button[type=submit]" },
+    after: "text=Not accepted",
+  },
+  {
+    name: "family-join-unconfirmed",
+    path: "join?token=DEMX-7K2M-9QXR-4TVW-8ZPN&fixture=family-flows&v=offline",
+    ready: "form h2",
+    steps: { fill: [["form input >> nth=0", "Alex Fictional"], ["form input >> nth=1", "12 Fictional Lane"]], check: ["input[value=demo_stop_002]"], click: "button[type=submit]" },
+    after: "text=Not confirmed yet",
+  },
+  { name: "family-requests", path: "?fixture=family-flows#/requests", ready: "main section .badge" },
+  { name: "family-requests-empty", path: "?fixture=family-flows&v=empty#/requests", ready: "main section h2" },
+  { name: "family-link", path: "link?token=MMMM-NNNN-PPPP-QQQQ-RRRR&fixture=family-flows", ready: "main input" },
+  {
+    name: "family-link-sent",
+    path: "link?token=MMMM-NNNN-PPPP-QQQQ-RRRR&fixture=family-flows",
+    ready: "main input",
+    steps: { fill: [["main input >> nth=1", "Jordan Guardian"]], click: "button[type=submit]" },
+    after: "text=Request sent",
+  },
+  { name: "family-checkin", path: "?fixture=family-flows#/checkin", ready: "main section h2" },
+  {
+    name: "family-checkin-accepted",
+    path: "checkin?token=AAAA-BBBB-CCCC-DDDD-EEEE&fixture=family-flows",
+    ready: "main section input",
+    steps: { click: "text=Check in >> nth=-1" },
+    after: "text=your scan",
+  },
+  {
+    name: "family-checkin-expired",
+    path: "checkin?token=EXPA-BBBB-CCCC-DDDD-EEEE&fixture=family-flows",
+    ready: "main section input",
+    steps: { click: "text=Check in >> nth=-1" },
+    after: "text=This code has expired",
+  },
+  { name: "family-checkin-done", path: "?fixture=family-flows&v=done#/checkin", ready: "text=your scan" },
+  { name: "family-checkin-no-trip", path: "?fixture=family-flows&v=no-trip#/checkin", ready: "text=isn't running" },
+  { name: "family-checkin-guardian", path: "?fixture=family-flows&v=guardian#/checkin", ready: "main section h2" },
+  { name: "family-checkin-loading", path: "?fixture=family-flows&v=loading#/checkin", ready: "[aria-busy=true]" },
   { name: "staff-routes", path: "?fixture=staff#/staff/routes", ready: "table" },
   { name: "staff-review", path: "?fixture=staff#/staff/review", ready: "table" },
   { name: "staff-draft-clean", path: "?fixture=staff#/staff/review/demo_draft_009", ready: "#decision" },

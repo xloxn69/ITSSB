@@ -2,6 +2,8 @@ import { ClerkProvider, SignIn, useAuth, useClerk } from "@clerk/react";
 import { ConvexReactClient, useConvexAuth } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
 import { useEffect, useMemo, useState } from "react";
+import { FamilyApp } from "../family/FamilyApp";
+import { convexFamilySource } from "../family/familySource";
 import { TrackPage } from "../family/TrackPage";
 import { Shell } from "../Shell";
 import { convexStaffSource } from "../staff/convexStaffSource";
@@ -79,5 +81,6 @@ function SignedInTrack({ client, onSignIn }: { client: ConvexReactClient; onSign
   // One store per signed-in session; unmounting on sign-out stops every
   // subscription and drops protected data.
   const store = useMemo(() => new TrackStore(convexSource(client)), [client]);
-  return <TrackPage store={store} onSignIn={onSignIn} />;
+  const family = useMemo(() => convexFamilySource(client), [client]);
+  return <FamilyApp source={family} track={<TrackPage store={store} onSignIn={onSignIn} />} />;
 }
