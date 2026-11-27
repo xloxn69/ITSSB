@@ -333,6 +333,31 @@ describe("driver roster actions", () => {
     expect(ok.body).toMatchObject({ status: "accepted", checkIn: { recordedAtMs: capturedAtMs } });
   });
 
+  it("a device clock a little behind the server still counts an action right after the grant and the start", async () => {
+    const { t, runA, aNoPhone } = await setup();
+    const now = Date.now();
+    // The run started on the bus at the same moment the device now reports, with a slow clock.
+    await t.run(async (ctx) => {
+      await ctx.db.patch(runA, { startedAtMs: now - 1000, startCapturedAtMs: now - 31_000 });
+      const grant = (await ctx.db.query("driverGrants").collect())[0];
+      if (grant) await ctx.db.patch(grant._id, { issuedAtMs: now - 2000 });
+    });
+    const res = await post(t, "/device/v1/roster-actions", SECRET_A, {
+      ...action("recordAttendance", { runId: runA, assignmentId: aNoPhone, status: "boarded" }, "act-skew-0001"),
+      capturedAtMs: now - 30_000, // 30 s slow device clock
+    });
+    expect(res.body).toMatchObject({ status: "accepted" });
+  });
+
+  it("a capture time well before the grant was issued is still rejected", async () => {
+    const { t, runA, aNoPhone } = await setup();
+    const res = await post(t, "/device/v1/roster-actions", SECRET_A, {
+      ...action("recordAttendance", { runId: runA, assignmentId: aNoPhone, status: "boarded" }, "act-skew-0002"),
+      capturedAtMs: Date.now() - HOUR - 5 * 60_000, // grant A was issued an hour ago
+    });
+    expect(res.body).toMatchObject({ status: "rejected", code: "grant_not_authorized" });
+  });
+
   it("attendance captured before the run started is rejected", async () => {
     const { t, runA, aNoPhone } = await setup();
     await t.run((ctx) => ctx.db.patch(runA, { startedAtMs: Date.now() - 10 * 60_000 }));
