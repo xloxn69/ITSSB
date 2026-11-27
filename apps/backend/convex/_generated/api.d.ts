@@ -9,6 +9,8 @@
  */
 
 import type * as audit from "../audit.js";
+import type * as checkIns from "../checkIns.js";
+import type * as deviceRoster from "../deviceRoster.js";
 import type * as devices from "../devices.js";
 import type * as driverGrants from "../driverGrants.js";
 import type * as enrollment from "../enrollment.js";
@@ -16,6 +18,7 @@ import type * as fleet from "../fleet.js";
 import type * as guardianLinks from "../guardianLinks.js";
 import type * as health from "../health.js";
 import type * as http from "../http.js";
+import type * as lib_attendance from "../lib/attendance.js";
 import type * as lib_authz from "../lib/authz.js";
 import type * as lib_deviceAuth from "../lib/deviceAuth.js";
 import type * as lib_family from "../lib/family.js";
@@ -40,6 +43,8 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   audit: typeof audit;
+  checkIns: typeof checkIns;
+  deviceRoster: typeof deviceRoster;
   devices: typeof devices;
   driverGrants: typeof driverGrants;
   enrollment: typeof enrollment;
@@ -47,6 +52,7 @@ declare const fullApi: ApiFromModules<{
   guardianLinks: typeof guardianLinks;
   health: typeof health;
   http: typeof http;
+  "lib/attendance": typeof lib_attendance;
   "lib/authz": typeof lib_authz;
   "lib/deviceAuth": typeof lib_deviceAuth;
   "lib/family": typeof lib_family;

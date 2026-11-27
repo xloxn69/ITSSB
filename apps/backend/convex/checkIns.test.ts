@@ -124,6 +124,7 @@ async function setup() {
     await token(h.expired, "trip_check_in", { runId: runA, expiresAtMs: now - 1 });
     await token(h.otherRun, "trip_check_in", { runId: runB });
     const routeRow = await ctx.db.insert("routes", { label: "Route 17 Morning", direction: "to_school", createdAtMs: now, currentVersionId: routeA });
+    await ctx.db.patch(routeA, { routeId: routeRow });
     await token(h.enrollment, "route_enrollment", { routeId: routeRow });
     return { staff, driver, routeA, routeB, a1, a2, a3, aNoPhone, student1, deviceA, deviceB, runA, runB };
   });

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "status": "already_recorded",
+  "serverNowMs": 1795608360000,
+  "requestId": "0b5b9a4e-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+  "runId": "demo_run_001",
+  "checkIn": {
+    "checkInId": "demo_check_in_001",
+    "status": "boarded",
+    "source": "student_qr_claim",
+    "recordedAtMs": 1795608300000,
+    "receivedAtMs": 1795608300000
+  }
+}

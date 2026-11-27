@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "requestId": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+  "status": "rejected",
+  "code": "grant_not_authorized",
+  "message": "The driver was not authorized for this when it was recorded.",
+  "serverNowMs": 1795608900000
+}

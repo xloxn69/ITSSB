@@ -1,4 +1,6 @@
 import {
+  MAX_REASON_LENGTH,
+  type StaffActionResult,
   type ApproveDraftResult,
   type DraftDetail,
   type DraftSummary,
@@ -12,6 +14,8 @@ import {
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx, mutation, type QueryCtx, query } from "./_generated/server";
+import { receiptFor, revokeAssignment, storeReceipt } from "./lib/attendance";
+import { boundedText, isRequestId } from "./lib/family";
 import { routeChecks } from "./lib/routeChecks";
 import { accessUnavailable, audit, denied, staffCaller } from "./lib/staff";
 import { draftStop, routeDirection } from "./schema";
@@ -406,5 +410,45 @@ export const recordDraft = internalMutation({
   returns: v.id("routeDrafts"),
   handler: async (ctx, args) => {
     return await ctx.db.insert("routeDrafts", { ...args, status: "submitted", submittedAtMs: Date.now() });
+  },
+});
+
+/**
+ * Removes one student from one route (docs/09 §9, docs/08 §9): revokes the
+ * assignment with a reason. The student record, other assignments, guardian
+ * links and attendance history stay. Drivers do the same through
+ * `POST /device/v1/roster-actions`, scoped to their grant's routes.
+ */
+export const removeAssignment = mutation({
+  args: { requestId: v.string(), assignmentId: v.string(), reason: v.string() },
+  handler: async (ctx, { requestId, assignmentId, reason }): Promise<StaffActionResult> => {
+    const caller = await staffCaller(ctx);
+    if (!caller.ok) {
+      await audit(ctx, caller.user, "assignment.remove", "assignments", assignmentId, "denied");
+      return denied(caller.reason);
+    }
+    const refuseRemoval = (code: "not_found" | "reason_required" | "already_removed", message: string): StaffActionResult => ({
+      schemaVersion: SCHEMA_VERSION,
+      status: "refused",
+      serverNowMs: Date.now(),
+      code,
+      message,
+    });
+    const why = boundedText(reason, MAX_REASON_LENGTH);
+    if (!why || !isRequestId(requestId)) return refuseRemoval("reason_required", "Give a reason for removing this student.");
+    const scope = `user:${caller.user._id}`;
+    const prior = await receiptFor(ctx, scope, requestId);
+    if (prior) {
+      if (prior.fingerprint !== `remove:${assignmentId}`) return refuseRemoval("not_found", "This request was already used.");
+      return { schemaVersion: SCHEMA_VERSION, status: "accepted", serverNowMs: Date.now(), checkIn: null };
+    }
+    const id = ctx.db.normalizeId("assignments", assignmentId);
+    const assignment = id ? await ctx.db.get(id) : null;
+    if (!assignment) return refuseRemoval("not_found", "That assignment doesn't exist.");
+    if (assignment.status !== "approved") return refuseRemoval("already_removed", "This student was already removed from the route.");
+    await revokeAssignment(ctx, assignment, caller.user._id, why);
+    await storeReceipt(ctx, { scope, requestId, fingerprint: `remove:${assignmentId}`, status: "accepted" });
+    await audit(ctx, caller.user, "assignment.remove", "assignments", assignment._id, "allowed", { reason: why, source: "staff_web" });
+    return { schemaVersion: SCHEMA_VERSION, status: "accepted", serverNowMs: Date.now(), checkIn: null };
   },
 });

@@ -88,3 +88,4 @@ export * from "./staff.js";
 export * from "./tripEvents.js";
 export * from "./health.js";
 export * from "./enrollment.js";
+export * from "./checkIns.js";

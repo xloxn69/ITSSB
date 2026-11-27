@@ -24,3 +24,4 @@ export * from "./tripEventFixtures.js";
 export * from "./demoRoute.js";
 export * from "./healthFixtures.js";
 export * from "./enrollmentFixtures.js";
+export * from "./checkInFixtures.js";

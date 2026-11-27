@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "status": "ready",
+  "serverNowMs": 1795608400000,
+  "assignmentId": "demo_assignment_001",
+  "runId": "demo_run_001",
+  "checkIn": {
+    "checkInId": "demo_check_in_001",
+    "status": "boarded",
+    "source": "student_qr_claim",
+    "recordedAtMs": 1795608300000,
+    "receivedAtMs": 1795608300000
+  }
+}
