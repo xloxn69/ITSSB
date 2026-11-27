@@ -638,7 +638,7 @@ describe("access denial on every staff enrollment function", () => {
         const result = await call(who ? (as(t, who) as unknown as T) : t, ids);
         expect(result).toMatchObject({
           status: "access_unavailable",
-          reason: who === null || who === APPLICANT ? "unauthenticated" : "not_permitted",
+          reason: who === null ? "unauthenticated" : "not_permitted",
         });
         expect(await t.run(async (ctx) => (await ctx.db.query("scopedTokens").collect()).length)).toBe(before);
       });
