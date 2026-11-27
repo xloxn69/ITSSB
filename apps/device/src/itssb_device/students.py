@@ -648,7 +648,7 @@ class StudentDesk:
             if not isinstance(ctx, _Ctx):
                 return ctx
             run_id, grant = ctx.run_id, ctx.grant
-            seen = self._seen(db, request_id, intent)
+            seen = self._seen(db, request_id, intent, run_id)
             if seen is not None:
                 return seen
             cached = db.conn.execute(
@@ -737,7 +737,7 @@ class StudentDesk:
             except sqlite3.IntegrityError:
                 # The same requestId arrived twice at once: answer from the saved row.
                 db.write_guard = None
-                seen = self._seen(db, request_id, intent)
+                seen = self._seen(db, request_id, intent, run_id)
                 if seen is not None:
                     return seen
                 raise
@@ -753,13 +753,18 @@ class StudentDesk:
         return HTTPStatus.OK, {"action": _action_view(row)}
 
     @staticmethod
-    def _seen(db: Database, request_id: str, intent: dict[str, Any]) -> Reply | None:
+    def _seen(db: Database, request_id: str, intent: dict[str, Any], run_id: str) -> Reply | None:
         row = db.conn.execute(
             "SELECT * FROM roster_actions WHERE request_id=?", (request_id,)
         ).fetchone()
         if row is None:
             return None
-        if json.loads(row["intent"]) != intent:
+        # A saved change is returned only to a caller authorized for its run's
+        # route (the same scope as the change history). Anything else gets
+        # the same answer as different details, so it reveals nothing.
+        route = StudentDesk._route_version(db, run_id)
+        allowed = StudentDesk._runs_on_routes(db, {route} if route else set()) | {run_id}
+        if row["run_id"] not in allowed or json.loads(row["intent"]) != intent:
             return _error(
                 HTTPStatus.CONFLICT,
                 "REQUEST_ID_CONFLICT",
