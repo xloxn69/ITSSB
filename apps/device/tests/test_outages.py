@@ -169,8 +169,14 @@ def newest_sequence(b) -> int:
 
 
 def stop(proc: subprocess.Popen, b) -> None:
-    """Stop new fixes, let the queue drain completely, then SIGTERM."""
+    """Stop new fixes, let the queue drain completely, then SIGTERM.
+
+    Wait until the device has processed a no-fix report first: from then on
+    it holds no current fix and cannot save another observation. Without
+    that, a fix received just before the switch could be saved after the
+    queue looked drained, leaving one pending row at the end."""
     b.gpsd.mode = "nofix"
+    assert wait_until(lambda: health_value(b, "gps", "lastRejectReason") is not None, timeout=10)
     assert wait_until(lambda: all(r["status"] == "acknowledged" for r in local_rows(b)), timeout=30)
     proc.send_signal(signal.SIGTERM)
     out, _ = proc.communicate(timeout=20)
