@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Captures one simulator screenshot per tracking screen state, using the
 # fictional DEBUG scenarios (`-ITSSBScenario <name>`). No backend, no network
-# beyond Apple map tiles. Output: one PNG per state in $1 (default build/screenshots).
+# beyond Apple map tiles. Output: one PNG per state and appearance (light, dark)
+# in $1 (default build/screenshots).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT="${1:-build/screenshots}"
@@ -18,7 +19,6 @@ echo "Simulator: $UDID"
 
 xcrun simctl boot "$UDID" 2>/dev/null || true
 xcrun simctl bootstatus "$UDID" -b
-xcrun simctl ui "$UDID" appearance light
 xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100 \
   --cellularBars 4 --wifiBars 3
 
@@ -34,13 +34,16 @@ shoot() { # name, then launch arguments
   xcrun simctl terminate "$UDID" "$BUNDLE_ID" 2>/dev/null || true
   xcrun simctl launch "$UDID" "$BUNDLE_ID" "$@" >/dev/null
   sleep "${ITSSB_SCREENSHOT_WAIT:-8}" # let map tiles load
-  xcrun simctl io "$UDID" screenshot "$OUT/$name.png" >/dev/null
-  echo "  $name"
+  xcrun simctl io "$UDID" screenshot "$OUT/$name-$APPEARANCE.png" >/dev/null
+  echo "  $name ($APPEARANCE)"
 }
 
-for scenario in live aging stale awaitingPosition gpsUnavailable noActiveRun loading \
-                accessUnavailable sessionExpired failed; do
-  shoot "$scenario" -ITSSBScenario "$scenario"
+for APPEARANCE in light dark; do
+  xcrun simctl ui "$UDID" appearance "$APPEARANCE"
+  for scenario in live aging stale awaitingPosition gpsUnavailable noActiveRun loading \
+                  accessUnavailable sessionExpired failed; do
+    shoot "$scenario" -ITSSBScenario "$scenario"
+  done
+  # The real configuration: no identity provider yet, so sign-in is unavailable.
+  shoot signInUnavailable
 done
-# The real configuration: no identity provider yet, so sign-in is unavailable.
-shoot signInUnavailable
