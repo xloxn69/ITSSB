@@ -14,8 +14,10 @@
     "screenshots": "bun scripts/screenshots.ts"
   },
   "dependencies": {
+    "@clerk/react": "^6.4.3",
     "@itssb/contracts": "workspace:*",
     "@itssb/ui": "workspace:*",
+    "convex": "^1.51.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
