@@ -84,6 +84,8 @@ Once active, all recording continues automatically. At each stop the driver can 
 
 A recording consists of real observations plus explicitly marked stop candidates. Save each accepted point with its actual capture time. If GPS becomes unavailable, mark a quality gap. The review may draw a visually distinct connector between known points, but it must not describe that connector as measured travel.
 
+Route lines are drawn as straight segments between recorded points and are never snapped to roads, so the line is only where the bus actually drove. The recorder therefore saves a point at least every 25 m of travel and whenever the heading changes by more than about 20°, keeping the last fix before a turn as the corner. It saves nothing while stopped. A draft holds at most 2,000 points (`MAX_ROUTE_PATH_POINTS`). Past that, only straight runs are thinned (Douglas-Peucker, a few metres' tolerance, no segment over 90 m); corners and the edges of GPS gaps are never removed.
+
 Stops have stable identifiers and an ordered position within a route version. Give each a useful public label and restricted staff instructions only where needed. A route that passes a stop twice must retain direction/order context so the first nearby pass does not falsely serve it.
 
 Finishing a recording creates a draft. Review its direction, endpoint, stop sequence, missing sections, and accidental detours. Submission and approval are separate events. A locally saved draft can survive loss of internet; **Submitted** means the server accepted the submission. Students continue using their existing approved assignments until an authorized version becomes effective.

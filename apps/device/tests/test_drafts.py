@@ -1,3 +1,4 @@
+import itertools
 import uuid
 
 import pytest
@@ -118,25 +119,143 @@ def test_stops_from_another_draft_cannot_be_edited(drafts, recording):
         drafts.remove_stop(other, s["stopId"])
 
 
-def test_points_keep_capture_order_and_flag_gaps(drafts, recording):
-    assert drafts.add_point(recording, fix(0))
-    assert drafts.add_point(recording, fix(1))
-    assert not drafts.add_point(recording, fix(1))  # same fix again: not saved twice
-    assert not drafts.add_point(recording, fix(0))  # older: not saved
-    assert drafts.add_point(recording, fix(0, at_ms=T0 + 1000 + GAP_MS + 1))
-    d = drafts.detail(recording)
-    assert d["pointCount"] == 3
-    assert d["gapCount"] == 1
-    assert [p["gapBefore"] for p in d["path"]] == [False, False, True]
+# ── Road-following path (owner decision: no snapping, so points follow the road) ──
+
+M_PER_DEG = 111_195.0  # metres per degree of latitude
 
 
-def test_review_path_is_bounded_but_keeps_gaps(drafts, recording):
-    for i in range(1000):
-        drafts.add_point(recording, fix(i))
-    drafts.add_point(recording, fix(0, at_ms=T0 + 2_000_000))
+class Drive:
+    """Fictional 1 Hz fixes along a path given in metres east/north of a
+    fictional origin, with the receiver's course as heading."""
+
+    LAT0, LON0 = 34.1, -83.98
+
+    def __init__(self) -> None:
+        self.t = T0
+        self.x = self.y = 0.0
+
+    def fix(self, speed: float, heading: float | None) -> Fix:
+        import math
+
+        lat = self.LAT0 + self.y / M_PER_DEG
+        lon = self.LON0 + self.x / (M_PER_DEG * math.cos(math.radians(self.LAT0)))
+        return Fix(self.t, lat, lon, speed, heading, 5.0, 3)
+
+    def go(self, drafts, draft_id, heading: float, metres: float, speed: float = 10.0):
+        import math
+
+        steps = round(metres / speed)
+        for _ in range(steps):
+            self.t += 1000
+            self.x += speed * math.sin(math.radians(heading))
+            self.y += speed * math.cos(math.radians(heading))
+            drafts.add_point(draft_id, self.fix(speed, heading))
+
+    def stop(self, drafts, draft_id, seconds: int):
+        for _ in range(seconds):
+            self.t += 1000
+            drafts.add_point(draft_id, self.fix(0.2, None))
+
+
+def xy_of(p):
+    import math
+
+    return (
+        (p["longitude"] - Drive.LON0) * M_PER_DEG * math.cos(math.radians(Drive.LAT0)),
+        (p["latitude"] - Drive.LAT0) * M_PER_DEG,
+    )
+
+
+def test_spacing_is_at_most_25m_on_a_straight(drafts, recording):
+    d = Drive()
+    drafts.add_point(recording, d.fix(10.0, 0.0))
+    d.go(drafts, recording, 0.0, 1000)
+    pts = [xy_of(p) for p in drafts.detail(recording)["path"]]
+    steps = [abs(b[1] - a[1]) for a, b in itertools.pairwise(pts)]
+    assert max(steps) <= 25.001  # never more than 25 m between points
+    assert 40 <= len(pts) <= 55
+
+
+def test_l_shaped_turn_keeps_its_corner(drafts, recording):
+    d = Drive()
+    drafts.add_point(recording, d.fix(10.0, 0.0))
+    d.go(drafts, recording, 0.0, 210, speed=15.0)  # north; corner not on the 25 m grid
+    corner = (d.x, d.y)
+    d.go(drafts, recording, 90.0, 210, speed=15.0)  # then east
+    pts = [xy_of(p) for p in drafts.detail(recording)["path"]]
+    nearest = min(((x - corner[0]) ** 2 + (y - corner[1]) ** 2) ** 0.5 for x, y in pts)
+    assert nearest < 1.0  # a saved point sits on the corner itself
+    # No segment cuts the corner: every point is on one leg or the other.
+    for x, y in pts:
+        assert abs(x) < 1.0 or abs(y - corner[1]) < 1.0
+
+
+def test_no_points_while_stopped(drafts, recording):
+    d = Drive()
+    drafts.add_point(recording, d.fix(10.0, 0.0))
+    d.go(drafts, recording, 0.0, 100)
+    before = drafts.detail(recording)["pointCount"]
+    d.stop(drafts, recording, 120)  # two minutes at a stop, GPS jitter only
+    assert drafts.detail(recording)["pointCount"] == before
+    d.go(drafts, recording, 0.0, 50)
+    detail = drafts.detail(recording)
+    assert detail["gapCount"] == 0  # stopping is not a GPS gap
+
+
+def test_gps_gap_is_flagged_from_the_last_fix_seen(drafts, recording):
+    d = Drive()
+    drafts.add_point(recording, d.fix(10.0, 0.0))
+    d.go(drafts, recording, 0.0, 50)
+    d.t += GAP_MS + 1000  # no fixes at all (tunnel)
+    d.y += 80
+    d.go(drafts, recording, 0.0, 50)
     path = drafts.detail(recording)["path"]
-    assert len(path) <= 402
-    assert path[-1]["gapBefore"] is True
+    assert sum(p["gapBefore"] for p in path) == 1
+
+
+def test_points_keep_capture_order(drafts, recording):
+    d = Drive()
+    assert drafts.add_point(recording, d.fix(10.0, 0.0))
+    assert not drafts.add_point(recording, d.fix(10.0, 0.0))  # same fix again
+    d.t -= 5000
+    assert not drafts.add_point(recording, d.fix(10.0, 0.0))  # older
+
+
+def test_long_route_stays_under_the_cap_and_keeps_every_corner(drafts, recording):
+    from itssb_device.drafts import MAX_ROUTE_PATH_POINTS
+
+    d = Drive()
+    drafts.add_point(recording, d.fix(10.0, 0.0))
+    corners = []
+    # 70 km of 1 km blocks with a turn after each: ~2,800 points before thinning.
+    for leg in range(70):
+        heading = 0.0 if leg % 2 == 0 else 90.0
+        d.go(drafts, recording, heading, 1000)
+        corners.append((d.x, d.y))
+    path = drafts.detail(recording)["path"]
+    assert len(path) <= MAX_ROUTE_PATH_POINTS
+    pts = [xy_of(p) for p in path]
+    for cx, cy in corners[:-1]:
+        assert min(((x - cx) ** 2 + (y - cy) ** 2) ** 0.5 for x, y in pts) < 1.0
+    # Thinned straights stay under the review's 100 m gap warning.
+    longest = max(
+        ((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2) ** 0.5 for a, b in itertools.pairwise(pts)
+    )
+    assert longest < 100
+
+
+def test_thinning_a_1km_straight_keeps_few_points():
+    from itssb_device.route_geometry import simplify
+
+    pts = [(34.1 + i * 25 / M_PER_DEG, -83.98) for i in range(41)]  # 1 km, every 25 m
+    assert simplify(pts, 3.0) == [0, 40]
+    # With the 90 m segment limit the recorder uses: still few, none over 90 m.
+    kept = simplify(pts, 3.0, max_segment_m=90.0)
+    assert len(kept) <= 17 and max(b - a for a, b in itertools.pairwise(kept)) * 25 <= 90
+    # A corner in the middle is never thinned away, even when protected only.
+    bent = pts[:21] + [(pts[20][0], -83.98 + i * 0.00027) for i in range(1, 21)]
+    keep = simplify(bent, 3.0, protected={20})
+    assert 20 in keep and len(keep) <= 4
 
 
 def test_finish_stops_sampling_and_marking(drafts, recording):

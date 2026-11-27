@@ -70,6 +70,12 @@ MIGRATIONS: list[str] = [
         resolved_at_ms INTEGER
     );
     """,
+    # 5: route points remember their heading and whether they mark a turn,
+    # so thinning never removes a corner
+    """
+    ALTER TABLE route_draft_points ADD COLUMN heading_degrees REAL;
+    ALTER TABLE route_draft_points ADD COLUMN corner INTEGER NOT NULL DEFAULT 0;
+    """,
 ]
 
 

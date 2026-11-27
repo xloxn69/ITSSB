@@ -20,7 +20,8 @@ Python service that runs on the bus Raspberry Pi. Spec:
 | `driver_api.py` | Driver touchscreen routes: session, unlock, parked, route recording; static UI files |
 | `local_auth.py` | Origin/CSRF/session checks for the local API; scrypt driver PINs with a device-wide lockout |
 | `motion.py` | Moving / stopped / unknown from fresh fixes; the driver-confirmed **Parked** state |
-| `drafts.py` | Route recording into a local draft: sampled points with gap flags, service-ordered stops |
+| `drafts.py` | Route recording into a local draft: a point every ≤ 25 m and at every turn over 20°, none while stopped, gap flags, ≤ 2,000 points (straight runs thinned, corners kept), service-ordered stops |
+| `route_geometry.py` | Distance, bearing, and corner-preserving Douglas-Peucker thinning |
 | `service.py` | One process, one writer per thread, SIGTERM/SIGINT clean shutdown, bounded logs |
 | `devtools/fake_gpsd.py` | Fake GPSD with **fictional** data for tests and indoor demos |
 | `devtools/fake_backend.py` | Local fake of the telemetry endpoint with outage modes (`down`, `drop_response`, `partial`, ...) |
