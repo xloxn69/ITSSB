@@ -1,0 +1,42 @@
+name: Web screenshots
+
+# Every family and staff web screen state from fictional development fixtures,
+# at phone and desktop width, light and dark. Download them from the run's
+# "web-screenshots" artifact.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'apps/web/**'
+      - 'packages/ui/**'
+      - '.github/workflows/web-screenshots.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-screenshots-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  screenshots:
+    name: Capture screen states
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - name: Headless Chromium
+        working-directory: apps/web
+        run: bun x playwright-core install --with-deps chromium-headless-shell
+      - name: Capture
+        working-directory: apps/web
+        run: bun run screenshots build/screenshots
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-screenshots
+          path: apps/web/build/screenshots/*.png
+          retention-days: 30

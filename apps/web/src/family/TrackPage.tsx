@@ -1,0 +1,184 @@
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { readInstant } from "../tracking/clock";
+import { capturedTime, dimsMarker, livePresentation, showsMarker, statusCopy } from "../tracking/presentation";
+import type { TrackContext, TrackStore } from "../tracking/store";
+import type { TrackedRun } from "../tracking/model";
+import type { ServerClock } from "../tracking/clock";
+import { RouteDiagram } from "./RouteDiagram";
+
+/** Re-renders every second so the age advances without a new update (docs/06 §9). */
+function useTick(): ReturnType<typeof readInstant> {
+  const [now, setNow] = useState(readInstant);
+  useEffect(() => {
+    const id = setInterval(() => setNow(readInstant()), 1_000);
+    return () => clearInterval(id);
+  }, []);
+  return now;
+}
+
+function useStore(store: TrackStore) {
+  // The store replaces `state` on every change, so its identity is the snapshot.
+  return useSyncExternalStore(
+    (cb) => store.subscribe(cb),
+    () => store.state,
+  );
+}
+
+/** Family tracking (docs/06 I09/I10/I12/I25–I28 on the web). */
+export function TrackPage({ store, onSignIn }: { store: TrackStore; onSignIn: () => void }) {
+  const state = useStore(store);
+
+  useEffect(() => {
+    store.start();
+    // A sleeping device can pause the monotonic clock: re-measure server time
+    // whenever the page is shown again (docs/08 §8.1).
+    const reverify = () => {
+      if (document.visibilityState === "visible") store.reverifyServerTime();
+    };
+    document.addEventListener("visibilitychange", reverify);
+    window.addEventListener("pageshow", reverify);
+    return () => {
+      document.removeEventListener("visibilitychange", reverify);
+      window.removeEventListener("pageshow", reverify);
+      store.stop();
+    };
+  }, [store]);
+
+  return (
+    <div className="stack">
+      {store.assignments.length > 1 && (
+        <div className="switcher" role="group" aria-label="Choose a student">
+          {store.assignments.map((a) => (
+            <button
+              key={a.assignmentId}
+              type="button"
+              className="chip"
+              aria-pressed={a.assignmentId === store.selectedAssignmentId}
+              onClick={() => store.select(a.assignmentId)}
+            >
+              {a.studentDisplayName}
+            </button>
+          ))}
+        </div>
+      )}
+      {(() => {
+        switch (state.kind) {
+          case "loading":
+            return <Message title="Finding your bus…" detail="Loading your approved trip." busy />;
+          case "no_active_run":
+            return (
+              <>
+                <ContextHeader context={state.context} />
+                <Message title="No trip right now" detail="Your bus isn't running a route at the moment." />
+              </>
+            );
+          case "access_unavailable":
+            return (
+              <Message
+                title="Tracking not available"
+                detail="Your account isn't linked to an approved route. Your school can approve it."
+              />
+            );
+          case "session_expired":
+            return (
+              <Message title="Signed out" detail="Your session ended. Sign in again to see your bus.">
+                <button type="button" className="btn btn-primary" onClick={onSignIn}>
+                  Sign in
+                </button>
+              </Message>
+            );
+          case "failed":
+            return (
+              <Message title="Something went wrong" detail={state.message}>
+                <button type="button" className="btn" onClick={() => store.retry()}>
+                  Try again
+                </button>
+              </Message>
+            );
+          case "tracking":
+            return <Tracking context={state.context} run={state.run} clock={state.clock} />;
+        }
+      })()}
+    </div>
+  );
+}
+
+function ContextHeader({ context }: { context: TrackContext }) {
+  const a = context.assignment;
+  return (
+    <header className="stack" style={{ gap: "var(--space-xs)" }}>
+      <h1>{a.studentDisplayName}</h1>
+      <p className="muted">
+        {a.routeLabel} · Stop: {a.stopLabel}
+      </p>
+    </header>
+  );
+}
+
+function Tracking({ context, run, clock }: { context: TrackContext; run: TrackedRun; clock: ServerClock }) {
+  const now = useTick();
+  const presentation = livePresentation(run, clock, now);
+  const copy = statusCopy(presentation, run, clock, now);
+  const marker = showsMarker(presentation) ? run.position : null;
+  return (
+    <>
+      <ContextHeader context={context} />
+      <div className="track-grid">
+        <div className="card">
+          {context.route ? (
+            <RouteDiagram route={context.route} position={marker} dimBus={dimsMarker(presentation)} busLabel={run.busLabel} />
+          ) : (
+            <p className="muted">The route drawing isn't available. The trip details are shown here.</p>
+          )}
+        </div>
+        <div className="stack">
+          <section className="card status" aria-live="polite" aria-atomic="true">
+            <span className={`dot tone-${copy.tone}`} aria-hidden />
+            <div className="stack" style={{ gap: "var(--space-xs)" }}>
+              <h2>{copy.title}</h2>
+              <p>{copy.detail}</p>
+              {copy.age && <p className="muted age">{copy.age}</p>}
+            </div>
+          </section>
+          <section className="card">
+            <dl className="facts">
+              <dt>Bus</dt>
+              <dd>{run.busLabel}</dd>
+              <dt>Your stop</dt>
+              <dd>{run.assignedStop.label}</dd>
+              {marker && (
+                <>
+                  <dt>Reported at</dt>
+                  <dd className="age">{capturedTime(marker.capturedAtMs)}</dd>
+                </>
+              )}
+            </dl>
+          </section>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function Message({
+  title,
+  detail,
+  busy,
+  children,
+}: {
+  title: string;
+  detail: string;
+  busy?: boolean;
+  children?: React.ReactNode;
+}) {
+  return (
+    <section className="card message" aria-busy={busy}>
+      <div className="message-icon" aria-hidden>
+        {busy ? "…" : "i"}
+      </div>
+      <h2>{title}</h2>
+      <p className="muted">{detail}</p>
+      {children}
+    </section>
+  );
+}
