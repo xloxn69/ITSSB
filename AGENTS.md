@@ -139,9 +139,8 @@ explicit owner decision.
 ## Review before merging
 Every PR gets a self-review of its whole diff before it merges. PRs that touch
 shared contracts, authorization, device credentials, the local API, or student
-data also get an independent review first: a different model (for example GPT
-Sol through T3 `delegate_task`) or a fresh instance, given the brief, the full
-diff and the test results, not your conclusions. Fix valid findings, say why
+data also get an independent review first: a fresh reviewer given the brief,
+the full diff and the test results, not your conclusions. Fix valid findings, say why
 you reject the others, and record both in the PR. If no reviewer is available,
 say so in the PR; never claim a review that did not happen.
 
