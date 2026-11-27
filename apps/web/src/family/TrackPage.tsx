@@ -166,8 +166,8 @@ function Tracking({
   const presentation = whileDisconnected(livePresentation(run, clock, now), connectionLost);
   const copy = statusCopy(presentation, run, clock, now);
   const marker = showsMarker(presentation) ? run.position : null;
-  // While disconnected, no estimate is shown: it can't be confirmed current.
-  const eta = connectionLost ? null : etaView(run, clock, now);
+  // Only while the bus is live: never while disconnected, stale, or without a GPS fix.
+  const eta = !connectionLost && presentation.kind === "live" ? etaView(run, clock, now) : null;
   const progress = stopProgressText(run);
   return (
     <>
