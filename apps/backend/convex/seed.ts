@@ -2,7 +2,8 @@ import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { internalAction, internalMutation } from "./_generated/server";
-import { MAX_GRANT_TTL_MS } from "./driverGrants";
+import type { TableNames } from "./_generated/dataModel";
+import { insertGrant, MAX_GRANT_TTL_MS } from "./driverGrants";
 import { generateDeviceSecret, sha256Hex } from "./lib/deviceAuth";
 import { UNLINKED_PREFIX } from "./users";
 
@@ -50,18 +51,14 @@ export const dev = internalAction({
     const deviceSecret = generateDeviceSecret();
     const driverGrant = generateDeviceSecret();
     const nowMs = Date.now();
-    const ids: SeedIds = await ctx.runMutation(internal.seed.insert, {
-      deviceCredentialHash: await sha256Hex(deviceSecret),
-      nowMs,
-    });
-    const driverGrantExpiresAtMs: number = await ctx.runMutation(internal.driverGrants.insert, {
-      tokenHash: await sha256Hex(driverGrant),
-      deviceId: ids.deviceId,
-      driverUserId: ids.driverUserId,
-      routeVersionIds: [ids.routeVersionId],
-      ttlMs: MAX_GRANT_TTL_MS,
-      nowMs,
-    });
+    // One transaction: either everything is seeded and both secrets are
+    // returned, or nothing is written and the seed can simply be rerun.
+    const { driverGrantExpiresAtMs, ...ids }: SeedIds & { driverGrantExpiresAtMs: number } =
+      await ctx.runMutation(internal.seed.insert, {
+        deviceCredentialHash: await sha256Hex(deviceSecret),
+        driverGrantHash: await sha256Hex(driverGrant),
+        nowMs,
+      });
     return {
       ids,
       deviceSecret,
@@ -76,6 +73,26 @@ export const dev = internalAction({
   },
 });
 
+/** Every table in the schema. A new table must be added here (typechecked below). */
+const SEED_GUARDED_TABLES = [
+  "users",
+  "devices",
+  "runs",
+  "driverGrants",
+  "telemetryEvents",
+  "liveState",
+  "routeVersions",
+  "stops",
+  "students",
+  "assignments",
+  "guardianLinks",
+  "auditLog",
+] as const satisfies readonly TableNames[];
+// Fails to compile if a schema table is missing from the list above.
+type MissingFromGuard = Exclude<TableNames, (typeof SEED_GUARDED_TABLES)[number]>;
+const guardCoversEveryTable: [MissingFromGuard] extends [never] ? true : false = true;
+void guardCoversEveryTable;
+
 type SeedIds = {
   routeVersionId: Id<"routeVersions">;
   stopIds: Id<"stops">[];
@@ -88,15 +105,16 @@ type SeedIds = {
 };
 
 export const insert = internalMutation({
-  args: { deviceCredentialHash: v.string(), nowMs: v.number() },
-  handler: async (ctx, { deviceCredentialHash, nowMs }): Promise<SeedIds> => {
+  args: { deviceCredentialHash: v.string(), driverGrantHash: v.string(), nowMs: v.number() },
+  handler: async (
+    ctx,
+    { deviceCredentialHash, driverGrantHash, nowMs },
+  ): Promise<SeedIds & { driverGrantExpiresAtMs: number }> => {
     requireDevSeedAllowed();
-    const [anyUser, anyDevice, anyRoute] = await Promise.all([
-      ctx.db.query("users").first(),
-      ctx.db.query("devices").first(),
-      ctx.db.query("routeVersions").first(),
-    ]);
-    if (anyUser || anyDevice || anyRoute) {
+    // Every application table must be empty, so fictional records never mix
+    // with existing ones.
+    const existing = await Promise.all(SEED_GUARDED_TABLES.map((table) => ctx.db.query(table).first()));
+    if (existing.some((row) => row !== null)) {
       throw new ConvexError({
         code: "SEED_REFUSED_NOT_EMPTY",
         message: "The seed only runs on an empty development deployment.",
@@ -144,6 +162,14 @@ export const insert = internalMutation({
       revoked: false,
       busLabel: "Bus 12 (demo)",
     });
+    const driverGrantExpiresAtMs = await insertGrant(ctx, {
+      tokenHash: driverGrantHash,
+      deviceId,
+      driverUserId,
+      routeVersionIds: [routeVersionId],
+      ttlMs: MAX_GRANT_TTL_MS,
+      nowMs,
+    });
     await ctx.db.insert("auditLog", {
       actor: { kind: "system" },
       action: "seed.dev",
@@ -160,6 +186,7 @@ export const insert = internalMutation({
       studentId,
       assignmentId,
       deviceId,
+      driverGrantExpiresAtMs,
     };
   },
 });

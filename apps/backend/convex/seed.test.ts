@@ -21,7 +21,9 @@ describe("seed.dev", () => {
     const t = convexTest(schema, modules);
     await expect(t.action(internal.seed.dev, {})).rejects.toThrow(/SEED_NOT_ALLOWED/);
     // The mutation checks too, so calling it directly does not bypass the guard.
-    await expect(t.mutation(internal.seed.insert, { deviceCredentialHash: "x", nowMs: 0 })).rejects.toThrow(
+    await expect(
+      t.mutation(internal.seed.insert, { deviceCredentialHash: "x", driverGrantHash: "y", nowMs: 0 }),
+    ).rejects.toThrow(
       /SEED_NOT_ALLOWED/,
     );
     expect(await t.run((ctx) => ctx.db.query("users").first())).toBeNull();
@@ -32,6 +34,26 @@ describe("seed.dev", () => {
     await t.action(internal.seed.dev, {});
     await expect(t.action(internal.seed.dev, {})).rejects.toThrow(/SEED_REFUSED_NOT_EMPTY/);
     expect((await t.run((ctx) => ctx.db.query("devices").collect())).length).toBe(1);
+  });
+
+  it("refuses a database holding only a student record, or only history", async () => {
+    const t = convexTest(schema, modules);
+    await t.run((ctx) => ctx.db.insert("students", { displayName: "Existing Example" }));
+    await expect(t.action(internal.seed.dev, {})).rejects.toThrow(/SEED_REFUSED_NOT_EMPTY/);
+    const t2 = convexTest(schema, modules);
+    await t2.run((ctx) =>
+      ctx.db.insert("auditLog", { actor: { kind: "system" }, action: "x", resourceType: "x", result: "allowed", atMs: 0 }),
+    );
+    await expect(t2.action(internal.seed.dev, {})).rejects.toThrow(/SEED_REFUSED_NOT_EMPTY/);
+  });
+
+  it("seeds everything, grant included, in one transaction (nothing half-written to repair)", async () => {
+    const t = convexTest(schema, modules);
+    const ids = await t.mutation(internal.seed.insert, { deviceCredentialHash: "x", driverGrantHash: "y", nowMs: 0 });
+    const grants = await t.run((ctx) => ctx.db.query("driverGrants").collect());
+    expect(grants).toEqual([
+      expect.objectContaining({ tokenHash: "y", deviceId: ids.deviceId, driverUserId: ids.driverUserId }),
+    ]);
   });
 
   it("seeds a world in which the Pi can start, report and end one run that only the family can read", async () => {
