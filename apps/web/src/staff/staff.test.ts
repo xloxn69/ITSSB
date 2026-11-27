@@ -116,3 +116,31 @@ describe("sweepSummary", () => {
     expect(sweepSummary(null)).toBeNull();
   });
 });
+
+describe("enrollment staff pages", () => {
+  it("attendance text names its source and never claims verified boarding", async () => {
+    const { recordText, SOURCE_LABEL } = await import("./EnrollmentPages");
+    const base = { checkInId: "c", recordedAtMs: 0, receivedAtMs: 0 };
+    expect(recordText(null)).toBe("Nothing recorded");
+    expect(recordText({ ...base, status: "boarded", source: "student_qr_claim" })).toContain("Student QR claim");
+    expect(recordText({ ...base, status: "not_boarded", source: "staff_correction" })).toContain("Staff correction");
+    for (const label of Object.values(SOURCE_LABEL)) expect(label.toLowerCase()).not.toContain("verified");
+  });
+
+  it("reads new success statuses as done and a refusal as refused", () => {
+    for (const status of ["revoked", "created", "accepted", "already_recorded"]) {
+      expect(mutationOutcome({ schemaVersion: 1, status }, "Done").kind).toBe("done");
+    }
+    expect(mutationOutcome({ schemaVersion: 1, status: "refused", message: "Choose a stop" }, "Done")).toEqual({
+      kind: "refused",
+      message: "Choose a stop",
+    });
+    expect(mutationOutcome({ schemaVersion: 1, status: "token_problem" }, "Done").kind).toBe("failed");
+  });
+
+  it("the fixture source refuses an approval at a stop outside the route", async () => {
+    const source = staffFixtureSource("staff");
+    const result = await source.mutate("enrollment:approve", { enrollmentRequestId: "demo_enrollment_request_001", stopId: "elsewhere" });
+    expect(mutationOutcome(result, "Approved").kind).toBe("refused");
+  });
+});

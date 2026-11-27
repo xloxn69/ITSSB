@@ -11,12 +11,37 @@ export type StaffQueryName =
   | "routes:getDraft"
   | "fleet:listDevices"
   | "fleet:listDrivers"
-  | "fleet:diagnostics";
+  | "fleet:diagnostics"
+  | "enrollment:listRequests"
+  | "enrollment:listInvitations"
+  | "guardianLinks:listRequests"
+  | "students:list"
+  | "checkIns:recentRuns"
+  | "checkIns:runAttendance"
+  | "audit:list";
 
-export type StaffMutationName = "routes:approveDraft" | "routes:rejectDraft" | "fleet:setBusLabel" | "fleet:revokeDevice";
+export type StaffMutationName =
+  | "routes:approveDraft"
+  | "routes:rejectDraft"
+  | "fleet:setBusLabel"
+  | "fleet:revokeDevice"
+  | "enrollment:approve"
+  | "enrollment:reject"
+  | "enrollment:revokeInvitation"
+  | "guardianLinks:approve"
+  | "guardianLinks:reject"
+  | "guardianLinks:revoke"
+  | "routes:removeAssignment"
+  | "checkIns:staffRecord";
+
+/** Actions create invitation codes, which need real randomness on the server. */
+export type StaffActionName =
+  | "enrollment:createRouteInvitation"
+  | "guardianLinks:createInvitation"
+  | "fleet:provisionDevice"
+  | "fleet:rotateDeviceCredential";
 
 /** Convex actions: they return a one-time device secret (docs/14 §4). */
-export type StaffActionName = "fleet:provisionDevice" | "fleet:rotateDeviceCredential";
 
 export interface StaffSource {
   watch(
@@ -26,7 +51,7 @@ export interface StaffSource {
     onError: (error: unknown) => void,
   ): Unsubscribe;
   mutate(name: StaffMutationName, args: Record<string, string>): Promise<unknown>;
-  act(name: StaffActionName, args: Record<string, string>): Promise<unknown>;
+  act(name: StaffActionName, args: Record<string, string | number>): Promise<unknown>;
 }
 
 export type QueryState<T> =
@@ -59,6 +84,8 @@ export type MutationOutcome =
   | { kind: "access_unavailable"; reason: AccessUnavailableReason }
   | { kind: "failed"; message: string };
 
+const DONE_STATUSES = new Set(["ok", "approved", "rejected", "revoked", "created", "accepted", "already_recorded"]);
+
 export function mutationOutcome(raw: unknown, doneMessage: string): MutationOutcome {
   const env = (raw ?? {}) as { schemaVersion?: unknown; status?: unknown; message?: unknown; reason?: unknown };
   if (env.schemaVersion !== 1) return { kind: "failed", message: "The server's answer couldn't be read. Nothing is assumed." };
@@ -68,7 +95,7 @@ export function mutationOutcome(raw: unknown, doneMessage: string): MutationOutc
   if (env.status === "refused") {
     return { kind: "refused", message: typeof env.message === "string" ? env.message : "The server refused this action." };
   }
-  if (env.status === "ok" || env.status === "approved" || env.status === "rejected") return { kind: "done", message: doneMessage };
+  if (DONE_STATUSES.has(env.status as string)) return { kind: "done", message: doneMessage };
   return { kind: "failed", message: "The server's answer couldn't be read. Nothing is assumed." };
 }
 

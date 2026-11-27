@@ -19,7 +19,7 @@ const ref = {
 };
 
 /** The part of `ConvexReactClient` this source uses, so tests can fake it. */
-export type LiveClient = Pick<ConvexReactClient, "watchQuery" | "mutation"> &
+export type LiveClient = Pick<ConvexReactClient, "watchQuery" | "mutation" | "action"> &
   Partial<Pick<ConvexReactClient, "connectionState" | "subscribeToConnectionState">>;
 
 /** Maps the SDK's typed auth failure to the signed-out state; anything else stays a transport error. */

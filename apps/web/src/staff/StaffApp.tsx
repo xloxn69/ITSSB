@@ -8,23 +8,12 @@ import type {
   ListDriversResult,
   ListRoutesResult,
 } from "@itssb/contracts";
-import { type ReactNode, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { DraftDiagram } from "./DraftDiagram";
+import { AttendancePage, AuditPage, EnrollmentPage, GuardianLinksPage, InvitationsPage, RunAttendancePage, StudentsPage } from "./EnrollmentPages";
 import { approvalBlocker, contactStatus, DIRECTION_LABEL, dateTime, sweepSummary } from "./format";
-import {
-  type CredentialOutcome,
-  credentialOutcome,
-  type MutationOutcome,
-  mutationOutcome,
-  type QueryState,
-  queryState,
-  type StaffActionName,
-  type StaffMutationName,
-  type StaffQueryName,
-  type StaffSource,
-} from "./source";
-
-type Ready<T> = Extract<T, { status: "ready" }>;
+import { type CredentialOutcome, credentialOutcome, type StaffActionName, type StaffSource } from "./source";
+import { Empty, Loaded, Outcome, type Ready, useMutation, useNow, useStaffQuery } from "./ui";
 
 /** Staff console (docs/12 §3–4). The server checks the staff role on every call. */
 export function StaffApp({ source }: { source: StaffSource }) {
@@ -37,6 +26,12 @@ export function StaffApp({ source }: { source: StaffSource }) {
     ["devices", "Buses & devices"],
     ["drivers", "Drivers"],
     ["diagnostics", "Diagnostics"],
+    ["enrollment", "Enrollment"],
+    ["guardians", "Guardian links"],
+    ["invitations", "Invitations"],
+    ["students", "Students"],
+    ["attendance", "Attendance"],
+    ["audit", "Audit"],
   ];
   return (
     <div className="stack">
@@ -53,6 +48,13 @@ export function StaffApp({ source }: { source: StaffSource }) {
       {page === "devices" && <DevicesPage source={source} />}
       {page === "drivers" && <DriversPage source={source} />}
       {page === "diagnostics" && <DiagnosticsPage source={source} />}
+      {page === "enrollment" && <EnrollmentPage source={source} />}
+      {page === "guardians" && <GuardianLinksPage source={source} />}
+      {page === "invitations" && <InvitationsPage source={source} />}
+      {page === "students" && <StudentsPage source={source} />}
+      {page === "attendance" && !parts[2] && <AttendancePage source={source} />}
+      {page === "attendance" && parts[2] && <RunAttendancePage source={source} runId={parts[2]} />}
+      {page === "audit" && <AuditPage source={source} />}
     </div>
   );
 }
@@ -65,68 +67,6 @@ function useHashRoute(): string {
     return () => window.removeEventListener("hashchange", onChange);
   }, []);
   return hash;
-}
-
-interface Received<T> {
-  state: QueryState<T>;
-  receivedAtWallMs: number;
-}
-
-function useStaffQuery<T>(source: StaffSource, name: StaffQueryName, args: Record<string, string> = {}): Received<T> {
-  const key = JSON.stringify(args);
-  const [received, setReceived] = useState<Received<T>>({ state: { kind: "loading" }, receivedAtWallMs: 0 });
-  useEffect(() => {
-    setReceived({ state: { kind: "loading" }, receivedAtWallMs: 0 });
-    return source.watch(
-      name,
-      JSON.parse(key) as Record<string, string>,
-      (raw) => setReceived({ state: queryState<T>(raw), receivedAtWallMs: Date.now() }),
-      () => setReceived({ state: { kind: "failed" }, receivedAtWallMs: Date.now() }),
-    );
-  }, [source, name, key]);
-  return received;
-}
-
-/** Renders the non-ready states the same way on every page. */
-function Loaded<T>({ state, children }: { state: QueryState<T>; children: (value: T) => ReactNode }) {
-  switch (state.kind) {
-    case "loading":
-      return (
-        <section className="card message" aria-busy>
-          <h2>Loading…</h2>
-        </section>
-      );
-    case "access_unavailable":
-      return state.reason === "unauthenticated" ? (
-        <Notice title="Signed out" detail="Sign in again with a staff account." />
-      ) : (
-        <Notice title="Staff access needed" detail="This account isn't a staff account. Ask an administrator for access." />
-      );
-    case "not_found":
-      return <Notice title="Not found" detail="It may have been removed, or the link is wrong." />;
-    case "failed":
-      return (
-        <Notice
-          title="Something went wrong"
-          detail="Couldn't load this from the server. Nothing shown here is assumed. Check your connection and reload."
-        />
-      );
-    case "ready":
-      return <>{children(state.value)}</>;
-  }
-}
-
-function Notice({ title, detail }: { title: string; detail: string }) {
-  return (
-    <section className="card message">
-      <h2>{title}</h2>
-      <p className="muted">{detail}</p>
-    </section>
-  );
-}
-
-function Empty({ text }: { text: string }) {
-  return <p className="muted">{text}</p>;
 }
 
 // MARK: Routes
@@ -224,39 +164,6 @@ function ReviewQueuePage({ source }: { source: StaffSource }) {
         }
       </Loaded>
     </section>
-  );
-}
-
-function useMutation(source: StaffSource) {
-  const [busy, setBusy] = useState(false);
-  const [outcome, setOutcome] = useState<MutationOutcome | null>(null);
-  async function run(name: StaffMutationName, args: Record<string, string>, done: string) {
-    setBusy(true);
-    setOutcome(null);
-    try {
-      setOutcome(mutationOutcome(await source.mutate(name, args), done));
-    } catch {
-      // The outcome is unknown, not failed: the server may have applied it.
-      setOutcome({ kind: "failed", message: "No answer from the server. Reload to see whether it was applied." });
-    } finally {
-      setBusy(false);
-    }
-  }
-  return { busy, outcome, run };
-}
-
-function Outcome({ outcome }: { outcome: MutationOutcome | null }) {
-  if (!outcome) return null;
-  const text =
-    outcome.kind === "access_unavailable"
-      ? outcome.reason === "unauthenticated"
-        ? "You're signed out. Sign in again with a staff account."
-        : "This account isn't a staff account."
-      : outcome.message;
-  return (
-    <p role="status" className={outcome.kind === "done" ? "" : "error-text"}>
-      {text}
-    </p>
   );
 }
 
@@ -453,15 +360,6 @@ function AddDevice({ source }: { source: StaffSource }) {
 }
 
 // MARK: Devices
-
-function useNow(): number {
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1_000);
-    return () => clearInterval(id);
-  }, []);
-  return now;
-}
 
 function DevicesPage({ source }: { source: StaffSource }) {
   const { state, receivedAtWallMs } = useStaffQuery<Ready<ListDevicesResult>>(source, "fleet:listDevices");
