@@ -129,3 +129,56 @@ def test_bad_config_exits_with_message_and_no_token(tmp_path):
     assert proc.returncode == 2
     assert "loopback" in proc.stderr
     assert "fake-secret-xyz" not in proc.stderr + proc.stdout
+
+
+def test_uploads_to_backend_and_reports_backend_down_separately(tmp_path, fake_gpsd):
+    from itssb_device.devtools.fake_backend import FakeBackend
+
+    gpsd = fake_gpsd("fix")
+    backend = FakeBackend(0, "fake-dev-token").start()
+    api_port = _free_port()
+    env = {
+        "ITSSB_DEVICE_API_ORIGIN": backend.origin,
+        "ITSSB_DEVICE_TOKEN": "fake-dev-token",
+        "ITSSB_UPLOAD_INTERVAL_SECONDS": "1",
+    }
+    fixture = subprocess.run(
+        [sys.executable, "-m", "itssb_device", "fixture-run", "start"],
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "ITSSB_ENV_FILE": str(tmp_path / "none.env"),
+            "ITSSB_DATABASE_PATH": str(tmp_path / "state" / "device.sqlite3"),
+        },
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=True,
+    )
+    assert "NOT server-issued" in fixture.stderr
+    proc = _spawn(tmp_path, gpsd.port, api_port, env)
+    try:
+        assert wait_until(
+            lambda: (_health(api_port) or {}).get("outbox", {}).get("acknowledged", 0) >= 1,
+            timeout=15,
+        )
+        snap = _health(api_port)
+        assert snap["backend"]["status"] == "ok"
+        assert snap["network"]["status"] == "online"
+
+        backend.mode = "down"
+        assert wait_until(lambda: _health(api_port)["backend"]["status"] == "error", timeout=15)
+        snap = _health(api_port)
+        assert snap["network"]["status"] == "online"  # network fine, backend failing
+        assert snap["gps"]["status"] == "valid"  # GPS unaffected
+        backend.mode = "ok"
+        assert wait_until(lambda: _health(api_port)["backend"]["status"] == "ok", timeout=30)
+        proc.send_signal(signal.SIGTERM)
+        proc.communicate(timeout=20)
+    finally:
+        proc.kill()
+        backend.stop()
+    assert proc.returncode == 0
+    db = Database(tmp_path / "state" / "device.sqlite3")
+    acked = {r["eventId"] for r in db.list_outbox(1000) if r["status"] == "acknowledged"}
+    db.close()
+    assert acked and acked <= set(backend.events)  # acknowledged only what the server holds

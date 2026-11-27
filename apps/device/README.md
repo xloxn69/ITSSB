@@ -13,13 +13,30 @@ Python service that runs on the bus Raspberry Pi. Spec:
 | `recorder.py` | During an active run, saves one fresh, new fix per publish interval (never re-saves an old one) |
 | `database.py` | SQLite (WAL, `synchronous=FULL`) with migrations; observation + outbox row in one transaction |
 | `sync.py` | Applies per-event upload results (`accepted`/`duplicate`/`rejected`/`retryable`) with capped backoff |
+| `uploader.py` | `POST /device/v1/telemetry`: bounded batches (50 events / 128 KiB), verified TLS, timeouts, per-event results, backoff + jitter, 401/403/413/429 handling, TCP network probe |
+| `trips.py` | Online run start flow behind a `RunStarter` interface; ships a stub because the backend has no `/device/v1/trip-events` yet |
 | `status.py` | Thread-safe health snapshot: GPS, network, backend, outbox, run kept separate |
 | `api.py` | Local API on `127.0.0.1:8765`: `GET /health` (JSON) and `GET /` (status page) |
 | `service.py` | One process, one writer per thread, SIGTERM/SIGINT clean shutdown, bounded logs |
 | `devtools/fake_gpsd.py` | Fake GPSD with **fictional** data for tests and indoor demos |
+| `devtools/fake_backend.py` | Local fake of the telemetry endpoint with outage modes (`down`, `drop_response`, `partial`, ...) |
 
-Still to build (see [roadmap](../../docs/15_BUILD_ROADMAP.md)): HTTP uploader,
-online run start, systemd unit.
+Still to build (see [roadmap](../../docs/15_BUILD_ROADMAP.md)): the HTTP
+`RunStarter` (needs the backend's trip-events endpoint), systemd unit.
+
+## Commands
+
+```sh
+uv run itssb-device run                       # the service (default)
+uv run itssb-device watch                     # print GPSD fixes
+uv run itssb-device outbox                    # outbox rows: eventId, status, attempts (no coordinates)
+uv run itssb-device fixture-run start         # DEV ONLY: fictional local run "demo_run_001"
+uv run itssb-device fixture-run end
+```
+
+`fixture-run` stands in for online start until the backend supports it. The
+run it creates is not server-issued, so a real backend rejects its telemetry
+(`RUN_NOT_AUTHORIZED`). Use it with `devtools/fake_backend.py`.
 
 ## Develop
 
