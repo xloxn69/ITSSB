@@ -841,3 +841,23 @@ def test_a_correction_targets_the_newest_record_from_any_source(tmp_path, pin_ha
     env.tick()
     sent = json.loads(backend.action_bodies[request_id][-1])
     assert sent["correctsCheckInId"] == "fake_check_in_staff"
+
+
+def test_replaying_another_routes_request_id_reveals_nothing(tmp_path, pin_hash, backend):
+    backend.grants[OTHER_GRANT] = {OTHER_ROUTE}
+    backend.roster_students[OTHER_ROUTE] = []
+    env = Env(tmp_path, pin_hash, backend)
+    env.roster()
+    request_id = rid()
+    intent = {"type": "recordAttendance", "assignmentId": "demo_assignment_002", "status": "boarded"}
+    assert env.action(requestId=request_id, **intent)[0] == 200
+    env.tick()
+    assert env.post(f"/api/runs/{env.run_id}/end", {"requestId": rid()})[1]["endSync"] == "accepted"
+    env.post("/api/session/lock")
+    env.post("/api/session/unlock", {"driverId": "drv_other", "pin": PIN})
+    env.post("/api/motion/parked")
+    code, body = env.post("/api/runs/start", {"requestId": rid(), "routeVersionId": OTHER_ROUTE})
+    assert code == 200, body
+    code, body = env.action(requestId=request_id, **intent)  # driver A's change, replayed
+    assert (code, body["error"]) == (409, "REQUEST_ID_CONFLICT")
+    assert "Example" not in env.last_raw.decode()
