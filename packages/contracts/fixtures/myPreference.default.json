@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "status": "ready",
+  "serverNowMs": 1795609085500,
+  "preference": {
+    "assignmentId": "demo_assignment_001",
+    "approachingEnabled": false,
+    "approachingMinutes": 5,
+    "updatedAtMs": null
+  }
+}

@@ -58,7 +58,7 @@ These files are a plan to implement, not files already supplied by this document
 | `convex/routes.ts` | Drafts, versions, stops, approval, publication. |
 | `convex/enrollment.ts` | Invitations, private details, stop requests, approvals. |
 | `convex/checkIns.ts` | Student claims, staff records, corrections. |
-| `convex/notifications.ts` | Preferences, push-token associations, outbox. |
+| `convex/notifications.ts`, `convex/notificationJobs.ts`, `convex/pushDelivery.ts`, `convex/lib/alertRules.ts`, `convex/lib/apns.ts` | Preferences, push-token associations, inbox; the alert rule (run inside telemetry ingest); outbox claim/record/sweep; the Node APNs sender behind `lib/push.ts`. |
 | `convex/lib/routeProgress.ts`, `convex/lib/eta.ts`, `convex/lib/progressStore.ts` | Route progress, the baseline estimate, and stored predictions, updated inside telemetry ingest. Later model integration goes behind the same seam. |
 | `convex/audit.ts` | Append-only records of sensitive application decisions. |
 | `convex/lib/authorization.ts` | Reusable organization/role/relationship checks. |
@@ -90,7 +90,7 @@ Every protected record must be traceable to its organization. A route number suc
 | `liveRunState` | Latest valid position, health, progress, current prediction, monotonic revision. |
 | `checkIns` | Student/run/phase, source, result, correction history reference. |
 | `invitations`, `checkInChallenges` | Purpose-bound temporary tokens, scope, expiration, revocation. |
-| `alerts`, `notificationJobs`, `pushTokens` | Logical alert, delivery attempts, permitted recipient devices. |
+| `notificationPreferences`, `alerts`, `notificationJobs`, `pushTokens` | Per-person alert choice; logical alert (unique by recipient, run, stop, type) and inbox entry; outbox job per alert and token with lease, attempts, and expiry; the installation's token, permission, and active flag. |
 | `requestReceipts`, `auditEvents` | Idempotency results and sensitive change history. |
 | `runProgress`, `etaPredictions` | Per-run distance along the approved path with GPS-inferred stop arrivals and departures; every estimate as it was made, for evaluation. `modelVersions` (activation status) comes with learned models. |
 

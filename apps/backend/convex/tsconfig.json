@@ -1,11 +1,21 @@
 {
   "extends": "../../../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ES2023", "DOM"],
+    "lib": [
+      "ES2023",
+      "DOM"
+    ],
     "allowJs": true,
     "exactOptionalPropertyTypes": false,
-    "types": ["vite/client"]
+    "types": [
+      "vite/client",
+      "node"
+    ]
   },
-  "include": ["./**/*"],
-  "exclude": ["./_generated"]
+  "include": [
+    "./**/*"
+  ],
+  "exclude": [
+    "./_generated"
+  ]
 }

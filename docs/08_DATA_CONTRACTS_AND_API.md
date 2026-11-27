@@ -385,8 +385,6 @@ Age is `now - capturedAtMs`, measured on a server-aligned clock. A query result 
 | --- | --- | --- |
 | `enrollment:request` | `requestId`, invitation token, private profile/address, selected eligible `stopId` | Pending/approved request; server verifies stop eligibility and invitation scope. |
 | `checkIns:record` | `requestId`, challenge token, `runId` | Accepted/already-recorded/rejected; student identity derived from session. |
-| `notifications:setPreferences` | `requestId`, permitted assignment/student context, thresholds and enabled types | Validated preferences for that account only. |
-| `notifications:registerDevice` | Installation identity, APNs token, app environment, permission status | Associate current token with the signed-in account. |
 | `routes:removeAssignment` | `requestId`, assignment, reason, authorized driver/admin context | Scoped revocation and audit record; not global account deletion. |
 
 ### 9.1 Enrollment and guardian linking (implemented)
@@ -447,6 +445,21 @@ The first record for a student, run and `boarding` phase is the logical record; 
 A rejected action is final, and the Pi shows it; a removal is not in effect until it is `accepted`. Request-level failures use §5: `400` (`INVALID_REQUEST`, `MALFORMED_JSON`, `UNSUPPORTED_SCHEMA_VERSION`), `401` `UNAUTHENTICATED`, `403` (`GRANT_NOT_AUTHORIZED`, `RUN_NOT_AUTHORIZED`), and `413` above 8 KiB.
 
 **Not proved.** A check-in records that an account presented a valid challenge, or that staff recorded an action. It does not prove that a particular child boarded (docs/09 §7).
+
+### 9.3 Notifications (implemented)
+
+Types live in `packages/contracts/src/notifications.ts`; fixtures are `myPreference.*`, `setPreferences.saved`, `registerDevice.registered`, and `myAlerts.*`. The account is always the signed-in caller, and an assignment is usable only through the same relationship check as `tracking:myRun`. The Pi never sends or reads any of these.
+
+| Function | Args | Returns |
+| --- | --- | --- |
+| `notifications:myPreference` (query) | `{ assignmentId }` | `ready` with `preference` (`assignmentId`, `approachingEnabled`, `approachingMinutes`, `updatedAtMs` or `null` for defaults), or `access_unavailable`. Defaults: off, 5 minutes. |
+| `notifications:setPreferences` (mutation) | `{ requestId, assignmentId, approachingEnabled, approachingMinutes }` | `saved` with the stored `preference`; `invalid` (non-UUID `requestId`, minutes not a whole number in `APPROACHING_MINUTES_MIN`–`MAX`, 1–30); or `access_unavailable`. A retry of any of the last 20 `requestId`s returns the stored row unchanged, so a delayed retry never reverses a newer choice. Per person and assignment: a guardian's choice never changes the student's. |
+| `notifications:registerDevice` (mutation) | `{ installationId, apnsToken, environment: "sandbox" \| "production", permission: "authorized" \| "provisional" \| "denied" \| "not_determined" }` | `registered` with `pushEnabled` (a token and an allowing permission), `invalid` (non-UUID installation, non-hex token), or `access_unavailable`. `apnsToken` is `null` when the app has none. One installation has one current row; signing in as another account on the same installation stops the previous account's pushes. A token already active for another account's installation is refused (`invalid`), never taken over; the same account may move it to a new installation (a reinstall). Permission is recorded separately from preferences. |
+| `notifications:myAlerts` (query) | `{}` | `ready` with up to 50 `alerts`, newest first, each `alertId`, `type: "approaching"`, `assignmentId`, `runId`, `stopLabel`, `createdAtMs`, `predictedArrivalAtMs`, `predictionGeneratedAtMs`; or `access_unavailable`. Alerts for assignments the caller can no longer track are omitted. |
+
+Push payloads carry no student, stop, or route details: the Lock Screen text is generic and the payload holds only `itssb.type` and the opaque `itssb.assignmentId`. A tapped notification opens that assignment and fetches current state; it never shows the payload as current.
+
+Provisional constants (docs/17 "Freshness and alert thresholds"): `ALERT_MAX_INPUT_AGE_MS = 30000` (an alert is created only from a position younger than this), `MAX_DELIVERY_ATTEMPTS = 5`.
 
 Private enrollment fields belong only in authenticated submissions and appropriately restricted storage. Treat a scanned link as untrusted input: allow expected scheme/host/path and a bounded token, then ask the backend to validate purpose, expiration, revocation, route, and account eligibility.
 

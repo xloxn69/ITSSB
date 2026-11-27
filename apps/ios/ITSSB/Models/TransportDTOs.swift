@@ -160,7 +160,8 @@ struct RoutePointDTO: Decodable {
 
 // MARK: Envelope discriminator
 
-private enum WireStatus {
+/// Shared by every DTO file (tracking and notifications).
+enum WireStatus {
     enum Key: String, CodingKey { case status }
 
     static func decode(from decoder: Decoder) throws -> String {

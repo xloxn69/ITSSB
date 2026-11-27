@@ -1,5 +1,7 @@
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
+import { internal } from "../_generated/api";
+import { alertable, type StopEstimate } from "./alertRules";
 import { BASELINE_V1, predictArrival } from "./eta";
 import { advance, type Fix, initialProgress, type PreparedRoute, prepareRoute, type ProgressState } from "./routeProgress";
 
@@ -95,9 +97,11 @@ export class ProgressTracker {
       if (row) await this.ctx.db.replace(row._id, fields);
       else await this.ctx.db.insert("runProgress", fields);
 
+      const estimates: StopEstimate[] = [];
       for (const stop of route.stops) {
         const p = predictArrival(route, state, stop.stopId, BASELINE_V1, last.capturedAtMs);
         if (!p) continue;
+        estimates.push({ stopId: stop.stopId, ...p, generatedAtMs: nowMs });
         await this.ctx.db.insert("etaPredictions", {
           runId: run._id,
           routeVersionId: run.routeVersionId,
@@ -109,6 +113,17 @@ export class ProgressTracker {
           arrivalAtMs: p.arrivalAtMs,
           validUntilMs: p.validUntilMs,
           algorithmVersion: BASELINE_V1.algorithmVersion,
+        });
+      }
+      // Alerts are evaluated after this transaction, never inside it.
+      if (run.state === "active" && alertable(last, estimates, nowMs).length > 0) {
+        await this.ctx.scheduler.runAfter(0, internal.alerts.evaluate, {
+          runId: run._id,
+          sourceEventId: last.eventId,
+          sourceCapturedAtMs: last.capturedAtMs,
+          estimates,
+          nowMs,
+          cursor: null,
         });
       }
     }

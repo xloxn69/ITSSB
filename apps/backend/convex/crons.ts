@@ -8,4 +8,8 @@ const crons = cronJobs();
 // fictional pilot's time zone; the sweep never touches an active run anyway.
 crons.daily("raw GPS retention", { hourUTC: 8, minuteUTC: 0 }, internal.retention.sweep, {});
 
+// Recovery for the notification outbox (docs/10 §10): reclaim expired
+// leases and due retries, expire stale jobs, never resend finished ones.
+crons.interval("notification outbox sweep", { minutes: 1 }, internal.notificationJobs.sweep, {});
+
 export default crons;
