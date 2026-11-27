@@ -9,7 +9,13 @@ import { serviceAnswering } from "./snapshot.js";
  */
 export type ScreenId =
   | "D01" // startup and self-check
+  | "D04" // driver unlock
   | "D05" // driver dashboard
+  | "D06" // route library (drafts on this device)
+  | "D07" // record a new route
+  | "D08" // recording a route
+  | "D09" // add or edit a stop
+  | "D10" // review recorded route
   | "D13" // driving view (read-only)
   | "D21" // GPS and device diagnostics
   | "D22"; // offline bus operation
@@ -31,7 +37,11 @@ export interface Availability {
 }
 
 /** Screens that stay reachable while the bus may be moving: short and read-only. */
-const MOVING_ALLOWED: ReadonlySet<ScreenId> = new Set(["D13", "D22"]);
+const MOVING_ALLOWED: ReadonlySet<ScreenId> = new Set(["D08", "D13", "D22"]);
+/** Screens that need an unlocked driver. */
+const NEEDS_DRIVER: ReadonlySet<ScreenId> = new Set(["D06", "D07", "D08", "D09", "D10"]);
+/** Screens that change a draft: parked only. D08 itself is fine while moving (read-only). */
+const NEEDS_PARKED: ReadonlySet<ScreenId> = new Set(["D07", "D09"]);
 
 export function runActive(o: Observed): boolean {
   return o.snapshot?.run?.state === "active";
@@ -42,13 +52,36 @@ export function parked(o: Observed): boolean {
   return serviceAnswering(o) && o.snapshot?.motion?.parked === true;
 }
 
+export function recordingActive(o: Observed): boolean {
+  return o.snapshot?.recording?.status === "recording";
+}
+
+export function driverUnlocked(o: Observed): boolean {
+  return o.snapshot?.session?.unlocked === true;
+}
+
 export function selectScreen(o: Observed, requested: ScreenId | null): ScreenId {
   if (!serviceAnswering(o)) return "D01";
   if (runActive(o) && !parked(o)) {
-    return requested !== null && MOVING_ALLOWED.has(requested) ? requested : "D13";
+    return requested !== null && MOVING_ALLOWED.has(requested) && requested !== "D08" ? requested : "D13";
+  }
+  if (recordingActive(o) && !parked(o)) {
+    // Recording keeps sampling while driving; the view is read-only.
+    return requested === "D22" ? "D22" : "D08";
   }
   if (requested === null || requested === "D01" || requested === "D13") return "D05";
+  if (NEEDS_DRIVER.has(requested) && !driverUnlocked(o)) return "D04";
+  if (NEEDS_PARKED.has(requested) && !parked(o)) return recordingActive(o) ? "D08" : "D05";
+  if (requested === "D07" && recordingActive(o)) return "D08";
   return requested;
+}
+
+/** Why a draft-changing control is unavailable right now, or null if it can be used. */
+export function editBlocked(o: Observed): string | null {
+  if (!serviceAnswering(o)) return "The device service is not answering.";
+  if (!driverUnlocked(o)) return "Unlock with your driver PIN first.";
+  if (!parked(o)) return "Stop safely and confirm the bus is parked.";
+  return null;
 }
 
 const UNSUPPORTED = "This device software does not support it yet.";
@@ -75,6 +108,8 @@ export function actionAvailability(o: Observed, id: ActionId): Availability {
   if (id === "startRoute" && active) return { enabled: false, reason: "A run is already active." };
   if (id === "recordRoute" && active) return { enabled: false, reason: "End the active run before recording a route." };
   if (s.session?.unlocked !== true) return { enabled: false, reason: "Unlock with your driver PIN first." };
+  // A recording in progress can be reopened without parking: its view is read-only while moving.
+  if (id === "recordRoute" && recordingActive(o)) return { enabled: true, reason: null };
   if (!parked(o)) return { enabled: false, reason: "Stop safely and confirm the bus is parked." };
   return { enabled: true, reason: null };
 }
