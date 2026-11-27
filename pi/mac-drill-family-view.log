@@ -1,0 +1,19 @@
+[] 02:08:48 status= ready gpsStatus= None contactAge= None s positionAge= None s
+[1 baseline: link up, GPS fix] 02:09:05 status= ready gpsStatus= None contactAge= 1 s positionAge= 3 s
+[1 baseline: link up, GPS fix] 02:09:23 status= ready gpsStatus= valid contactAge= 1 s positionAge= 2 s
+[2 D07 link DOWN, GPS still valid] 02:09:40 status= ready gpsStatus= valid contactAge= 12 s positionAge= 14 s
+[2 D07 link DOWN, GPS still valid] 02:09:57 status= ready gpsStatus= valid contactAge= 29 s positionAge= 31 s
+[2 D07 link DOWN, GPS still valid] 02:10:14 status= ready gpsStatus= valid contactAge= 29 s positionAge= 31 s
+[2 D07 link DOWN, GPS still valid] 02:10:31 status= ready gpsStatus= valid contactAge= 63 s positionAge= 65 s
+[2 D07 link DOWN, GPS still valid] 02:10:49 status= ready gpsStatus= valid contactAge= 81 s positionAge= 82 s
+[3 D08 link RESTORED with a backlog] 02:11:06 status= ready gpsStatus= valid contactAge= 1 s positionAge= 3 s
+[4 D09 GPS LOST (receiver connected, no fix), lin] 02:11:22 status= ready gpsStatus= None contactAge= 15 s positionAge= 18 s
+[4 D09 GPS LOST (receiver connected, no fix), lin] 02:11:39 status= ready gpsStatus= no_fix contactAge= 16 s positionAge= 34 s
+[4 D09 GPS LOST (receiver connected, no fix), lin] 02:11:55 status= ready gpsStatus= no_fix contactAge= 2 s positionAge= 50 s
+[5 GPS back] 02:12:11 status= ready gpsStatus= None contactAge= 1 s positionAge= 4 s
+[5 GPS back] 02:12:26 status= ready gpsStatus= valid contactAge= 0 s positionAge= 1 s
+[6 D05 link DOWN, then kill -9 mid-run] 02:12:42 status= ready gpsStatus= valid contactAge= 5 s positionAge= 7 s
+[6 D05 link DOWN, then kill -9 mid-run] 02:12:58 status= ready gpsStatus= valid contactAge= 5 s positionAge= 7 s
+[6 D05 link DOWN, then kill -9 mid-run] 02:13:14 status= ready gpsStatus= valid contactAge= 37 s positionAge= 39 s
+[7 link RESTORED; GPS stopped; drain] 02:13:30 status= ready gpsStatus= valid contactAge= 0 s positionAge= 2 s
+[7 link RESTORED; GPS stopped; drain] 02:13:46 status= ready gpsStatus= valid contactAge= 1 s positionAge= 4 s
