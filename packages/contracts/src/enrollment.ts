@@ -74,17 +74,12 @@ export function parseScannedToken(
   const trimmed = text.trim();
   const bare = normalizeToken(trimmed);
   if (bare) return bare;
-  let url: URL;
-  try {
-    url = new URL(trimmed);
-  } catch {
-    return null;
-  }
-  if (url.protocol !== "https:" || !allowedHosts.includes(url.host)) return null;
-  if (url.pathname !== TOKEN_LINK_PATHS[purpose]) return null;
-  const keys = [...url.searchParams.keys()];
-  if (keys.length !== 1 || keys[0] !== "token") return null;
-  return normalizeToken(url.searchParams.get("token") ?? "");
+  // Strict shape: https://<host><path>?token=<code>, nothing else.
+  const match = /^https:\/\/([A-Za-z0-9.-]+(?::\d+)?)(\/[A-Za-z0-9/_-]*)\?token=([A-Za-z0-9-]{1,64})$/.exec(trimmed);
+  if (!match) return null;
+  const [, host = "", path = "", token = ""] = match;
+  if (!allowedHosts.includes(host.toLowerCase()) || path !== TOKEN_LINK_PATHS[purpose]) return null;
+  return normalizeToken(token);
 }
 
 /** Why a token was not accepted. Unknown and revoked are deliberately the same. */

@@ -247,7 +247,8 @@ export default defineSchema({
     revokeReason: v.optional(v.string()),
   })
     .index("by_guardian", ["guardianUserId"])
-    .index("by_guardian_student", ["guardianUserId", "studentId"]),
+    .index("by_guardian_student", ["guardianUserId", "studentId"])
+    .index("by_student", ["studentId"]),
 
   /**
    * A scoped opaque token (docs/09 §2–§3): a route enrollment invitation, a
@@ -334,6 +335,8 @@ export default defineSchema({
       v.object({ kind: v.literal("user"), userId: v.id("users") }),
       v.object({ kind: v.literal("device"), deviceId: v.id("devices") }),
       v.object({ kind: v.literal("system") }),
+      /** A signed-in applicant who has no approved `users` row yet. */
+      v.object({ kind: v.literal("identity"), tokenIdentifier: v.string() }),
     ),
     action: v.string(),
     resourceType: v.string(),

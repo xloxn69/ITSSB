@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "status": "ready",
+  "serverNowMs": 1795608000000,
+  "requests": [
+    {
+      "enrollmentRequestId": "demo_enrollment_request_001",
+      "routeLabel": "Route 17 Morning",
+      "direction": "to_school",
+      "studentName": "Alex Fictional",
+      "requestedStopLabel": "Oak & Pine",
+      "status": "pending",
+      "submittedAtMs": 1795607000000,
+      "decidedAtMs": null,
+      "decisionReason": null
+    },
+    {
+      "enrollmentRequestId": "demo_enrollment_request_002",
+      "routeLabel": "Route 4 Afternoon",
+      "direction": "from_school",
+      "studentName": "Alex Fictional",
+      "requestedStopLabel": null,
+      "status": "rejected",
+      "submittedAtMs": 1795600000000,
+      "decidedAtMs": 1795604000000,
+      "decisionReason": "Outside the service area"
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "status": "ready",
+  "serverNowMs": 1795608000000,
+  "routeLabel": "Route 17 Morning",
+  "direction": "to_school",
+  "expiresAtMs": 1795694400000,
+  "stops": [
+    {
+      "stopId": "demo_stop_001",
+      "label": "Oak & Pine",
+      "sequence": 0,
+      "instructions": "North corner"
+    },
+    {
+      "stopId": "demo_stop_002",
+      "label": "Maple Court",
+      "sequence": 1,
+      "instructions": null
+    }
+  ]
+}

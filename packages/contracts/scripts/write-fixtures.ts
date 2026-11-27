@@ -2,10 +2,12 @@
 // tests. Run with `bun run fixtures`; src/trackingFixtures.test.ts fails if the
 // JSON and the typed TypeScript values ever disagree.
 import { trackingFixtureFiles } from "../src/trackingFixtures.ts";
+import { enrollmentFixtureFiles } from "../src/enrollmentFixtures.ts";
 import { healthFixtureFiles } from "../src/healthFixtures.ts";
 import { tripEventFixtureFiles } from "../src/tripEventFixtures.ts";
 
-const files = { ...trackingFixtureFiles, ...tripEventFixtureFiles, ...healthFixtureFiles };
+const files = { ...trackingFixtureFiles, ...tripEventFixtureFiles, ...healthFixtureFiles, ...enrollmentFixtureFiles };
+
 for (const [name, value] of Object.entries(files)) {
   await Bun.write(new URL(`../fixtures/${name}.json`, import.meta.url), `${JSON.stringify(value, null, 2)}\n`);
 }

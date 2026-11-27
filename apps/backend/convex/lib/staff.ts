@@ -1,6 +1,6 @@
 import { type AccessUnavailable, type AccessUnavailableReason, SCHEMA_VERSION } from "@itssb/contracts";
 import { v } from "convex/values";
-import type { Doc } from "../_generated/dataModel";
+import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { getUser, missingUserReason } from "./authz";
 
@@ -43,14 +43,45 @@ export async function audit(
   resourceType: string,
   resourceId: string | undefined,
   result: "allowed" | "denied",
+  extra: AuditExtra = {},
 ) {
   if (!user) return; // An anonymous caller has no actor to record.
+  await insertAudit(ctx, { kind: "user", userId: user._id }, action, resourceType, resourceId, result, extra);
+}
+
+export type AuditExtra = {
+  /** Why: a removal, rejection, or correction reason. Never a token or an address. */
+  reason?: string;
+  source?: "staff_web" | "family_app" | "driver_device";
+  viaDeviceId?: Id<"devices">;
+  capturedAtMs?: number;
+};
+
+export type AuditActor =
+  | { kind: "user"; userId: Id<"users"> }
+  | { kind: "device"; deviceId: Id<"devices"> }
+  | { kind: "system" }
+  | { kind: "identity"; tokenIdentifier: string };
+
+export async function insertAudit(
+  ctx: MutationCtx,
+  actor: AuditActor,
+  action: string,
+  resourceType: string,
+  resourceId: string | undefined,
+  result: "allowed" | "denied",
+  extra: AuditExtra = {},
+) {
   await ctx.db.insert("auditLog", {
-    actor: { kind: "user", userId: user._id },
+    actor,
     action,
     resourceType,
     ...(resourceId ? { resourceId } : {}),
     result,
     atMs: Date.now(),
+    ...(extra.reason !== undefined ? { reason: extra.reason } : {}),
+    ...(extra.source ? { source: extra.source } : {}),
+    ...(extra.viaDeviceId ? { viaDeviceId: extra.viaDeviceId } : {}),
+    ...(extra.capturedAtMs !== undefined ? { capturedAtMs: extra.capturedAtMs } : {}),
   });
 }
