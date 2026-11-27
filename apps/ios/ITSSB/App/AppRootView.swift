@@ -84,7 +84,7 @@ struct SignedInTabs: View {
         .tint(AppColors.brand)
         // A tapped notification opens Track for its assignment, with current state.
         .onChange(of: router.requestedAssignmentId) { _, id in if id != nil { tab = .track } }
-        .task { await registrar?.refresh() }
+        .task { await registrar?.activate() }
         // Returning from Settings may have changed the permission: re-read and re-register.
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await registrar?.refresh() } }

@@ -59,8 +59,11 @@ final class PushRegistrar {
     @ObservationIgnored private let authorizing: any PushAuthorizing
     @ObservationIgnored private let environment: PushEnvironment
     @ObservationIgnored private let registerForRemoteNotifications: @MainActor () -> Void
-    /// True between a signed-in `refresh` and `deactivate`; late token callbacks are ignored otherwise.
-    @ObservationIgnored private var signedIn = false
+    /// True between `activate` (on sign-in) and `deactivate` (before sign-out).
+    /// Nothing is sent to the server outside that window.
+    @ObservationIgnored private var active = false
+    /// Bumped by `deactivate`; work that started before it is dropped when it resumes.
+    @ObservationIgnored private var epoch = 0
 
     init(source: any NotificationSource, authorizing: any PushAuthorizing,
          ids: any InstallationIdStoring = KeychainInstallationIdStore(),
@@ -77,24 +80,34 @@ final class PushRegistrar {
         }
     }
 
-    /// Reads the current permission, asks APNs for a token when allowed, and tells the server.
-    /// Called only while signed in.
+    /// On sign-in only: opens the registration window, then refreshes.
+    func activate() async {
+        active = true
+        await refresh()
+    }
+
+    /// Reads the current permission, asks APNs for a token when allowed, and tells
+    /// the server. Does nothing unless signed in (`activate`), and drops its result
+    /// if sign-out began while it waited.
     func refresh() async {
-        signedIn = true
-        permission = await authorizing.currentPermission()
+        guard active else { return }
+        let started = epoch
+        let current = await authorizing.currentPermission()
+        guard active, started == epoch else { return }
+        permission = current
         if permission.allowsAlerts { registerForRemoteNotifications() }
         await sync()
     }
 
-    /// Asks the person, from an explicit tap, never on launch.
     /// Before sign-out, while still authenticated: this phone stops receiving
     /// the account's pushes, and later token callbacks are not sent.
     func deactivate() async {
-        guard signedIn else { return }
+        guard active else { return }
         // Fence first: a token callback or refresh arriving while this awaits
         // must not register again. Mutations from one client run in order, so
         // anything already sent lands before this one.
-        signedIn = false
+        active = false
+        epoch += 1
         pushEnabled = false
         do {
             _ = try await source.registerDevice(installationId: installationId, token: nil,
@@ -104,8 +117,13 @@ final class PushRegistrar {
         }
     }
 
+    /// Asks the person, from an explicit tap, never on launch.
     func requestPermission() async {
-        permission = await authorizing.requestPermission()
+        guard active else { return }
+        let started = epoch
+        let current = await authorizing.requestPermission()
+        guard active, started == epoch else { return }
+        permission = current
         if permission.allowsAlerts { registerForRemoteNotifications() }
         await sync()
     }
@@ -121,12 +139,15 @@ final class PushRegistrar {
     }
 
     private func sync() async {
-        guard signedIn else { return }
+        guard active else { return }
+        let started = epoch
         do {
-            pushEnabled = try await source.registerDevice(
+            let enabled = try await source.registerDevice(
                 installationId: installationId,
                 token: permission.allowsAlerts ? token : nil,
                 environment: environment, permission: permission)
+            // A sign-out that began meanwhile already turned this off.
+            if started == epoch { pushEnabled = enabled }
             registrationFailed = false
         } catch {
             registrationFailed = true

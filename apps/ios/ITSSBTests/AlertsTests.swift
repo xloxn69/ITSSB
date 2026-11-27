@@ -58,6 +58,22 @@ private final class SuspendingSource: NotificationSource, @unchecked Sendable {
     }
 }
 
+/// Holds `currentPermission` open until released, like a slow system call.
+@MainActor
+private final class HeldPermission: PushAuthorizing, @unchecked Sendable {
+    var held: CheckedContinuation<Void, Never>?
+    var holdNext = false
+    func release() { held?.resume(); held = nil }
+    func currentPermission() async -> PushPermission {
+        if holdNext {
+            holdNext = false
+            await withCheckedContinuation { held = $0 }
+        }
+        return .authorized
+    }
+    func requestPermission() async -> PushPermission { .authorized }
+}
+
 private struct FixedPermission: PushAuthorizing {
     let value: PushPermission
     func currentPermission() async -> PushPermission { value }
@@ -98,7 +114,7 @@ final class AlertsTests: XCTestCase {
         var asked = 0
         let registrar = PushRegistrar(source: source, authorizing: FixedPermission(value: .denied),
                                       ids: defaults(), environment: .sandbox) { asked += 1 }
-        await registrar.refresh()
+        await registrar.activate()
         await registrar.didRegister(deviceToken: Data([1, 2]))
         XCTAssertEqual(asked, 0)
         XCTAssertEqual(source.registrations.last?.token, nil)
@@ -111,7 +127,7 @@ final class AlertsTests: XCTestCase {
         let store = defaults()
         let registrar = PushRegistrar(source: source, authorizing: FixedPermission(value: .authorized),
                                       ids: store, environment: .sandbox) {}
-        await registrar.refresh()
+        await registrar.activate()
         await registrar.didRegister(deviceToken: Data([0xab, 0xcd]))
         XCTAssertEqual(source.registrations.last?.token, "abcd")
         XCTAssertTrue(registrar.pushEnabled)
@@ -142,7 +158,7 @@ final class AlertsTests: XCTestCase {
         let source = RecordingNotificationSource()
         let registrar = PushRegistrar(source: source, authorizing: FixedPermission(value: .authorized),
                                       ids: defaults(), environment: .sandbox) {}
-        await registrar.refresh()
+        await registrar.activate()
         await registrar.didRegister(deviceToken: Data([0xab]))
         XCTAssertEqual(source.registrations.last?.token, "ab")
         await registrar.deactivate()
@@ -157,7 +173,7 @@ final class AlertsTests: XCTestCase {
         let source = SuspendingSource()
         let registrar = PushRegistrar(source: source, authorizing: FixedPermission(value: .authorized),
                                       ids: defaults(), environment: .sandbox) {}
-        await registrar.refresh()
+        await registrar.activate()
         source.suspendNext = true
         let deactivation = Task { await registrar.deactivate() }
         _ = await eventuallyTrue { source.suspended != nil }
@@ -165,6 +181,24 @@ final class AlertsTests: XCTestCase {
         source.resume()
         await deactivation.value
         XCTAssertEqual(source.tokens, [nil, nil])
+    }
+
+    func testARefreshRacingSignOutNeverRegistersAgain() async {
+        let source = SuspendingSource()
+        let permission = HeldPermission()
+        let registrar = PushRegistrar(source: source, authorizing: permission, ids: defaults(),
+                                      environment: .sandbox) {}
+        await registrar.activate()
+        await registrar.didRegister(deviceToken: Data([0xab]))
+        permission.holdNext = true
+        let refresh = Task { await registrar.refresh() } // e.g. returning to the foreground
+        _ = await eventuallyTrue { permission.held != nil }
+        await registrar.deactivate()
+        permission.release()
+        await refresh.value
+        await registrar.refresh() // a later refresh while signed out
+        XCTAssertEqual(source.tokens.last, .some(nil))
+        XCTAssertFalse(registrar.pushEnabled)
     }
 
     func testNotificationTapCarriesOnlyTheAssignment() {
