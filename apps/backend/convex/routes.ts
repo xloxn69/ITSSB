@@ -60,6 +60,7 @@ const refused = v.object({
     v.literal("already_decided"),
     v.literal("blocking_checks"),
     v.literal("route_has_assignments"),
+    v.literal("direction_mismatch"),
     v.literal("reason_required"),
   ),
   message: v.string(),
@@ -304,6 +305,12 @@ export const approveDraft = mutation({
     if (draft.routeId) {
       const route = await ctx.db.get(draft.routeId);
       if (!route) return refuse("not_found", "The route this draft revises no longer exists.");
+      if (route.direction !== draft.direction) {
+        return refuse(
+          "direction_mismatch",
+          "This revision runs in the other direction from its route. Record it as a new route instead.",
+        );
+      }
       if (route.currentVersionId) {
         if (await hasApprovedAssignments(ctx, route.currentVersionId)) {
           return refuse(

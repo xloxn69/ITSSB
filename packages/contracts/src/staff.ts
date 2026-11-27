@@ -114,6 +114,8 @@ export const REVIEW_REFUSAL_CODES = [
    * families without a visible trip, so it is refused.
    */
   "route_has_assignments",
+  /** A revision's direction differs from its route's; record it as a new route instead. */
+  "direction_mismatch",
   /** Reject needs a reason. */
   "reason_required",
 ] as const;

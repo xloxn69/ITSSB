@@ -1,4 +1,5 @@
 import { MAX_ROUTE_PATH_POINTS } from "@itssb/contracts";
+import { demoTelemetryEvent } from "@itssb/contracts/fixtures";
 import { convexTest } from "convex-test";
 import { describe, expect, it } from "vitest";
 import { api, internal } from "./_generated/api";
@@ -224,6 +225,26 @@ describe("route review and approval", () => {
     expect(next).toBe(v1.routeVersionId);
   });
 
+  it("refuses a revision in the other direction from its route", async () => {
+    const { t, draftId } = await setup();
+    const staff = t.withIdentity({ tokenIdentifier: STAFF });
+    const v1 = await staff.mutation(api.routes.approveDraft, { draftId });
+    if (v1.status !== "approved") throw new Error("not approved");
+    const flipped = await t.mutation(internal.routes.recordDraft, {
+      routeId: v1.routeId as Id<"routes">,
+      label: "Route 17 Afternoon",
+      direction: "from_school",
+      path: PATH,
+      stops: STOPS,
+    });
+    expect(await staff.mutation(api.routes.approveDraft, { draftId: flipped })).toMatchObject({
+      status: "refused",
+      code: "direction_mismatch",
+    });
+    const route = await t.run((ctx) => ctx.db.get(v1.routeId as Id<"routes">));
+    expect(route).toMatchObject({ direction: "to_school", currentVersionId: v1.routeVersionId });
+  });
+
   it("blocks approval of a draft without stops or with too many points", async () => {
     const { t } = await setup();
     const staff = t.withIdentity({ tokenIdentifier: STAFF });
@@ -335,6 +356,29 @@ describe("fleet", () => {
     expect(device).toMatchObject({ busLabel: "Bus 12", revoked: true });
     const revokes = (await t.run((ctx) => ctx.db.query("auditLog").collect())).filter((r) => r.action === "device.revoke");
     expect(revokes).toHaveLength(1);
+  });
+
+  it("after staff revoke a device, its next upload is rejected and nothing is stored", async () => {
+    const { t, deviceId } = await setup();
+    const runId = await t.run(async (ctx) =>
+      ctx.db.insert("runs", {
+        deviceId: deviceId as Id<"devices">,
+        routeVersionId: "legacy",
+        state: "active",
+        startRequestId: "5b1f1d0e-0000-4000-8000-000000000002",
+      }),
+    );
+    await t.withIdentity({ tokenIdentifier: STAFF }).mutation(api.fleet.revokeDevice, { deviceId });
+    // The HTTP route's credential lookup happened before the revoke; the
+    // committing mutation must still refuse.
+    await expect(
+      t.mutation(internal.telemetry.ingestBatch, {
+        deviceId: deviceId as Id<"devices">,
+        events: [{ ...demoTelemetryEvent, runId }],
+        nowMs: demoTelemetryEvent.capturedAtMs + 400,
+      }),
+    ).rejects.toThrow(/DEVICE_NOT_AUTHORIZED/);
+    expect(await t.run((ctx) => ctx.db.query("liveState").collect())).toHaveLength(0);
   });
 
   it("lists drivers only", async () => {

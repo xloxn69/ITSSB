@@ -405,6 +405,7 @@ The staff web calls these Convex functions. The Pi and the iOS app never do, so 
   - `already_decided`
   - `blocking_checks`
   - `route_has_assignments`: approved assignments still point at the current version, and moving them to a new version (enrollment) does not exist yet. Approving would leave those families seeing no trip while the bus runs.
+  - `direction_mismatch`: a revision whose direction differs from its route's.
   - `reason_required`: a rejection without a reason.
 
 **Audit.** Each allowed staff mutation appends an `auditLog` row. Mutations return typed results instead of throwing, so a denied attempt by a signed-in person is recorded too.
