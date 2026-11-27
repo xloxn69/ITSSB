@@ -1,6 +1,13 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { readInstant } from "../tracking/clock";
-import { capturedTime, dimsMarker, livePresentation, showsMarker, statusCopy } from "../tracking/presentation";
+import {
+  capturedTime,
+  dimsMarker,
+  livePresentation,
+  showsMarker,
+  statusCopy,
+  whileDisconnected,
+} from "../tracking/presentation";
 import { connectionNotice, type TrackContext, type TrackStore } from "../tracking/store";
 import type { TrackedRun } from "../tracking/model";
 import type { ServerClock } from "../tracking/clock";
@@ -112,7 +119,14 @@ export function TrackPage({ store, onSignIn }: { store: TrackStore; onSignIn: ()
               </Message>
             );
           case "tracking":
-            return <Tracking context={state.context} run={state.run} clock={state.clock} />;
+            return (
+              <Tracking
+                context={state.context}
+                run={state.run}
+                clock={state.clock}
+                connectionLost={store.connectionLost}
+              />
+            );
         }
       })()}
     </div>
@@ -131,9 +145,19 @@ function ContextHeader({ context }: { context: TrackContext }) {
   );
 }
 
-function Tracking({ context, run, clock }: { context: TrackContext; run: TrackedRun; clock: ServerClock }) {
+function Tracking({
+  context,
+  run,
+  clock,
+  connectionLost,
+}: {
+  context: TrackContext;
+  run: TrackedRun;
+  clock: ServerClock;
+  connectionLost: boolean;
+}) {
   const now = useTick();
-  const presentation = livePresentation(run, clock, now);
+  const presentation = whileDisconnected(livePresentation(run, clock, now), connectionLost);
   const copy = statusCopy(presentation, run, clock, now);
   const marker = showsMarker(presentation) ? run.position : null;
   return (
