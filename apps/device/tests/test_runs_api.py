@@ -226,3 +226,67 @@ def test_end_payload_matches_the_shared_fixture_shape(tmp_path):
     }
     assert payload["lastRunSequence"] is None  # nothing recorded
     db.close()
+
+
+def test_overlapping_starts_with_one_request_id_never_conflict(
+    tmp_path, pin_hash, backend, monkeypatch
+):
+    """Review finding: two taps of one start could both build fresh payloads;
+    the second got REQUEST_ID_CONFLICT and stranded the server's run."""
+    import threading
+    import time
+
+    env = Env(tmp_path, pin_hash, events_for(backend))
+    ticks = iter(range(T0, T0 + 10_000, 7))
+    env.api.now_ms = lambda: next(ticks)  # each request sees a different "now"
+    real = Database.pending_start
+
+    def slow_pending(self):
+        found = real(self)
+        time.sleep(0.2)  # widen the gap between "no pending start" and saving one
+        return found
+
+    monkeypatch.setattr(Database, "pending_start", slow_pending)
+    same = rid()
+    gate = threading.Barrier(2)
+    answers = []
+
+    def tap():
+        gate.wait()
+        answers.append(env.post("/api/runs/start", {"requestId": same, "routeVersionId": ROUTE}))
+
+    threads = [threading.Thread(target=tap) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert [a[1]["status"] for a in answers] == ["accepted", "accepted"]
+    assert answers[0][1]["runId"] == answers[1][1]["runId"]
+    assert len(backend.runs) == 1
+    db = env.db()
+    assert db.active_run()["runId"] == answers[0][1]["runId"]
+    db.close()
+
+
+def test_end_time_covers_positions_captured_ahead_of_the_device_clock(tmp_path):
+    """Review finding: an end stamped with the device clock could fall before a
+    saved fix whose GPS time ran slightly ahead, so the server would reject it."""
+    db = Database(tmp_path / "d.sqlite3")
+    db.save_run("demo_run_001", "active")
+    db.record_observation("demo_run_001", Fix(T0 + 1500, 34.1, -83.98, 0.0, 0.0, 6.0, 3), "b", 0)
+    payload = db.end_run_locally("demo_run_001", rid(), GRANT, T0)
+    assert payload["capturedAtMs"] == T0 + 1500
+    assert payload["lastRunSequence"] == 0
+    db.close()
+
+
+def test_summary_counts_rejected_positions(tmp_path):
+    db = Database(tmp_path / "d.sqlite3")
+    db.save_run("demo_run_001", "active")
+    a = db.record_observation("demo_run_001", Fix(T0, 34.1, -83.98, 0.0, 0.0, 6.0, 3), "b", 0)
+    db.record_observation("demo_run_001", Fix(T0 + 5000, 34.1, -83.98, 0.0, 0.0, 6.0, 3), "b", 1)
+    db.conn.execute("UPDATE outbox SET status='rejected' WHERE event_id=?", (a.event_id,))
+    db.end_run_locally("demo_run_001", rid(), GRANT, T0 + 9000)
+    s = db.last_ended_run()
+    assert (s["positionsRejected"], s["positionsWaiting"], s["positionsAccepted"]) == (1, 1, 0)
+    db.close()

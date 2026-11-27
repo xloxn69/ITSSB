@@ -3,7 +3,7 @@ import { formatAge, formatDuration } from "./format.js";
 import { cloudIndicator, gpsIndicator, type Indicator, networkIndicator, storageIndicator } from "./indicators.js";
 import { routeSvg } from "./routeMap.js";
 import { editBlocked, parked, type ScreenId } from "./screens.js";
-import type { DraftDetail, DraftSummary, Observed } from "./snapshot.js";
+import type { DraftDetail, DraftSummary, EndedRun, Observed } from "./snapshot.js";
 import { h } from "./views.js";
 
 /**
@@ -519,11 +519,22 @@ export function summaryView(o: Observed, ui: UiState, c: Controller): HTMLElemen
       h("h2", {}, `Run ${e.runId}`),
       checkRow("Completed on this device", "ok", `Ended ${new Date(e.endedAtMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`),
       checkRow("End synced", sync[0] ?? "warn", sync[1] ?? ""),
-      checkRow(
-        "Positions",
-        e.positionsWaiting > 0 ? "warn" : "ok",
-        `${e.positionsRecorded} recorded; ${e.positionsWaiting === 0 ? "all accepted by the school server" : `${e.positionsWaiting} waiting to sync`}.`,
-      ),
+      checkRow("Positions", positionsLevel(e), positionsText(e)),
     ),
   );
+}
+
+function positionsLevel(e: EndedRun): string {
+  if ((e.positionsRejected ?? 0) > 0) return "problem";
+  return e.positionsWaiting > 0 ? "warn" : "ok";
+}
+
+/** Rejected and waiting positions are named; "all accepted" only when it is true. */
+export function positionsText(e: EndedRun): string {
+  const parts = [`${e.positionsRecorded} recorded`];
+  if (e.positionsAccepted !== undefined) parts.push(`${e.positionsAccepted} accepted by the school server`);
+  if ((e.positionsRejected ?? 0) > 0) parts.push(`${e.positionsRejected} rejected by the school server and missing from the trip history`);
+  if (e.positionsWaiting > 0) parts.push(`${e.positionsWaiting} waiting to sync`);
+  if (e.positionsAccepted === undefined && (e.positionsRejected ?? 0) === 0 && e.positionsWaiting === 0) parts.push("none waiting to sync");
+  return `${parts.join("; ")}.`;
 }

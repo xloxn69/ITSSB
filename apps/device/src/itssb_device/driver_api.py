@@ -20,6 +20,7 @@ import json
 import logging
 import mimetypes
 import re
+import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping
@@ -130,6 +131,10 @@ class DriverApi:
     ) -> None:
         self.trip_events = trip_events
         self.service_timezone = service_timezone
+        # One start at a time: choosing between "resend the saved request" and
+        # "build a new one" must not interleave, or two requests with the same
+        # requestId could carry different content.
+        self._start_lock = threading.Lock()
         self.board = board
         self.sessions = sessions
         self.judge = judge
@@ -439,6 +444,10 @@ class DriverApi:
     # ── Runs ─────────────────────────────────────────────────────────
 
     def _start_run(self, session: KioskSession, data: dict[str, Any]) -> Response:
+        with self._start_lock:
+            return self._start_run_locked(session, data)
+
+    def _start_run_locked(self, session: KioskSession, data: dict[str, Any]) -> Response:
         """Online start (docs/05 §5, docs/08 §6). The run exists only once the
         server answers `accepted` with its runId; nothing is invented here."""
         cap = self._start_capability(session)
@@ -455,6 +464,15 @@ class DriverApi:
             )
         now = self.now_ms()
         with self._db() as db:
+            # A requestId the device has seen before is answered from its saved
+            # outcome, never rebuilt with new content.
+            seen = db.start_request(str(data.get("requestId")))
+            if seen is not None and seen["status"] == "accepted":
+                return _json(HTTPStatus.OK, {"status": "accepted", "runId": seen["runId"]})
+            if seen is not None and seen["status"] == "rejected":
+                code = seen["code"] or "REJECTED"
+                words = SERVER_WORDS.get(code, f"The school server refused the start ({code}).")
+                return _error(HTTPStatus.CONFLICT, code, words)
             if db.active_run_id() is not None:
                 return _error(HTTPStatus.CONFLICT, "RUN_ACTIVE", "A run is already active.")
             if Drafts(db).recording() is not None:

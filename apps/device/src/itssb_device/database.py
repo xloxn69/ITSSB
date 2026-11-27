@@ -222,6 +222,20 @@ class Database:
             "createdAtMs": row["created_at_ms"],
         }
 
+    def start_request(self, request_id: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT status, run_id, last_error, payload FROM run_start_requests WHERE request_id=?",
+            (request_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "status": row["status"],
+            "runId": row["run_id"],
+            "code": row["last_error"],
+            "payload": json.loads(row["payload"]),
+        }
+
     def last_start_result(self) -> dict | None:
         row = self.conn.execute(
             "SELECT request_id, status, run_id, last_error FROM run_start_requests "
@@ -258,6 +272,13 @@ class Database:
             if row is None:
                 raise RunNotActive(run_id)
             last = row["next_run_sequence"] - 1
+            # The end's capture time must cover every saved observation: GPS
+            # time can run slightly ahead of this clock, and the server rejects
+            # telemetry captured after the end as late history.
+            newest = tx.execute(
+                "SELECT MAX(captured_at_ms) AS m FROM telemetry_events WHERE run_id=?", (run_id,)
+            ).fetchone()["m"]
+            captured_at_ms = max(captured_at_ms, newest or 0)
             payload = {
                 "schemaVersion": 1,
                 "requestId": request_id,
@@ -305,7 +326,11 @@ class Database:
             "SELECT e.run_id, e.status, e.last_error, e.attempts, e.payload, e.resolved_at_ms, "
             "(SELECT COUNT(*) FROM telemetry_events t WHERE t.run_id=e.run_id) AS events, "
             "(SELECT COUNT(*) FROM telemetry_events t JOIN outbox o ON o.event_id=t.event_id "
-            " WHERE t.run_id=e.run_id AND o.status='pending') AS pending "
+            " WHERE t.run_id=e.run_id AND o.status='pending') AS pending, "
+            "(SELECT COUNT(*) FROM telemetry_events t JOIN outbox o ON o.event_id=t.event_id "
+            " WHERE t.run_id=e.run_id AND o.status='acknowledged') AS acknowledged, "
+            "(SELECT COUNT(*) FROM telemetry_events t JOIN outbox o ON o.event_id=t.event_id "
+            " WHERE t.run_id=e.run_id AND o.status='rejected') AS rejected "
             "FROM run_end_requests e ORDER BY e.rowid DESC LIMIT 1"
         ).fetchone()
         if row is None:
@@ -319,6 +344,8 @@ class Database:
             "endAttempts": row["attempts"],
             "positionsRecorded": row["events"],
             "positionsWaiting": row["pending"],
+            "positionsAccepted": row["acknowledged"],
+            "positionsRejected": row["rejected"],
         }
 
     # ── Observations ──────────────────────────────────────────────────

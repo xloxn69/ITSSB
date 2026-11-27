@@ -158,6 +158,9 @@ export interface EndedRun {
   endAttempts: number;
   positionsRecorded: number;
   positionsWaiting: number;
+  /** Absent on older device software. */
+  positionsAccepted?: number;
+  positionsRejected?: number;
 }
 
 /**
