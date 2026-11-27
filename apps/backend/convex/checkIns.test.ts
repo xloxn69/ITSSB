@@ -323,21 +323,82 @@ describe("driver roster actions", () => {
     expect(changed.body).toMatchObject({ status: "rejected", code: "request_id_conflict" });
   });
 
-  it("a queued offline action keeps its capture time and is accepted later with a then-valid grant", async () => {
+  it("a queued offline action keeps its capture time and is accepted while its grant is current", async () => {
     const { t, runA, aNoPhone } = await setup();
-    const capturedAtMs = Date.now() - 3 * HOUR; // grant expired 2 h ago; valid at capture
-    const res = await post(t, "/device/v1/roster-actions", SECRET_A, {
-      ...action("recordAttendance", { runId: runA, assignmentId: aNoPhone, status: "boarded" }),
-      driverOperatingGrant: GRANT_EXPIRED,
-      capturedAtMs: capturedAtMs - 2 * HOUR,
-    });
-    expect(res.body).toMatchObject({ status: "rejected", code: "run_not_authorized" }); // before the run started
+    const capturedAtMs = Date.now() - 30 * 60_000; // queued during the outage
     const ok = await post(t, "/device/v1/roster-actions", SECRET_A, {
       ...action("recordAttendance", { runId: runA, assignmentId: aNoPhone, status: "boarded" }, "act-queued-0002"),
-      driverOperatingGrant: GRANT_EXPIRED,
-      capturedAtMs: Date.now() - 2.5 * HOUR,
+      capturedAtMs,
     });
-    expect(ok.body).toMatchObject({ status: "accepted", checkIn: { recordedAtMs: expect.any(Number) } });
+    expect(ok.body).toMatchObject({ status: "accepted", checkIn: { recordedAtMs: capturedAtMs } });
+  });
+
+  it("attendance captured before the run started is rejected", async () => {
+    const { t, runA, aNoPhone } = await setup();
+    await t.run((ctx) => ctx.db.patch(runA, { startedAtMs: Date.now() - 10 * 60_000 }));
+    const res = await post(t, "/device/v1/roster-actions", SECRET_A, {
+      ...action("recordAttendance", { runId: runA, assignmentId: aNoPhone, status: "boarded" }),
+      capturedAtMs: Date.now() - 30 * 60_000,
+    });
+    expect(res.body).toMatchObject({ status: "rejected", code: "run_not_authorized" });
+  });
+
+  it("an expired grant is rejected even for an action backdated into its validity", async () => {
+    const { t, a1 } = await setup();
+    const res = await post(t, "/device/v1/roster-actions", SECRET_A, {
+      ...action("removeAssignment", { assignmentId: a1, reason: "Moved" }),
+      driverOperatingGrant: GRANT_EXPIRED,
+      capturedAtMs: Date.now() - 2.5 * HOUR, // inside the grant's old window
+    });
+    expect(res.body).toMatchObject({ status: "rejected", code: "grant_not_authorized" });
+    expect((await t.run((ctx) => ctx.db.get(a1)))?.status).toBe("approved");
+  });
+
+  it("attendance captured after the run's end on the bus is rejected, even if the end synced later", async () => {
+    const { t, runA, aNoPhone } = await setup();
+    await t.run((ctx) => ctx.db.patch(runA, { state: "completed", endCapturedAtMs: Date.now() - 2 * HOUR, endedAtMs: Date.now() }));
+    const res = await post(t, "/device/v1/roster-actions", SECRET_A, {
+      ...action("recordAttendance", { runId: runA, assignmentId: aNoPhone, status: "boarded" }),
+      capturedAtMs: Date.now() - HOUR,
+    });
+    expect(res.body).toMatchObject({ status: "rejected", code: "run_not_authorized" });
+  });
+
+  it("an older queued correction does not override a newer one", async () => {
+    const { t, runA, a1 } = await setup();
+    const scanned = (await scan(t, STUDENT_1, runA)) as { checkIn: { checkInId: string } };
+    const newer = await post(t, "/device/v1/roster-actions", SECRET_A, {
+      ...action("correctAttendance", { runId: runA, assignmentId: a1, status: "not_boarded", correctsCheckInId: scanned.checkIn.checkInId, reason: "Stayed home" }, "act-corr-new"),
+      capturedAtMs: Date.now() - 60_000,
+    });
+    expect(newer.body).toMatchObject({ status: "accepted" });
+    const older = await post(t, "/device/v1/roster-actions", SECRET_A, {
+      ...action("correctAttendance", { runId: runA, assignmentId: a1, status: "boarded", correctsCheckInId: scanned.checkIn.checkInId, reason: "Was aboard" }, "act-corr-old"),
+      capturedAtMs: Date.now() - 5 * 60_000,
+    });
+    expect(older.body).toMatchObject({ status: "superseded" });
+    const view = await as(t, STAFF).query(api.checkIns.runAttendance, { runId: runA });
+    const alex = (view as { students: { studentDisplayName: string; current: { status: string } }[] }).students.find(
+      (x) => x.studentDisplayName === "Alex One",
+    );
+    expect(alex?.current.status).toBe("not_boarded");
+  });
+
+  it("a newer queued correction that arrives after an older one becomes current", async () => {
+    const { t, runA, a1 } = await setup();
+    const scanned = (await scan(t, STUDENT_1, runA)) as { checkIn: { checkInId: string } };
+    const body = (requestId: string, status: string, capturedAtMs: number) => ({
+      ...action("correctAttendance", { runId: runA, assignmentId: a1, status, correctsCheckInId: scanned.checkIn.checkInId, reason: "Driver check" }, requestId),
+      capturedAtMs,
+    });
+    expect((await post(t, "/device/v1/roster-actions", SECRET_A, body("act-c-old", "not_boarded", Date.now() - 5 * 60_000))).body).toMatchObject({ status: "accepted" });
+    expect((await post(t, "/device/v1/roster-actions", SECRET_A, body("act-c-new", "boarded", Date.now() - 60_000))).body).toMatchObject({ status: "accepted" });
+    const view = await as(t, STAFF).query(api.checkIns.runAttendance, { runId: runA });
+    const alex = (view as { students: { studentDisplayName: string; current: { status: string }; history: unknown[] }[] }).students.find(
+      (x) => x.studentDisplayName === "Alex One",
+    );
+    expect(alex?.current.status).toBe("boarded");
+    expect(alex?.history).toHaveLength(3);
   });
 
   it("a queued action captured after its grant expired is rejected, not silently accepted", async () => {
