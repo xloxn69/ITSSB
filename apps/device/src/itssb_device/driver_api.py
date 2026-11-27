@@ -48,6 +48,7 @@ from .local_auth import (
 from .models import Fix
 from .motion import FIX_FRESH_S, MotionJudge
 from .status import StatusBoard
+from .students import StudentDesk
 from .trips import HttpRunStarter, HttpTripEvents, StartRunRequest, end_run, start_run_online
 
 log = logging.getLogger(__name__)
@@ -83,8 +84,8 @@ SERVER_WORDS = {
 }
 
 NOT_YET = {
-    "showQr": "QR codes need the school server's QR service, which is not available yet.",
-    "showStudents": "The roster comes from the school server, which does not provide it yet.",
+    "showQr": "QR codes come from the school server, and this device has none set up.",
+    "showStudents": "The roster comes from the school server, and this device has none set up.",
 }
 
 
@@ -128,7 +129,10 @@ class DriverApi:
         monotonic: Callable[[], float] = time.monotonic,
         trip_events: HttpTripEvents | None = None,
         service_timezone: str | None = None,
+        students: StudentDesk | None = None,
     ) -> None:
+        # QR codes, roster and driver actions (students.py); None without a server.
+        self.students = students
         self.trip_events = trip_events
         self.service_timezone = service_timezone
         # One start at a time: choosing between "resend the saved request" and
@@ -264,6 +268,16 @@ class DriverApi:
             # every publish interval, and a just-ended run must not read as active.
             run = db.active_run()
             outbox = db.outbox_counts()
+            # Driver changes to students (students.py); names only when unlocked.
+            changes = (
+                self.students.summary(
+                    db,
+                    self.now_ms(),
+                    {r.route_version_id for r in session.driver.route_versions},
+                )
+                if self.students is not None and session.driver is not None
+                else None
+            )
         snap.update(
             {
                 "motion": self.judge.snapshot(),
@@ -274,8 +288,8 @@ class DriverApi:
                 "capabilities": {
                     "recordRoute": {"available": True},
                     "startRoute": self._start_capability(session),
-                    "showQr": {"available": False, "reason": NOT_YET["showQr"]},
-                    "showStudents": {"available": False, "reason": NOT_YET["showStudents"]},
+                    "showQr": self._students_capability(session, run, "showQr"),
+                    "showStudents": self._students_capability(session, run, "showStudents"),
                 },
                 # Only for an unlocked driver: route drafts are protected.
                 "recording": recording,
@@ -288,9 +302,17 @@ class DriverApi:
                 "lastEndedRun": last_ended,
                 "run": run,
                 "outbox": outbox,
+                "studentChanges": changes,
             }
         )
         return snap
+
+    def _students_capability(
+        self, session: KioskSession, run: dict[str, Any] | None, kind: str
+    ) -> dict[str, Any]:
+        if self.students is None:
+            return {"available": False, "reason": NOT_YET[kind]}
+        return self.students.capability(session, run)
 
     def _start_capability(self, session: KioskSession) -> dict[str, Any]:
         def no(reason: str) -> dict[str, Any]:
@@ -312,6 +334,13 @@ class DriverApi:
             return _json(HTTPStatus.OK, self.status(session))
         if session.driver is None:
             return _error(HTTPStatus.FORBIDDEN, "LOCKED", "Unlock with your driver PIN first.")
+        if path == "/api/roster" and self.students is not None:
+            # Never behind an unknown or moving bus (docs/05 §3).
+            if not self.judge.parked():
+                return _error(
+                    HTTPStatus.CONFLICT, "NOT_PARKED", "Stop safely and confirm parked first."
+                )
+            return _json(*self.students.roster(session))
         with self._db() as db:
             drafts = Drafts(db)
             if path == "/api/recordings":
@@ -371,6 +400,15 @@ class DriverApi:
                     motion=self.judge.snapshot(),
                 )
             return _json(HTTPStatus.OK, {"motion": self.judge.snapshot()})
+
+        if path in ("/api/qr-codes", "/api/roster-actions") and self.students is not None:
+            if not self.judge.parked():
+                return _error(
+                    HTTPStatus.CONFLICT, "NOT_PARKED", "Stop safely and confirm parked first."
+                )
+            if path == "/api/qr-codes":
+                return _json(*self.students.qr(session, data))
+            return _json(*self.students.action(session, data, guard=self._require_parked))
 
         if path == "/api/runs/start" or _RUN_END.match(path):
             if not self.judge.parked():

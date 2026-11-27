@@ -157,6 +157,8 @@ export interface DeviceSnapshot {
   runStart?: { pending: boolean; routeVersionId: string | null; lastStatus: string | null; lastCode: string | null };
   /** The most recently ended run and whether the server has its end. */
   lastEndedRun?: EndedRun | null;
+  /** Waiting and recently rejected student changes; null while locked. Absent on older software. */
+  studentChanges?: import("./students.js").StudentChanges | null;
 }
 
 export interface EndedRun {

@@ -13,8 +13,10 @@ import {
   type UiState,
   unlockView,
 } from "./flows.js";
-import { type ActionId, parked as parkedNow, type ScreenId, selectScreen } from "./screens.js";
+import { type ActionId, parked as parkedNow, STUDENT_SCREENS, type ScreenId, selectScreen } from "./screens.js";
 import type { DeviceSnapshot, DraftSummary, Observed } from "./snapshot.js";
+import { correctionView, detailView, emptyStudentUi, qrView, rosterView, type StudentController } from "./studentViews.js";
+import { type AttendanceStatus, type QrPurpose, type RosterAction, rosterRows, studentChangeLines, syncLabel } from "./students.js";
 import { css } from "./styles.js";
 import { dashboardView, diagnosticsView, drivingView, type Nav, offlineView, startupView, statusBar } from "./views.js";
 
@@ -53,6 +55,12 @@ const ui: UiState = {
   busy: false,
   routeVersionId: null,
 };
+
+/** QR codes and the roster (D15-D19). Cleared on lock: a locked screen keeps no roster. */
+let sui = emptyStudentUi();
+let qrLoading = false;
+let qrLastTry = -Infinity;
+const QR_RETRY_MS = 5_000;
 
 function observed(): Observed {
   return {
@@ -144,6 +152,16 @@ const ctl: Controller & Nav = {
     render();
   },
   action(id: ActionId) {
+    if (id === "showQr") {
+      sctl.chooseQr("trip_check_in");
+      this.go("D16");
+      return;
+    }
+    if (id === "showStudents") {
+      this.go("D17");
+      void loadRoster().then(render);
+      return;
+    }
     if (id === "startRoute") {
       const routes = currentSession()?.routes ?? [];
       ui.routeVersionId = snapshot?.runStart?.routeVersionId ?? (routes.length === 1 ? (routes[0]?.routeVersionId ?? null) : ui.routeVersionId);
@@ -173,6 +191,7 @@ const ctl: Controller & Nav = {
     });
   },
   lock() {
+    sui = emptyStudentUi();
     void run(null, () => api.lock()).then(() => ctl.go(null));
   },
   confirmParked() {
@@ -256,6 +275,171 @@ const ctl: Controller & Nav = {
   },
 };
 
+// ── QR codes and roster (D15-D19) ───────────────────────────────────
+
+function routeLabel(): string | null {
+  const id = sui.roster?.routeVersionId ?? sui.qr?.routeVersionId ?? null;
+  return currentSession()?.routes?.find((r) => r.routeVersionId === id)?.label ?? null;
+}
+
+/** Asks the device for the chosen code. The device reuses it until shortly before expiry. */
+async function loadQr(): Promise<void> {
+  if (qrLoading) return;
+  qrLoading = true;
+  qrLastTry = performance.now();
+  const purpose = sui.qrPurpose;
+  try {
+    const code = await api.qrCode(purpose);
+    if (sui.qrPurpose === purpose) {
+      sui.qr = code;
+      sui.qrAt = performance.now();
+      sui.qrError = null;
+    }
+  } catch (err) {
+    if (sui.qrPurpose === purpose) {
+      if (err instanceof ApiError) {
+        sui.qr = null; // the device has no valid code to show
+        sui.qrError = err.message;
+      } else {
+        // The device did not answer: a code it gave earlier still blanks on its own expiry.
+        sui.qrError = "No answer from the device.";
+      }
+    }
+  } finally {
+    qrLoading = false;
+  }
+  render();
+}
+
+function qrDue(now: number): boolean {
+  if (qrLoading) return false;
+  if (sui.qr === null || sui.qrAt === null) return now - qrLastTry >= QR_RETRY_MS;
+  return now - sui.qrAt >= Math.max(1_000, sui.qr.refreshInMs);
+}
+
+async function loadRoster(): Promise<void> {
+  try {
+    const r = await api.roster();
+    sui.roster = r;
+    sui.rosterAt = performance.now();
+    sui.rosterError = null;
+    sui.orphanActions = [];
+  } catch (err) {
+    if (err instanceof ApiError) {
+      // Refused, locked, or nothing cached: show no roster at all.
+      sui.roster = null;
+      sui.rosterError = err.message;
+      const actions = err.body["actions"];
+      sui.orphanActions = Array.isArray(actions) ? (actions as RosterAction[]) : [];
+    } else {
+      sui.rosterError = "No answer from the device. This is the roster the screen last received.";
+    }
+  }
+}
+
+function studentAction(key: string, body: Record<string, unknown>, after?: () => void): void {
+  if (sui.busy) return;
+  sui.busy = true;
+  sui.message = { kind: "pending", text: "Saving on this device…" };
+  render();
+  void api
+    .rosterAction({ requestId: ids.for(key), ...body })
+    .then((r) => {
+      ids.answered(key);
+      const msg = { kind: "pending" as const, text: `Saved on this device. ${syncLabel(r.action)}.` };
+      sui.message = msg;
+      setTimeout(() => {
+        if (sui.message === msg) {
+          sui.message = null;
+          render();
+        }
+      }, 5_000);
+      after?.();
+    })
+    .catch((err: unknown) => {
+      if (!noAnswer(err)) ids.answered(key);
+      sui.message = {
+        kind: "problem",
+        text: err instanceof ApiError ? err.message : "No answer from the device. Tap again to retry the same change.",
+      };
+    })
+    .finally(() => {
+      sui.busy = false;
+      void loadRoster().then(render);
+    });
+}
+
+const sctl: StudentController = {
+  go(screen) {
+    sui.message = null;
+    if (screen === "D19") {
+      const row = sui.roster && sui.assignmentId ? rosterRows(sui.roster).find((r) => r.assignmentId === sui.assignmentId) : undefined;
+      sui.reason = "";
+      sui.correctStatus = row?.checkIn?.status === "boarded" ? "not_boarded" : "boarded";
+    }
+    if (screen === "D18") sui.confirmRemove = false;
+    ctl.go(screen);
+  },
+  setStudents(patch) {
+    Object.assign(sui, patch);
+    render();
+  },
+  chooseQr(purpose: QrPurpose) {
+    if (sui.qrPurpose !== purpose) {
+      sui.qr = null; // never show one purpose's code under the other's label
+      sui.qrAt = null;
+    }
+    sui.qrPurpose = purpose;
+    sui.qrError = null;
+    qrLastTry = -Infinity;
+    requested = purpose === "trip_check_in" ? "D16" : "D15";
+    void loadQr();
+    render();
+  },
+  openStudent(assignmentId) {
+    const row = sui.roster ? rosterRows(sui.roster).find((r) => r.assignmentId === assignmentId) : undefined;
+    Object.assign(sui, {
+      assignmentId,
+      seat: row?.seatLabel ?? "",
+      note: row?.driverNote ?? "",
+      field: "seat",
+      confirmRemove: false,
+      reason: "",
+    });
+    this.go("D18");
+  },
+  record(assignmentId: string, status: AttendanceStatus) {
+    studentAction(`record:${assignmentId}:${status}`, { type: "recordAttendance", assignmentId, status });
+  },
+  saveSeatNote() {
+    const id = sui.assignmentId;
+    if (!id) return;
+    const seat = sui.seat.trim();
+    const note = sui.note.trim();
+    studentAction(`seat:${id}:${seat}:${note}`, { type: "setSeatNote", assignmentId: id, seatLabel: seat || null, driverNote: note || null });
+  },
+  correct() {
+    const id = sui.assignmentId;
+    const reason = sui.reason.trim();
+    if (!id || !reason) return;
+    const status = sui.correctStatus;
+    studentAction(`correct:${id}:${status}:${reason}`, { type: "correctAttendance", assignmentId: id, status, reason }, () => {
+      sui.reason = "";
+      ctl.go("D18");
+    });
+  },
+  remove() {
+    const id = sui.assignmentId;
+    const reason = sui.reason.trim();
+    if (!id || !reason) return;
+    studentAction(`remove:${id}:${reason}`, { type: "removeAssignment", assignmentId: id, reason }, () => {
+      sui.confirmRemove = false;
+      sui.reason = "";
+      ctl.go("D17");
+    });
+  },
+};
+
 function dashboardControls(o: Observed): (HTMLElement | null)[] {
   const s = o.snapshot?.session;
   if (!s) return [];
@@ -271,6 +455,13 @@ function dashboardControls(o: Observed): (HTMLElement | null)[] {
     end.disabled = !parkedNow(o);
     end.addEventListener("click", () => ctl.go("D23"));
     extra.push(end);
+  }
+  // Student changes still waiting, and any rejection, even after the run ended.
+  for (const line of studentChangeLines(o.snapshot?.studentChanges)) {
+    const note = document.createElement("div");
+    note.className = `banner lv-${line.level}`;
+    note.textContent = line.text;
+    extra.push(note);
   }
   if (s.unlocked && o.snapshot?.lastEndedRun && !o.snapshot.run) {
     const last = document.createElement("button");
@@ -291,6 +482,12 @@ function render(): void {
     // A forced change (the bus moved, the service restarted) drops half-typed input.
     if (DETAIL_SCREENS.has(screen) && !DETAIL_SCREENS.has(shown)) void refreshDetail().then(render);
     if (screen === "D04") void fetchSession().then(render, () => undefined);
+    // Leaving the QR screen (or being moved off it) drops the code from memory.
+    if (screen !== "D15" && screen !== "D16") {
+      sui.qr = null;
+      sui.qrAt = null;
+    }
+    if (!o.snapshot?.session?.unlocked) sui = emptyStudentUi();
     shown = screen;
   }
   const view = (() => {
@@ -313,6 +510,15 @@ function render(): void {
         return preflightView(o, currentSession(), ui, ctl);
       case "D13":
         return drivingView(o, ctl, [parkedControl(o, ctl, ui)]);
+      case "D15":
+      case "D16":
+        return qrView(o, sui, sctl, performance.now(), routeLabel());
+      case "D17":
+        return rosterView(sui, sctl, performance.now());
+      case "D18":
+        return detailView(sui, sctl, routeLabel());
+      case "D19":
+        return correctionView(o, sui, sctl);
       case "D23":
         return endConfirmView(o, ui, ctl);
       case "D24":
@@ -352,6 +558,9 @@ async function poll(): Promise<void> {
     pollFailed = false;
     // Keep the open draft current while recording (every few seconds).
     if (DETAIL_SCREENS.has(shown) && ++polls % 3 === 0) await refreshDetail();
+    // The roster and its queued changes, every few seconds while it is open.
+    if (STUDENT_SCREENS.has(shown) && shown !== "D15" && shown !== "D16" && ++polls % 3 === 0) await loadRoster();
+    if ((shown === "D15" || shown === "D16") && qrDue(performance.now())) void loadQr();
   } catch {
     pollFailed = true;
   } finally {

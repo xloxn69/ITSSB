@@ -4,6 +4,7 @@ Threads:
 - gps-reader: GPSD socket -> latest fix + status (no SQLite)
 - recorder:   its own SQLite connection; selects and saves observations
 - uploader:   its own SQLite connection; sends the outbox (when configured)
+- roster-sync: its own SQLite connection; sends queued driver actions (when configured)
 - local-api:  serves the status snapshot (no SQLite)
 
 The main thread installs SIGTERM/SIGINT handlers and waits on a stop event.
@@ -33,12 +34,14 @@ from .local_auth import SessionManager, allowed_origins, load_drivers
 from .motion import MotionJudge, ObservedFixHolder
 from .recorder import Recorder, RecorderThread
 from .status import StatusBoard
+from .students import DeviceGrantClient, RosterSyncThread, StudentDesk
 from .trips import EndRetryThread, HttpTripEvents
 from .uploader import HttpTransport, UploaderThread
 
 log = logging.getLogger("itssb_device")
 
 JOIN_TIMEOUT_S = 15.0
+STUDENTS_TIMEOUT_S = 3.0
 LOG_FILE_MAX_BYTES = 1_000_000
 LOG_FILE_BACKUPS = 3
 
@@ -101,10 +104,24 @@ class Service:
         log.info("recovered run=%s outbox=%s", run, counts)
 
         trip_events = None
+        students = None
+        roster_wake = threading.Event()
         if cfg.upload_enabled:
             assert cfg.device_api_origin and cfg.device_token  # noqa: S101 - upload_enabled
             trip_events = HttpTripEvents(
                 HttpTransport(cfg.device_api_origin, cfg.http_timeout_s), cfg.device_token
+            )
+            # Answered inside the screen's 4 s request timeout, so a slow server
+            # still lets the cached roster or code reach the driver.
+            students = StudentDesk(
+                cfg.database_path,
+                DeviceGrantClient(
+                    HttpTransport(
+                        cfg.device_api_origin, min(cfg.http_timeout_s, STUDENTS_TIMEOUT_S)
+                    ),
+                    cfg.device_token,
+                ),
+                wake=roster_wake,
             )
         drivers = load_drivers(cfg.drivers_file)
         log.info("driver unlock: %d driver(s) provisioned", len(drivers))
@@ -118,6 +135,7 @@ class Service:
             allowed_origins(cfg.local_api_port),
             trip_events=trip_events,
             service_timezone=cfg.service_timezone,
+            students=students,
         )
         if not driver_api.serves_ui:
             log.warning("driver UI not found at %s; serving the status page", cfg.driver_ui_dir)
@@ -141,6 +159,17 @@ class Service:
         self._threads.append(DraftSamplerThread(cfg.database_path, self.latest, self.stop_event))
         if trip_events is not None:
             self._threads.append(EndRetryThread(cfg.database_path, trip_events, self.stop_event))
+            assert cfg.device_api_origin and cfg.device_token  # noqa: S101 - upload_enabled
+            self._threads.append(
+                RosterSyncThread(
+                    cfg.database_path,
+                    DeviceGrantClient(
+                        HttpTransport(cfg.device_api_origin, cfg.http_timeout_s), cfg.device_token
+                    ),
+                    self.stop_event,
+                    wake=roster_wake,
+                )
+            )
         if cfg.upload_enabled:
             self._threads.append(UploaderThread(cfg, self.board, self.stop_event))
         else:
