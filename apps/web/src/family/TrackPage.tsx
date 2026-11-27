@@ -1,7 +1,14 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { readInstant } from "../tracking/clock";
-import { capturedTime, dimsMarker, livePresentation, showsMarker, statusCopy } from "../tracking/presentation";
-import type { TrackContext, TrackStore } from "../tracking/store";
+import {
+  capturedTime,
+  dimsMarker,
+  livePresentation,
+  showsMarker,
+  statusCopy,
+  whileDisconnected,
+} from "../tracking/presentation";
+import { connectionNotice, type TrackContext, type TrackStore } from "../tracking/store";
 import type { TrackedRun } from "../tracking/model";
 import type { ServerClock } from "../tracking/clock";
 import { RouteDiagram } from "./RouteDiagram";
@@ -27,6 +34,7 @@ function useStore(store: TrackStore) {
 /** Family tracking (docs/06 I09/I10/I12/I25–I28 on the web). */
 export function TrackPage({ store, onSignIn }: { store: TrackStore; onSignIn: () => void }) {
   const state = useStore(store);
+  const notice = connectionNotice(state, store.connectionLost);
 
   useEffect(() => {
     store.start();
@@ -61,7 +69,22 @@ export function TrackPage({ store, onSignIn }: { store: TrackStore; onSignIn: ()
           ))}
         </div>
       )}
+      {notice === "banner" && (
+        <p className="card status" role="status">
+          <span className="dot tone-stale" aria-hidden />
+          <span>Connection lost. Reconnecting… The bus position below keeps aging until updates return.</span>
+        </p>
+      )}
       {(() => {
+        if (notice === "replace") {
+          return (
+            <Message
+              title="Can't confirm your trip right now"
+              detail="The connection to the tracking service was lost. Reconnecting… Your trip status will show again once it's back."
+              busy
+            />
+          );
+        }
         switch (state.kind) {
           case "loading":
             return <Message title="Finding your bus…" detail="Loading your approved trip." busy />;
@@ -96,7 +119,14 @@ export function TrackPage({ store, onSignIn }: { store: TrackStore; onSignIn: ()
               </Message>
             );
           case "tracking":
-            return <Tracking context={state.context} run={state.run} clock={state.clock} />;
+            return (
+              <Tracking
+                context={state.context}
+                run={state.run}
+                clock={state.clock}
+                connectionLost={store.connectionLost}
+              />
+            );
         }
       })()}
     </div>
@@ -115,9 +145,19 @@ function ContextHeader({ context }: { context: TrackContext }) {
   );
 }
 
-function Tracking({ context, run, clock }: { context: TrackContext; run: TrackedRun; clock: ServerClock }) {
+function Tracking({
+  context,
+  run,
+  clock,
+  connectionLost,
+}: {
+  context: TrackContext;
+  run: TrackedRun;
+  clock: ServerClock;
+  connectionLost: boolean;
+}) {
   const now = useTick();
-  const presentation = livePresentation(run, clock, now);
+  const presentation = whileDisconnected(livePresentation(run, clock, now), connectionLost);
   const copy = statusCopy(presentation, run, clock, now);
   const marker = showsMarker(presentation) ? run.position : null;
   return (

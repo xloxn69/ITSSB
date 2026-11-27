@@ -32,6 +32,14 @@ export function livePresentation(run: TrackedRun, clock: ServerClock, now: Insta
   return { kind: "live", freshness };
 }
 
+/**
+ * While live updates can't arrive, nothing is called fresh: at best the bus
+ * is "waiting for an update", exactly as without verified time.
+ */
+export function whileDisconnected(p: LivePresentation, connectionLost: boolean): LivePresentation {
+  return connectionLost && p.kind === "live" && p.freshness === "fresh" ? { kind: "live", freshness: "aging" } : p;
+}
+
 /** Whether to draw the bus marker at the last position. */
 export function showsMarker(p: LivePresentation): boolean {
   return p.kind === "live" || p.kind === "stale" || p.kind === "gps_unavailable";
