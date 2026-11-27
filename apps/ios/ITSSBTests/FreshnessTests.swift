@@ -22,6 +22,7 @@ final class FreshnessTests: XCTestCase {
             JSONSerialization.jsonObject(with: ContractFixture.data("freshnessPolicy")) as? [String: Double])
         XCTAssertEqual(FreshnessPolicy.agingAfter * 1000, json["positionAgingAfterMs"])
         XCTAssertEqual(FreshnessPolicy.staleAfter * 1000, json["positionStaleAfterMs"])
+        XCTAssertEqual(FreshnessPolicy.etaValidFor * 1000, json["etaValidForMs"])
     }
 
     func testStaleCutoffBoundaries() {
