@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo/logo-horizontal-dark.svg">
+    <img src="docs/assets/logo/logo-horizontal.svg" width="292" height="80" alt="ITSSB">
+  </picture>
+</p>
+
 # ITSSB — Intelligence Transportation System for School Buses
 
 An open-source school bus tracker: a Raspberry Pi on the bus reads GPS, a
