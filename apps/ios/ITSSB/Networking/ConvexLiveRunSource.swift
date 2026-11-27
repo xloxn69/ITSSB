@@ -126,6 +126,8 @@ actor ServerTimeService {
     private var clock: ServerClock?
     private var inFlight = false
     private var waiters: [UUID: @Sendable (ServerClock) -> Void] = [:]
+    /// Streams that ended before their registration arrived; their late `register` is refused.
+    private var ended: Set<UUID> = []
     private(set) var requestCount = 0
 
     init(client: any ConvexQuerying, now: @escaping @Sendable () -> Date) {
@@ -140,6 +142,7 @@ actor ServerTimeService {
 
     /// Returns verified time if known; otherwise remembers `onVerified` and starts a request.
     func register(_ id: UUID, onVerified: @escaping @Sendable (ServerClock) -> Void) -> ServerClock? {
+        if ended.remove(id) != nil { return nil } // Already cancelled: never becomes an orphan waiter.
         if let clock { return clock }
         waiters[id] = onVerified
         request(after: nil)
@@ -167,7 +170,7 @@ actor ServerTimeService {
     }
 
     func unregister(_ id: UUID) {
-        waiters[id] = nil
+        if waiters.removeValue(forKey: id) == nil { ended.insert(id) }
     }
 
     private func finish(_ result: ServerClock?) {

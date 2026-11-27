@@ -217,6 +217,20 @@ final class ConvexLiveRunSourceTests: XCTestCase {
         XCTAssertEqual(waiters, 0)
     }
 
+    /// Re-check regression: a stream cancelled before its registration ran must not leave
+    /// an orphan waiter that keeps the retry loop alive.
+    func testUnregisterBeforeRegisterLeavesNoOrphan() async {
+        let service = ServerTimeService(client: FlakyTimeQuerying(), now: { Date() })
+        let id = UUID()
+        await service.unregister(id)
+        let clock = await service.register(id) { _ in }
+        XCTAssertNil(clock)
+        let waiters = await service.waiterCount
+        let requests = await service.requestCount
+        XCTAssertEqual(waiters, 0)
+        XCTAssertEqual(requests, 0, "no request is started for a stream that already ended")
+    }
+
     func testFailedTimeRequestIsRetried() async throws {
         let client = FlakyTimeQuerying()
         let source = ConvexLiveRunSource(client: client)
