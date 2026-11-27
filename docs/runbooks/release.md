@@ -28,6 +28,7 @@ it.
 | Backend variables | `ITSSB_ENVIRONMENT=development`, `ITSSB_ALLOW_DEV_SEED=true` | `ITSSB_ENVIRONMENT=staging` | `ITSSB_ENVIRONMENT=production`, never `ITSSB_ALLOW_DEV_SEED` |
 | Clerk | development instance | development instance | production instance |
 | Web build | `VITE_ITSSB_ENVIRONMENT=development` | `staging` | `production` |
+| iOS build | `ITSSB_ENVIRONMENT=development` | `staging` | `production` |
 | Pi | `/etc/itssb/device.env` points at the dev `.convex.site` | its own credential | its own credential |
 
 A device credential, Clerk key, or Convex URL is never shared between
@@ -47,9 +48,10 @@ REV=$(git rev-parse HEAD)
 - **Web:** `VITE_ITSSB_ENVIRONMENT=<env> VITE_ITSSB_RELEASE=$REL VITE_ITSSB_REVISION=$REV bun run --cwd apps/web build`.
   Hover the environment badge to see the release and commit.
 - **iOS:** bump `CURRENT_PROJECT_VERSION` (and `MARKETING_VERSION` for a
-  user-visible change) in `apps/ios/project.yml` in the release PR. The app
-  does not yet carry its environment and commit; until it does, record the
-  commit in the TestFlight build notes.
+  user-visible change) in `apps/ios/project.yml` in the release PR, then build
+  with `ITSSB_ENVIRONMENT=<env> ITSSB_SOURCE_REVISION=$REV` on the
+  `xcodebuild` command line. The app reads them through `BuildInfo`
+  (`BuildInfo.summary`, for example `0.1.0 (1) b0dad42 development`).
 - **Pi:** `itssb_release.py stage . --version "$REL" --revision "$REV"`
   ([Pi runbook](pi-update-and-rollback.md)). Health then reports
   `process.release.version`.

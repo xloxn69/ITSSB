@@ -13,4 +13,10 @@ CONVEX_URL = http:/$()/127.0.0.1:1
 // Empty means sign-in is not configured: the app says so instead of signing in.
 CLERK_PUBLISHABLE_KEY =
 
+// Build identity (docs/14 §1-2). A release build overrides both on the
+// xcodebuild command line (docs/runbooks/release.md). Anything but
+// "production" is treated as a non-production build.
+ITSSB_ENVIRONMENT = development
+ITSSB_SOURCE_REVISION =
+
 #include? "Secrets.xcconfig"
