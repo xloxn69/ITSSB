@@ -108,3 +108,34 @@ def test_restart_keeps_acknowledged_rejected_and_pending_meaning(tmp_path):
     assert d.pending_payloads(now_ms=1000) == []
     assert [x["eventId"] for x in d.pending_payloads(now_ms=1000 + backoff_ms(1))] == [p]
     d.close()
+
+
+def test_drill_verify_only_passes_a_clean_outbox_and_fails_a_gap(tmp_path):
+    """outage_drill --verify-only is the owner's after-reboot check."""
+    from itssb_device.devtools.outage_drill import main
+
+    db = Database(tmp_path / "device.sqlite3")
+    db.save_run("demo_run_001", "active")
+    ids = [
+        db.record_observation(
+            "demo_run_001", Fix(1_795_609_000_000 + i, 34.1, -83.98, None, None, None, 3), BOOT, i
+        ).event_id
+        for i in range(3)
+    ]
+    from itssb_device.sync import apply_results
+
+    apply_results(db, ids, [{"eventId": i, "status": "accepted"} for i in ids], 0)
+    token = tmp_path / "token"
+    token.write_text("fake-dev-token")
+    args = [
+        "--workdir",
+        str(tmp_path),
+        "--upstream",
+        "https://example.invalid",
+        "--token-file",
+        str(token),
+    ]
+    assert main([*args, "--verify-only", "demo_run_001"]) == 0
+    db.conn.execute("DELETE FROM outbox WHERE event_id=?", (ids[1],))  # a lost row
+    db.close()
+    assert main([*args, "--verify-only", "demo_run_001"]) == 1

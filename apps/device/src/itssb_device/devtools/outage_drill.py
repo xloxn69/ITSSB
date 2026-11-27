@@ -234,7 +234,7 @@ class Drill:
 
     def verify(self, run_id: str) -> int:
         db = Database(self.db_path)
-        rows = [r for r in db.list_outbox(1_000_000) if r["runId"] == run_id]
+        rows = [r for r in db.list_outbox(10_000_000) if r["runId"] == run_id]
         db.close()
         ids = [r["eventId"] for r in rows]
         seqs = sorted(r["runSequence"] for r in rows)
@@ -268,11 +268,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--upstream", required=True, help="https origin of the DEV backend")
     parser.add_argument("--token-file", type=Path, required=True, help="file with the device token")
     parser.add_argument("--screenshots", action="store_true", help="mark capture points")
+    parser.add_argument(
+        "--verify-only",
+        metavar="RUN_ID",
+        help="only check the workdir database's outbox for this run (after a reboot drill)",
+    )
     args = parser.parse_args(argv)
     args.workdir.mkdir(parents=True, exist_ok=True)
     token = args.token_file.expanduser().read_text().strip()
     with open(args.workdir / "transcript.txt", "a") as out:
         drill = Drill(args.workdir, args.upstream, token, out, args.screenshots)
+        if args.verify_only:
+            return drill.verify(args.verify_only)
         try:
             return drill.run()
         finally:
