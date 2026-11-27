@@ -270,8 +270,12 @@ class DriverApi:
             outbox = db.outbox_counts()
             # Driver changes to students (students.py); names only when unlocked.
             changes = (
-                self.students.summary(db, self.now_ms())
-                if self.students is not None and unlocked
+                self.students.summary(
+                    db,
+                    self.now_ms(),
+                    {r.route_version_id for r in session.driver.route_versions},
+                )
+                if self.students is not None and session.driver is not None
                 else None
             )
         snap.update(

@@ -319,23 +319,46 @@ class StudentDesk:
     # ── Capabilities (for /api/status) ───────────────────────────────
 
     @staticmethod
-    def summary(db: Database, now: int) -> dict[str, Any]:
+    def summary(db: Database, now: int, route_ids: set[str]) -> dict[str, Any]:
         """Waiting and recently rejected changes, for the dashboard: shown even
-        with no run, so a rejection that arrives after the run ends is seen."""
+        with no run, so a rejection that arrives after the run ends is seen.
+        Only changes on runs of the unlocked driver's routes: another route's
+        driver never sees these students' names."""
         exists = db.conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='roster_actions'"
         ).fetchone()
         if exists is None:
             return {"pending": 0, "rejected": []}
-        pending = db.conn.execute(
-            "SELECT COUNT(*) FROM roster_actions WHERE sync='pending'"
-        ).fetchone()[0]
-        rows = db.conn.execute(
-            "SELECT * FROM roster_actions WHERE sync='rejected' AND resolved_at_ms>=? "
-            "ORDER BY resolved_at_ms DESC LIMIT 5",
-            (now - REJECTED_SHOWN_MS,),
-        ).fetchall()
-        return {"pending": pending, "rejected": [_action_view(r) for r in rows]}
+        runs = StudentDesk._runs_on_routes(db, route_ids)
+        pending = [
+            r
+            for r in db.conn.execute(
+                "SELECT run_id FROM roster_actions WHERE sync='pending'"
+            ).fetchall()
+            if r["run_id"] in runs
+        ]
+        rows = [
+            r
+            for r in db.conn.execute(
+                "SELECT * FROM roster_actions WHERE sync='rejected' AND resolved_at_ms>=? "
+                "ORDER BY resolved_at_ms DESC",
+                (now - REJECTED_SHOWN_MS,),
+            ).fetchall()
+            if r["run_id"] in runs
+        ][:5]
+        return {"pending": len(pending), "rejected": [_action_view(r) for r in rows]}
+
+    @staticmethod
+    def _runs_on_routes(db: Database, route_ids: set[str]) -> set[str]:
+        """Runs this device started on one of `route_ids`."""
+        runs: set[str] = set()
+        for row in db.conn.execute(
+            "SELECT run_id, payload FROM run_start_requests WHERE status='accepted'"
+        ).fetchall():
+            route = json.loads(row["payload"]).get("routeVersionId")
+            if row["run_id"] and route in route_ids:
+                runs.add(row["run_id"])
+        return runs
 
     @staticmethod
     def capability(session: KioskSession, run: dict[str, Any] | None) -> dict[str, Any]:
@@ -590,14 +613,18 @@ class StudentDesk:
     @staticmethod
     def _actions(db: Database, run_id: str, now: int) -> list[dict[str, Any]]:
         """This run's changes, everything still pending, and any recent
-        rejection, even from an earlier run: a rejection is never hidden."""
+        rejection, even from an earlier run: a rejection is never hidden.
+        Earlier runs only on this run's route: the caller is authorized for
+        it, and another route's students must not appear."""
+        route = StudentDesk._route_version(db, run_id)
+        same_route = StudentDesk._runs_on_routes(db, {route} if route else set()) | {run_id}
         rows = db.conn.execute(
             "SELECT * FROM roster_actions WHERE run_id=? OR sync='pending' "
             "OR (sync='rejected' AND resolved_at_ms>=?) "
             "ORDER BY captured_at_ms, rowid",
             (run_id, now - REJECTED_SHOWN_MS),
         ).fetchall()
-        return [_action_view(r) for r in rows]
+        return [_action_view(r) for r in rows if r["run_id"] in same_route]
 
     # ── Driver actions ───────────────────────────────────────────────
 
@@ -646,11 +673,18 @@ class StudentDesk:
             if kind in ("recordAttendance", "correctAttendance"):
                 fields += [("runId", run_id), ("status", intent["status"])]
             if kind == "correctAttendance":
-                # The newest record: the roster's, or one the server accepted
-                # from this device since the roster was fetched.
-                current = self._latest_check_in(db, run_id, intent["assignmentId"]) or student.get(
-                    "checkIn"
-                )
+                # The newest record, by when the server received it: the
+                # roster's (which includes staff changes), or one the server
+                # accepted from this device since the roster was fetched.
+                candidates = [
+                    c
+                    for c in (
+                        student.get("checkIn"),
+                        self._latest_check_in(db, run_id, intent["assignmentId"]),
+                    )
+                    if c
+                ]
+                current = max(candidates, key=lambda c: c.get("receivedAtMs", 0), default=None)
                 if not current:
                     return _error(
                         HTTPStatus.CONFLICT,
