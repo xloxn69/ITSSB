@@ -52,6 +52,7 @@ def render_page(snap: dict[str, Any]) -> str:
         ("Network", f"{n['status']}" + (f" ({n['detail']})" if n["detail"] else "")),
         ("Backend", f"{b['status']}" + (f" ({b['detail']})" if b["detail"] else "")),
         ("Run", f"{r['runId']} {r['state']}" if r else "no active run"),
+        ("Recording", f"FAULT: {snap['recorder']['fault']}" if snap["recorder"]["fault"] else "ok"),
         (
             "Outbox",
             f"{o['pending']} pending, {o['acknowledged']} acknowledged, {o['rejected']} rejected",

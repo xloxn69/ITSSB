@@ -189,7 +189,7 @@ class Uploader:
         self.failures = 0  # consecutive request-level failures
 
     def _batch(self, now: int) -> tuple[list[str], bytes] | None:
-        payloads = self.db.pending_payloads(now, limit=self.batch_limit)
+        payloads = self.db.pending_payloads(now, limit=self.batch_limit, newest_first=True)
         if not payloads:
             return None
         events: list[dict[str, Any]] = []

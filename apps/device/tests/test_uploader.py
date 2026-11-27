@@ -92,9 +92,13 @@ def test_lost_response_retries_same_event_id_and_gets_duplicate(db, backend):
 def test_results_are_applied_per_event(db, backend):
     ids = add(db, 4)
     up, board, _ = make(db, backend.origin)
-    backend.mode = "partial"  # answers for events 0 and 2 only
+    backend.mode = "partial"  # answers for every other event in the request
     assert up.upload_once() == "ok"
-    assert statuses(db, ids) == ["acknowledged", "pending", "acknowledged", "pending"]
+    [sent] = [r["eventIds"] for r in backend.requests]
+    answered, unanswered = set(sent[::2]), set(sent[1::2])
+    for eid in ids:
+        assert db.outbox_status(eid) == ("acknowledged" if eid in answered else "pending")
+    assert len(answered) == len(unanswered) == 2
     assert board.snapshot()["backend"]["lastBatch"]["missing"] == 2
 
 
@@ -164,7 +168,7 @@ def test_413_halves_the_batch(db, backend):
     assert up.upload_once() == "split"
     assert up.upload_once() == "split"
     assert up.upload_once() == "ok"
-    assert statuses(db, ids)[0] == "acknowledged"
+    assert statuses(db, ids).count("acknowledged") == 1
 
 
 def test_429_respects_retry_after(db, backend):
@@ -197,3 +201,16 @@ def test_byte_bound_splits_even_with_room_for_more_events(db, backend):
         pass
     sizes = [len(r["eventIds"]) for r in backend.requests]
     assert sum(sizes) == 6 and max(sizes) < 6
+
+
+def test_after_an_outage_the_newest_observation_goes_first(db, backend):
+    ids = add(db, 120)  # backlog from an outage
+    up, _, _ = make(db, backend.origin)
+    assert up.upload_once() == "ok"
+    first = backend.requests[0]["eventIds"]
+    assert first[0] == ids[-1]  # current position reaches families immediately
+    assert first[1:] == ids[: len(first) - 1]  # history still drains oldest-first
+    while up.upload_once() == "ok":
+        pass
+    sent = [e for r in backend.requests for e in r["eventIds"]]
+    assert sorted(sent) == sorted(ids)  # each event sent exactly once

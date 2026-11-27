@@ -86,6 +86,12 @@ curl -s http://127.0.0.1:8765/health
 | `backend.status` | `unconfigured`, `unknown`, `ok`, ... | Outcome of the last authenticated backend request |
 | `outbox` | counts + `oldestPendingCapturedAtMs` | Work the backend has not acknowledged |
 | `run` | `{runId, state, nextRunSequence}` or `null` | Recovered from SQLite; never invented |
+| `recorder.fault` | `null` or e.g. `save failed: OperationalError` | Observations are not being saved (disk full, ...); cleared after a successful save |
+
+A fix only counts as `valid` if its GPS time is a new measurement epoch, no
+more than 30 s old and no more than 2 min ahead of this device's clock (the
+backend's limit). After an outage the uploader sends the newest observation
+first, then drains history oldest-first.
 
 Every attribute carries its own timestamp or age. Health never includes
 coordinates, tokens, or student data.

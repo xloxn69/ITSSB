@@ -1,5 +1,6 @@
 import socket
 
+import pytest
 from conftest import wait_until
 
 from itssb_device.devtools.fake_gpsd import FakeGpsd
@@ -84,3 +85,48 @@ def test_valid_fix_goes_stale(clock):
     snap = board.snapshot()["gps"]
     assert snap["status"] == "no_fix"
     assert snap["lastValidFixAgeMs"] >= GPS_FRESH_S * 1000  # age kept, not hidden
+
+
+def _tpv(time_iso):
+    import json as _json
+
+    return _json.dumps(
+        {"class": "TPV", "mode": 3, "time": time_iso, "lat": 34.1, "lon": -83.98}
+    ).encode()
+
+
+def test_repeated_or_old_reports_do_not_look_fresh(clock, stop_event):
+    now_ms = 1_795_609_085_000  # 2026-11-25T12:18:05Z
+    board = StatusBoard("boot", upload_enabled=False, monotonic=clock)
+    board.gpsd_state("connected")
+    board.gps_receivers(1)
+    latest = LatestFixHolder()
+    reader = GpsReader(
+        "127.0.0.1", 1, board, latest, stop_event, monotonic=clock, now_ms=lambda: now_ms
+    )
+    reader.handle_line(_tpv("2026-11-25T12:18:05.000Z"))
+    assert board.snapshot()["gps"]["status"] == "valid"
+    # The same epoch repeated for a minute must not keep GPS "valid".
+    for _ in range(60):
+        clock.advance(1)
+        reader.handle_line(_tpv("2026-11-25T12:18:05.000Z"))
+    assert board.snapshot()["gps"]["status"] == "no_fix"
+    assert board.snapshot()["gps"]["lastValidFixAgeMs"] >= 60_000
+
+
+@pytest.mark.parametrize(
+    ("time_iso", "reason"),
+    [
+        ("2026-11-25T11:18:05.000Z", "capture time too old"),
+        ("2026-11-26T12:18:05.000Z", "capture time in the future"),
+    ],
+)
+def test_implausible_capture_times_are_rejected(clock, stop_event, time_iso, reason):
+    board = StatusBoard("boot", upload_enabled=False, monotonic=clock)
+    latest = LatestFixHolder()
+    reader = GpsReader(
+        "127.0.0.1", 1, board, latest, stop_event, monotonic=clock, now_ms=lambda: 1_795_609_085_000
+    )
+    reader.handle_line(_tpv(time_iso))
+    assert latest.get() is None
+    assert board.snapshot()["gps"]["lastRejectReason"] == reason
