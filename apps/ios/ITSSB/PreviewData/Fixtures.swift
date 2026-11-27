@@ -27,9 +27,15 @@ enum PreviewFixtures {
             capturedAt: captured, receivedAt: captured.addingTimeInterval(0.4))
     }
 
-    static func run(state: RunState = .active, position: LivePosition?, gpsStatus: GpsStatus? = .valid) -> TrackedRun {
-        TrackedRun(runId: "demo_run_001", state: state, liveRevision: 27, busLabel: "Bus 12",
-                   lastDeviceContactAt: position?.receivedAt, gpsStatus: gpsStatus,
+    /// `contactAt` is the bus's last contact (`.some(nil)`: never). By default
+    /// its position's receipt, or a moment ago when a heartbeat reports GPS
+    /// without a position.
+    static func run(state: RunState = .active, position: LivePosition?, gpsStatus: GpsStatus? = .valid,
+                    contactAt: Date?? = nil) -> TrackedRun {
+        let fallback = position?.receivedAt ?? (gpsStatus == nil ? nil : Date().addingTimeInterval(-2))
+        let contact = contactAt ?? fallback
+        return TrackedRun(runId: "demo_run_001", state: state, liveRevision: 27, busLabel: "Bus 12",
+                   lastDeviceContactAt: contact, gpsStatus: gpsStatus,
                    position: position, assignedStop: stop)
     }
 }

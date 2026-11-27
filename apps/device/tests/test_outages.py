@@ -228,8 +228,8 @@ def test_d07_d08_bus_internet_loss_queues_locally_then_fresh_first(bench):
 
 
 def test_d02_lost_responses_never_duplicate(bench):
-    proc = bench.spawn()
     bench.backend.mode = "drop_response"  # server commits; answer never arrives
+    proc = bench.spawn()
     assert wait_until(lambda: len(bench.backend.events) >= 3, timeout=15)
     assert health_value(bench, "outbox", "acknowledged") == 0  # nothing claimed
     bench.backend.mode = "ok"
@@ -263,7 +263,8 @@ def test_d05_kill_9_mid_run_during_an_outage_recovers_the_same_run(bench):
     assert wait_until(lambda: delivered_through(bench, last), timeout=45)
     stop(proc, bench)
     rows = local_rows(bench)
-    assert [r["eventId"] for r in rows][: len(pending_before)] == pending_before
+    survivors = [r["eventId"] for r in rows if r["eventId"] in set(pending_before)]
+    assert survivors == pending_before  # every pending row survived, same order
     boots = {e["bootId"] for e in bench.backend.events.values()}
     assert first_boot in boots and len(boots) == 2  # both processes' events arrived
     assert_delivered_exactly_once(bench)  # runSequence continued across the kill

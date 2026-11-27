@@ -11,6 +11,7 @@
 import type * as devices from "../devices.js";
 import type * as driverGrants from "../driverGrants.js";
 import type * as fleet from "../fleet.js";
+import type * as health from "../health.js";
 import type * as http from "../http.js";
 import type * as lib_authz from "../lib/authz.js";
 import type * as lib_deviceAuth from "../lib/deviceAuth.js";
@@ -35,6 +36,7 @@ declare const fullApi: ApiFromModules<{
   devices: typeof devices;
   driverGrants: typeof driverGrants;
   fleet: typeof fleet;
+  health: typeof health;
   http: typeof http;
   "lib/authz": typeof lib_authz;
   "lib/deviceAuth": typeof lib_deviceAuth;

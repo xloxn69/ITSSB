@@ -118,6 +118,25 @@ export default defineSchema({
     .index("by_run_captured", ["runId", "capturedAtMs"])
     .index("by_run_sequence", ["runId", "runSequence"]),
 
+  /**
+   * Latest health heartbeat per device (docs/08 §7). One row per device,
+   * replaced by each newer report; `receivedAtMs` is server time. Holds no
+   * coordinates. Lets families tell "connected, no GPS fix" from "no contact".
+   */
+  deviceHealth: defineTable({
+    deviceId: v.id("devices"),
+    bootId: v.string(),
+    capturedAtMs: v.number(),
+    receivedAtMs: v.number(),
+    appVersion: v.string(),
+    /** As reported by the Pi; informational, never used for access. */
+    reportedRunId: v.union(v.string(), v.null()),
+    gpsStatus: v.union(v.literal("valid"), v.literal("no_fix"), v.literal("receiver_missing"), v.literal("unknown")),
+    lastValidFixAtMs: v.union(v.number(), v.null()),
+    pendingCount: v.number(),
+    oldestPendingCapturedAtMs: v.union(v.number(), v.null()),
+  }).index("by_device", ["deviceId"]),
+
   /** Compact current position per run; what clients subscribe to. */
   liveState: defineTable({
     runId: v.id("runs"),

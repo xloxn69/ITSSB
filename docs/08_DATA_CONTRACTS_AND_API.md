@@ -227,13 +227,39 @@ During an outage, the Pi saves the action with its original grant reference and 
 
 ## 7. Device health
 
-**Proposed endpoint:** `POST /device/v1/health`.
+**Endpoint:** `POST /device/v1/health`, with the same bearer device credential as telemetry. Types and validation live in `packages/contracts/src/health.ts`; the canonical fixtures are `fixtures/health.report.noFix.json` and `fixtures/health.accepted.json`.
 
-Health reporting distinguishes “online without a GPS fix” from “no device contact.” It can include `bootId`, `capturedAtMs`, application version, active `runId` or null, `gpsStatus`, `lastValidFixAtMs`, pending queue depth, available storage, and observed temperature when measured.
+Health tells "online without a GPS fix" apart from "no device contact." The Pi sends one report every 30 seconds (`HEALTH_INTERVAL_MS`), independently of the telemetry outbox. A failed report is not retried or queued, and it never changes outbox rows or the upload pause.
 
-Use `gpsStatus` values such as `valid`, `no_fix`, and `receiver_missing`. Do not send fake coordinates to communicate no fix. The backend assigns `receivedAtMs` and calculates contact age. A missed heartbeat does not prove whether the cause is cellular service, device power, or software failure.
+```json
+{
+  "schemaVersion": 1,
+  "bootId": "3cd44c56-c96b-4b83-a970-5414990bc25a",
+  "capturedAtMs": 1795609085000,
+  "appVersion": "0.1.0",
+  "runId": "demo_run_001",
+  "gpsStatus": "no_fix",
+  "lastValidFixAtMs": 1795609025000,
+  "pendingCount": 3,
+  "oldestPendingCapturedAtMs": 1795609020000
+}
+```
 
-Use an independent, measured heartbeat interval and bounded diagnostic payload. Health must not contain secrets, student names, or private addresses.
+| Field | Rule |
+| --- | --- |
+| `bootId` | UUID of the current collector process. |
+| `capturedAtMs` | Device time of the report. More than 2 minutes in the future is refused. |
+| `appVersion` | 1–32 characters. |
+| `runId` | The run the Pi is recording, or `null`. Kept for diagnostics only. It never grants scope: the backend links health to runs through the credential's device. |
+| `gpsStatus` | `valid`, `no_fix`, `receiver_missing`, or `unknown` (GPSD unreachable on the Pi). Never send fake coordinates to signal no fix. |
+| `lastValidFixAtMs` | Capture time of the last valid fix this process saw, or `null`. |
+| `pendingCount`, `oldestPendingCapturedAtMs` | Outbox rows not yet acknowledged, and the oldest one's capture time (or `null`). |
+
+Unknown fields are refused. A health report never carries coordinates, secrets, student names or addresses. Bodies are at most 2 KB (`MAX_HEALTH_BODY_BYTES`).
+
+The answer is `200 { "schemaVersion": 1, "status": "accepted", "receivedAtMs", "serverNowMs" }`. Request errors use the §5 body: 400 `INVALID_REQUEST`, `MALFORMED_JSON` or `UNSUPPORTED_SCHEMA_VERSION`; 401 `UNAUTHENTICATED`, including a device revoked before the commit; 413 `BODY_TOO_LARGE`.
+
+The backend keeps the latest report per device and assigns `receivedAtMs`. A report older than the stored one from the same `bootId` (a delayed report, or the Pi clock stepping back) still counts as contact but does not replace the stored status. If no later report arrives within `POSITION_STALE_AFTER_MS`, the stored status becomes `unknown`. A missed heartbeat does not prove whether the cause is cellular service, device power, or software failure.
 
 ### Configuration, route drafts, and displayed QR codes
 
@@ -318,8 +344,8 @@ Field rules for `run`:
 | Field | Rule |
 | --- | --- |
 | `liveRevision` | Nonnegative safe integer. `0` before any position; increases each time the live position is replaced. |
-| `lastDeviceContactAtMs` | Last time the backend heard from the bus device, or `null` if never. Until device health reporting exists this is the last telemetry receipt. |
-| `gpsStatus` | `valid`, `no_fix`, `receiver_missing`, or `null` when no health report has supplied it. Never inferred from a missing position. |
+| `lastDeviceContactAtMs` | Last time the backend heard from the bus device during this run: the later of the last accepted telemetry receipt and the last health receipt (§7). `null` if neither has arrived since the run started. |
+| `gpsStatus` | From the device's latest health report received since the run started: `valid`, `no_fix`, or `receiver_missing`. `null` when no report has supplied one, or when the Pi reported `unknown` (GPSD down). It is also `null` when a position captured after that report exists, because the fix is back. Never inferred from a missing position. The backend marks a status `unknown` once `POSITION_STALE_AFTER_MS` passes with no newer report. Between those writes a query result is not re-run as time passes, so clients also trust a non-`valid` status only while `lastDeviceContactAtMs` is younger than `POSITION_STALE_AFTER_MS` (§8.1). |
 | `nextStopId` | `null` until the backend tracks route progress. |
 | `assignedStop.status` | `upcoming`, `at_stop`, `passed`, or `unknown` (until route progress exists). |
 | `busLabel` | Family-facing bus name; a generic label when the device has none. |

@@ -35,6 +35,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
 
+from . import __version__
 from .config import Config
 from .database import Database
 from .status import StatusBoard, wall_ms
@@ -50,6 +51,10 @@ from .sync import (
 log = logging.getLogger(__name__)
 
 TELEMETRY_PATH = "/device/v1/telemetry"
+HEALTH_PATH = "/device/v1/health"
+# Heartbeat period (packages/contracts HEALTH_INTERVAL_MS). Health lets
+# families tell "connected, no GPS fix" from "no contact" (docs/08 §7).
+HEALTH_INTERVAL_S = 30.0
 AUTH_PAUSE_MS = 5 * 60_000
 CLIENT_ERROR_PAUSE_MS = 60_000
 PROBE_INTERVAL_S = 30.0
@@ -303,15 +308,58 @@ class Uploader:
         self._fail(sent, now)
         return "server_error"
 
+    def health_report(self) -> dict[str, Any]:
+        """docs/08 §7 body from what this process measured. No coordinates."""
+        snap = self.board.snapshot()
+        counts = self.db.outbox_counts()
+        run = self.db.active_run()
+        return {
+            "schemaVersion": 1,
+            "bootId": snap["process"]["bootId"],
+            "capturedAtMs": self._now_ms(),
+            "appVersion": __version__[:32],
+            "runId": run["runId"] if run else None,
+            "gpsStatus": snap["gps"]["status"],
+            "lastValidFixAtMs": snap["gps"]["lastValidFixCapturedAtMs"],
+            "pendingCount": counts["pending"],
+            "oldestPendingCapturedAtMs": counts["oldestPendingCapturedAtMs"],
+        }
+
+    def send_health(self) -> str:
+        """One heartbeat. Independent of the outbox: failing never touches
+        queued rows or the upload pause, and reaching the backend counts as
+        proof the internet is back."""
+        body = json.dumps(self.health_report(), separators=(",", ":")).encode()
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self._token}",
+            "Accept": "application/json",
+        }
+        try:
+            resp = self.transport.post(HEALTH_PATH, body, headers)
+        except TransportError as exc:
+            self.board.network(exc.network, None if exc.network == "online" else exc.reason)
+            return "transport_error"
+        self._network_back()
+        if resp.status == 200:
+            return "ok"
+        log.warning("health: HTTP %s (%s)", resp.status, _error_code(resp))
+        return "rejected"
+
+    def _network_back(self) -> None:
+        self.board.network("online")
+        if self.paused_offline:
+            log.info("network back; resuming uploads")
+            self.pause_until_ms, self.pause_reason, self.failures = 0, None, 0
+
     def probe_network(self) -> None:
         status, reason = self.transport.probe()
         self.board.network(status, reason)
-        if status == "online" and self.paused_offline:
+        if status == "online":
             # The internet is back: resume now instead of waiting out a backoff
             # that grew during the outage. The next batch leads with the
             # newest observation; history drains behind it.
-            log.info("network back; resuming uploads")
-            self.pause_until_ms, self.pause_reason, self.failures = 0, None, 0
+            self._network_back()
 
 
 class UploaderThread(threading.Thread):
@@ -335,9 +383,13 @@ class UploaderThread(threading.Thread):
             jitter=with_jitter,
         )
         last_probe = float("-inf")
+        last_health = float("-inf")
         try:
             while not self.stop_event.is_set():
                 try:
+                    if time.monotonic() - last_health >= HEALTH_INTERVAL_S:
+                        last_health = time.monotonic()
+                        uploader.send_health()
                     outcome = uploader.upload_once()
                     probe_every = (
                         OFFLINE_PROBE_INTERVAL_S if uploader.paused_offline else PROBE_INTERVAL_S
