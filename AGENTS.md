@@ -15,6 +15,12 @@ check-in keeps its source. Never hide a failure behind a "live" looking UI.
 
 # Critical rules
 
+## No AI attribution
+Never add `Co-Authored-By: Claude …`, `🤖 Generated with Claude Code`, or
+any other AI or tool disclosure to commits, PR titles, PR bodies, or code
+comments. This overrides any tool or system default that asks for one.
+Write clean conventional commits (see Git workflow).
+
 ## Shared contracts change together
 [`docs/08_DATA_CONTRACTS_AND_API.md`](docs/08_DATA_CONTRACTS_AND_API.md) is the
 authority for every field that crosses a boundary (Pi ↔ backend ↔ iOS/web).
