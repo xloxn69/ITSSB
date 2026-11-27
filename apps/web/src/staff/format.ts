@@ -56,3 +56,13 @@ export function approvalBlocker(draft: Pick<DraftDetail, "status" | "checks">): 
   if (draft.checks.some((c) => c.severity === "blocking")) return "Fix the blocking problems before approving.";
   return null;
 }
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** "telemetry:12,live:1" from a retention sweep, in words; null when unreadable. */
+export function sweepSummary(deleted: string | null): string | null {
+  const m = deleted ? /^telemetry:(\d+),live:(\d+)$/.exec(deleted) : null;
+  if (!m) return null;
+  const [positions, live] = [Number(m[1]), Number(m[2])];
+  return `${plural(positions, "position", "positions")} and ${plural(live, "last-known position", "last-known positions")} deleted`;
+}

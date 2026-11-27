@@ -10,7 +10,8 @@ export type StaffQueryName =
   | "routes:listDrafts"
   | "routes:getDraft"
   | "fleet:listDevices"
-  | "fleet:listDrivers";
+  | "fleet:listDrivers"
+  | "fleet:diagnostics";
 
 export type StaffMutationName = "routes:approveDraft" | "routes:rejectDraft" | "fleet:setBusLabel" | "fleet:revokeDevice";
 

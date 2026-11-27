@@ -211,3 +211,30 @@ export type CredentialIssuedResult =
       message: string;
     }
   | AccessUnavailable;
+// MARK: fleet:diagnostics
+
+/** Limited support view (docs/12 §11): IDs, ages and versions, never payloads, addresses or tokens. */
+export interface DeviceDiagnostics {
+  deviceId: string;
+  label: string;
+  busLabel: string | null;
+  revoked: boolean;
+  activeRunId: string | null;
+  /** Latest telemetry receipt (server time) for this device's most recent run; null when none. */
+  lastContactAtMs: number | null;
+  lastRun: { runId: string; state: "scheduled" | "active" | "completed" | "cancelled"; endedAtMs: number | null } | null;
+}
+
+export interface Diagnostics {
+  deployment: {
+    /** `ITSSB_RELEASE` on the deployment; null when not recorded. */
+    release: string | null;
+    /** `ITSSB_ENVIRONMENT` on the deployment; null when not recorded. */
+    environment: string | null;
+    contractSchemaVersion: number;
+  };
+  retention: { rawGpsDays: number; lastSweepAtMs: number | null; lastSweepDeleted: string | null };
+  devices: DeviceDiagnostics[];
+}
+
+export type DiagnosticsResult = Ready<Diagnostics> | AccessUnavailable;
