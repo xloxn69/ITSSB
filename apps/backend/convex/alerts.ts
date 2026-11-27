@@ -1,7 +1,9 @@
+import { ALERT_MAX_INPUT_AGE_MS } from "@itssb/contracts";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { internalMutation } from "./_generated/server";
 import { evaluateApproachingPage } from "./lib/alertRules";
+import { getRunProgress } from "./lib/progressStore";
 
 const estimate = v.object({
   stopId: v.string(),
@@ -14,8 +16,7 @@ const estimate = v.object({
  * Evaluates approaching alerts for one source position, a page of
  * assignments at a time, continuing itself until every recipient is
  * considered. Scheduled by telemetry ingest so its size never affects an
- * upload. `nowMs` is the ingest time: freshness is judged when the position
- * arrived, and the logical-key check keeps every page idempotent.
+ * upload. The logical-key check keeps every page idempotent.
  */
 export const evaluate = internalMutation({
   args: {
@@ -29,6 +30,12 @@ export const evaluate = internalMutation({
   handler: async (ctx, args) => {
     const run = await ctx.db.get(args.runId);
     if (!run) return;
+    // Each page rechecks that its source is still the run's newest matched
+    // position and still fresh now, not just when it arrived: a newer
+    // off-route fix or a delayed scheduler makes the estimate obsolete.
+    const progress = await getRunProgress(ctx, run._id);
+    if (!progress || progress.lastEventId !== args.sourceEventId || progress.lastStatus !== "on_route") return;
+    if (Date.now() - args.sourceCapturedAtMs >= ALERT_MAX_INPUT_AGE_MS) return;
     const next = await evaluateApproachingPage(
       ctx,
       run,

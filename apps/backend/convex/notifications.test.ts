@@ -236,7 +236,8 @@ describe("approaching alerts", () => {
     const east = eastForRemaining(305);
     await driveTo(s, east, s.NOW - 120_000);
     for (let i = 0; i < 8; i++) {
-      const captured = s.NOW - 100_000 + i * 10_000;
+      // Recent enough that evaluation, which checks freshness again on the real clock, still runs.
+      const captured = s.NOW - 21_000 + i * 3_000;
       const lag = i % 2 === 0 ? 1_000 : 8_000;
       await ingest(s, {
         deviceId: s.deviceId,
@@ -602,5 +603,68 @@ describe("independent review cases", () => {
     });
     const replay = await student.mutation(api.notifications.setPreferences, enableReq);
     expect(replay).toMatchObject({ status: "saved", preference: { approachingEnabled: false } });
+  });
+});
+
+describe("independent re-review cases", () => {
+  it("an evaluation queued before a newer off-route fix creates no alert", async () => {
+    const s = await setup();
+    await enable(s, STUDENT);
+    await register(s, STUDENT, TOKEN_A, INSTALL_A);
+    await driveTo(s, 400, s.NOW - 200_000);
+    // Approaching fix and a newer off-route fix commit before the evaluation runs.
+    await s.t.mutation(internal.telemetry.ingestBatch, {
+      deviceId: s.deviceId,
+      events: [event(s.runId, eastForRemaining(240), s.NOW - 4_000)],
+      nowMs: s.NOW - 3_500,
+    });
+    await s.t.mutation(internal.telemetry.ingestBatch, {
+      deviceId: s.deviceId,
+      events: [{ ...event(s.runId, eastForRemaining(235), s.NOW - 2_000), latitude: 34.103 }],
+      nowMs: s.NOW - 1_500,
+    });
+    await s.t.finishAllScheduledFunctions(vi.runAllTimers);
+    expect(await alerts(s)).toEqual([]);
+  });
+
+  it("an evaluation that runs after its source went stale creates no alert", async () => {
+    const s = await setup();
+    await enable(s, STUDENT);
+    const stale = Date.now() - 60_000;
+    const stopId = (await s.t.run((ctx) => ctx.db.get(s.assignmentId)))!.stopId;
+    await s.t.mutation(internal.alerts.evaluate, {
+      runId: s.runId,
+      sourceEventId: "late-event",
+      sourceCapturedAtMs: stale,
+      estimates: [{ stopId, arrivalAtMs: Date.now() + 60_000, validUntilMs: Date.now() + 60_000, generatedAtMs: stale }],
+      nowMs: stale + 1_000,
+      cursor: null,
+    });
+    expect(await alerts(s)).toEqual([]);
+  });
+
+  it("the same account may move its token to a reinstalled app's new installation", async () => {
+    const s = await setup();
+    await register(s, STUDENT, TOKEN_A, INSTALL_A);
+    const reinstalled = crypto.randomUUID();
+    expect(await register(s, STUDENT, TOKEN_A, reinstalled)).toMatchObject({ status: "registered", pushEnabled: true });
+    const rows = await s.t.run((ctx) => ctx.db.query("pushTokens").collect());
+    expect(rows.filter((r) => r.active).map((r) => r.installationId)).toEqual([reinstalled]);
+  });
+
+  it("a job is not sent once the bus has passed the stop", async () => {
+    const { s, jobId } = await oneJob();
+    await s.t.run(async (ctx) => {
+      const progress = await ctx.db.query("runProgress").first();
+      const assignment = await ctx.db.get(s.assignmentId);
+      await ctx.db.patch(progress!._id, {
+        stops: progress!.stops.map((o) =>
+          o.stopId === assignment!.stopId ? { ...o, departedAtMs: s.NOW } : o,
+        ),
+      });
+    });
+    const r = await s.t.mutation(internal.notificationJobs.claim, { jobId, leaseId: "l", nowMs: s.NOW });
+    expect(r).toBeNull();
+    expect(await s.t.run((ctx) => ctx.db.get(jobId))).toMatchObject({ state: "cancelled", endReason: "stop_reached" });
   });
 });

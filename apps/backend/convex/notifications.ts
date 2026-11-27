@@ -195,16 +195,20 @@ export const registerDevice = mutation({
     if (token !== null && !APNS_TOKEN.test(token)) return bad("apnsToken must be hex.");
 
     // A token belongs to the phone (installation) that holds it. Another
-    // installation presenting an active token is refused, never allowed to
-    // take it over. Account switching on the same phone is handled below.
+    // account's installation presenting an active token is refused, never
+    // allowed to take it over; the same account may move it. Account
+    // switching on the same installation is handled below.
     if (token) {
       const holders = await ctx.db
         .query("pushTokens")
         .withIndex("by_token", (q) => q.eq("token", token))
         .collect();
-      if (holders.some((h) => h.active && h.installationId !== args.installationId)) {
+      const elsewhere = holders.filter((h) => h.active && h.installationId !== args.installationId);
+      if (elsewhere.some((h) => h.userId !== user._id)) {
         return bad("This notification token is registered to another installation.");
       }
+      // The same account moving its token (a reinstall with a new installation ID).
+      for (const h of elsewhere) await ctx.db.patch(h._id, { active: false, updatedAtMs: nowMs });
     }
     // One installation, one current row: a phone that signs in as someone
     // else stops receiving the previous account's alerts.

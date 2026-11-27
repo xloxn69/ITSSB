@@ -4,6 +4,7 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx } from "./_generated/server";
 import { getTrackableAssignment } from "./lib/authz";
+import { getRunProgress } from "./lib/progressStore";
 import { pushResult } from "./lib/push";
 
 /**
@@ -64,6 +65,10 @@ async function stopReason(ctx: MutationCtx, job: Doc<"notificationJobs">): Promi
   ) {
     return "access_revoked";
   }
+  // The bus already reached or passed the stop: "approaching" is obsolete.
+  const progress = await getRunProgress(ctx, run._id);
+  const outcome = progress?.stops.find((o) => o.stopId === alert.stopId);
+  if (outcome && (outcome.arrivedAtMs !== null || outcome.departedAtMs !== null)) return "stop_reached";
   const pref = await ctx.db
     .query("notificationPreferences")
     .withIndex("by_user_assignment", (q) => q.eq("userId", user._id).eq("assignmentId", alert.assignmentId))
