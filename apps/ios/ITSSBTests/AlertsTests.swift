@@ -33,6 +33,31 @@ private final class RecordingNotificationSource: NotificationSource, @unchecked 
     }
 }
 
+/// Records tokens; can hold one call open, like a slow network.
+@MainActor
+private final class SuspendingSource: NotificationSource, @unchecked Sendable {
+    var tokens: [String?] = []
+    var suspendNext = false
+    var suspended: CheckedContinuation<Void, Never>?
+    func resume() { suspended?.resume(); suspended = nil }
+
+    nonisolated func alerts() -> AsyncThrowingStream<[AlertItem]?, Error> { AsyncThrowingStream { $0.yield([]) } }
+    nonisolated func preference(assignmentId: String) -> AsyncThrowingStream<NotificationPreference?, Error> {
+        AsyncThrowingStream { $0.yield(nil) }
+    }
+    nonisolated func savePreference(assignmentId: String, enabled: Bool, minutes: Int) async throws
+        -> NotificationPreference { throw NotificationError.rejected }
+    func registerDevice(installationId: String, token: String?, environment: PushEnvironment,
+                        permission: PushPermission) async throws -> Bool {
+        tokens.append(token)
+        if suspendNext {
+            suspendNext = false
+            await withCheckedContinuation { suspended = $0 }
+        }
+        return token != nil
+    }
+}
+
 private struct FixedPermission: PushAuthorizing {
     let value: PushPermission
     func currentPermission() async -> PushPermission { value }
@@ -128,10 +153,29 @@ final class AlertsTests: XCTestCase {
         XCTAssertEqual(source.registrations.count, count)
     }
 
+    func testATokenArrivingDuringDeactivationIsNotRegistered() async {
+        let source = SuspendingSource()
+        let registrar = PushRegistrar(source: source, authorizing: FixedPermission(value: .authorized),
+                                      ids: defaults(), environment: .sandbox) {}
+        await registrar.refresh()
+        source.suspendNext = true
+        let deactivation = Task { await registrar.deactivate() }
+        _ = await eventuallyTrue { source.suspended != nil }
+        await registrar.didRegister(deviceToken: Data([0xee])) // APNs callback mid-deactivation
+        source.resume()
+        await deactivation.value
+        XCTAssertEqual(source.tokens, [nil, nil])
+    }
+
     func testNotificationTapCarriesOnlyTheAssignment() {
         XCTAssertEqual(NotificationRouter.assignmentId(from: ["itssb": ["type": "approaching",
                                                                          "assignmentId": "a1"]]), "a1")
         XCTAssertNil(NotificationRouter.assignmentId(from: ["aps": ["alert": "x"]]))
+    }
+
+    private func eventuallyTrue(_ condition: @escaping () -> Bool) async -> Bool {
+        for _ in 0..<500 where !condition() { await Task.yield() }
+        return condition()
     }
 
     private func waitUntil(_ condition: @escaping () -> Bool) async throws {

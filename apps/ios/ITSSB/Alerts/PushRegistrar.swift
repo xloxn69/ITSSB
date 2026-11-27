@@ -91,14 +91,17 @@ final class PushRegistrar {
     /// the account's pushes, and later token callbacks are not sent.
     func deactivate() async {
         guard signedIn else { return }
+        // Fence first: a token callback or refresh arriving while this awaits
+        // must not register again. Mutations from one client run in order, so
+        // anything already sent lands before this one.
+        signedIn = false
+        pushEnabled = false
         do {
             _ = try await source.registerDevice(installationId: installationId, token: nil,
                                                 environment: environment, permission: permission)
         } catch {
             registrationFailed = true
         }
-        signedIn = false
-        pushEnabled = false
     }
 
     func requestPermission() async {
