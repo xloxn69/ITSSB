@@ -437,6 +437,48 @@ describe("staff approval", () => {
     });
   });
 
+  it("refuses to attach a differently named student to an account that already has one", async () => {
+    const { t, stopA, otherRouteId, otherStop, staffId } = await setup();
+    const first = await submitted(t);
+    await as(t, STAFF).mutation(api.enrollment.approve, { enrollmentRequestId: first, stopId: stopA });
+    const otherToken = "3333-4444-5555-6666-7777";
+    const otherHash = await hash(otherToken);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("scopedTokens", {
+        tokenHash: otherHash,
+        purpose: "route_enrollment",
+        routeId: otherRouteId,
+        issuedByUserId: staffId,
+        issuedAtMs: Date.now(),
+        expiresAtMs: Date.now() + HOUR,
+        revoked: false,
+        singleUse: false,
+      });
+    });
+    // Alex's own account asks to enroll a sibling under its own identity.
+    const r = await as(t, APPLICANT).mutation(
+      api.enrollment.request,
+      requestArgs({ requestId: "c7d0b1a2-0000-4000-8000-000000000010", token: otherToken, studentName: "Blake Sibling", stopId: otherStop }),
+    );
+    const second = (r as { enrollmentRequestId: string }).enrollmentRequestId;
+    expect(await as(t, STAFF).mutation(api.enrollment.approve, { enrollmentRequestId: second, stopId: otherStop })).toMatchObject({
+      status: "refused",
+      code: "account_conflict",
+    });
+    // Alex's account gained nothing for Blake.
+    expect((await as(t, APPLICANT).query(api.tracking.myAssignments, {}) as { assignments: unknown[] }).assignments).toHaveLength(1);
+  });
+
+  it("a rejection's free-text reason stays on the private request, not in the audit log", async () => {
+    const { t } = await setup();
+    const enrollmentRequestId = await submitted(t);
+    const why = `${ADDRESS} is outside the service area`;
+    await as(t, STAFF).mutation(api.enrollment.reject, { enrollmentRequestId, reason: why });
+    const rows = JSON.stringify(await t.run((ctx) => ctx.db.query("auditLog").collect()));
+    expect(rows).toContain("enrollment.reject");
+    expect(rows).not.toContain(ADDRESS);
+  });
+
   it("staff review shows the private address; the audit log never holds it or a token", async () => {
     const { t, stopA } = await setup();
     const enrollmentRequestId = await submitted(t, APPLICANT, stopA);
