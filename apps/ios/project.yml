@@ -60,6 +60,8 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSSBEnvironment: $(ITSSB_ENVIRONMENT)
         ITSSBSourceRevision: $(ITSSB_SOURCE_REVISION)
+        # Trip check-in scans the code on the bus screen (docs/09 §6).
+        NSCameraUsageDescription: ITSSB uses the camera to scan the check-in code shown on your bus.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(ITSSB_BUNDLE_ID)

@@ -12,6 +12,11 @@ struct AppEnvironment {
     /// Nil without sign-in and in fixture mode: screenshots never touch OS notification settings.
     var registrar: PushRegistrar?
     var initialTab: AppTab = .track
+    /// Join a route, link a student, check in (docs/09). Nil only in previews that don't need it.
+    var enrollment: (any EnrollmentSource)?
+    #if DEBUG
+    var enrollmentScreen: FamilyScreen?
+    #endif
 
     static func make(configuration: AppConfiguration = .fromBundle(),
                      arguments: [String] = ProcessInfo.processInfo.arguments) -> AppEnvironment {
@@ -25,7 +30,8 @@ struct AppEnvironment {
             let querying = ConvexClientQuerying(client: client)
             return AppEnvironment(session: SessionStore(auth: UnconfiguredAuthSession()),
                                   source: ConvexLiveRunSource(client: querying),
-                                  notifications: ConvexNotificationSource(queries: querying, commands: querying))
+                                  notifications: ConvexNotificationSource(queries: querying, commands: querying),
+                                  enrollment: ConvexEnrollmentSource(client: client))
         }
         let backend = ClerkSDKBackend(publishableKey: publishableKey)
         let provider = ClerkConvexTokenProvider { backend }
@@ -47,7 +53,8 @@ struct AppEnvironment {
         // While still signed in: this phone stops receiving the account's pushes.
         session.beforeSignOut = { await registrar.deactivate() }
         return AppEnvironment(session: session, source: ConvexLiveRunSource(client: querying),
-                              notifications: notifications, registrar: registrar)
+                              notifications: notifications, registrar: registrar,
+                              enrollment: ConvexEnrollmentSource(client: client))
     }
 
     #if DEBUG
@@ -67,6 +74,17 @@ struct AppEnvironment {
     }
 
     private static func previewEnvironment(arguments: [String]) -> AppEnvironment? {
+        // `home` opens My Route itself; any other value opens that screen.
+        if let name = value(after: "-ITSSBEnrollmentScreen", in: arguments),
+           name == "home" || FamilyScreen(rawValue: name) != nil {
+            let screen = FamilyScreen(rawValue: name)
+            let variant = value(after: "-ITSSBEnrollmentVariant", in: arguments)
+                .flatMap(PreviewEnrollmentSource.Variant.init(rawValue:)) ?? .normal
+            return AppEnvironment(session: SessionStore(auth: PreviewAuthSession()),
+                                  source: PreviewLiveRunSource(scenario: .live),
+                                  notifications: PreviewNotificationSource(scenario: .live), initialTab: .route,
+                                  enrollment: PreviewEnrollmentSource(variant: variant), enrollmentScreen: screen)
+        }
         if let auth = authScenario(from: arguments) {
             let session = SessionStore(auth: PreviewAuthSession(configured: auth != .notConfigured))
             auth.apply(to: session)
