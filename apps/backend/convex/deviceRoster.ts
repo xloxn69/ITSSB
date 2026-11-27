@@ -222,8 +222,11 @@ async function decide(
   if (a.capturedAtMs > nowMs + MAX_FUTURE_SKEW_MS || nowMs - a.capturedAtMs > MAX_QUEUED_ACTION_AGE_MS) {
     return reject(a, "capture_time_out_of_range", "The action's time is not plausible.", nowMs);
   }
+  // The grant must still be current when the action arrives (docs/08 §6:
+  // a capture time alone never overrides an expired or revoked grant), and
+  // the action must have been captured while it was valid.
   const grant = await grantForDevice(ctx, grantHash, device);
-  if (!grant || a.capturedAtMs < grant.issuedAtMs || a.capturedAtMs > grant.expiresAtMs) {
+  if (!grant || grant.expiresAtMs <= nowMs || a.capturedAtMs < grant.issuedAtMs || a.capturedAtMs > grant.expiresAtMs) {
     return reject(a, "grant_not_authorized", "The driver was not authorized for this when it was recorded.", nowMs);
   }
   const assignmentId = ctx.db.normalizeId("assignments", a.assignmentId);
@@ -273,7 +276,8 @@ async function decide(
     run.routeVersionId !== assignment.routeVersionId ||
     run.startedAtMs === undefined ||
     a.capturedAtMs < run.startedAtMs ||
-    (run.endedAtMs !== undefined && a.capturedAtMs > run.endedAtMs) ||
+    // The end as captured on the bus, not when it reached the server.
+    a.capturedAtMs > (run.endCapturedAtMs ?? run.endedAtMs ?? Number.POSITIVE_INFINITY) ||
     (run.state !== "active" && run.state !== "completed")
   ) {
     return reject(a, "run_not_authorized", "That action doesn't match a trip this bus ran.", nowMs);
@@ -299,6 +303,13 @@ async function decide(
   const target = targetId ? await ctx.db.get(targetId) : null;
   if (!target || target.runId !== run._id || target.studentId !== assignment.studentId) {
     return reject(a, "correction_target_invalid", "The record to correct isn't this student's on this trip.", nowMs);
+  }
+  // Corrections are ordered by when they were made on the bus: one captured
+  // before the correction that is current now is superseded, so a late
+  // queued change never overrides a newer one.
+  const current = await currentCheckIn(ctx, run._id, assignment.studentId);
+  if (current && current.source === "staff_correction" && current.recordedAtMs >= a.capturedAtMs) {
+    return ok("superseded", current);
   }
   const reason = a.reason.trim();
   const row = await appendCorrection(ctx, {

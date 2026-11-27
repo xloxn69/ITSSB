@@ -437,9 +437,10 @@ The first record for a student, run and `boarding` phase is the logical record; 
 | `routes:removeAssignment` (mutation) | staff | `{ requestId, assignmentId, reason }` | `accepted`, or `refused` (`reason_required`, `not_found`, `already_removed`). |
 
 **Offline driver actions.** The Pi persists each action with its `requestId` and `capturedAtMs` before sending, shows it as pending sync, and retries with the same identity until it receives a result. The backend rechecks authority when it accepts the action:
-- **The grant:** it must belong to this device and must not be revoked. Revocation time is not recorded, so a revoked grant can't prove it was valid at capture. `capturedAtMs` must fall within the grant's validity, no more than 2 minutes in the future and no more than 24 hours old.
+- **The grant:** it must belong to this device, must not be revoked, and must still be current when the action arrives: a capture time never overrides an expired or revoked grant (§6). Revocation time is not recorded, so a revoked grant can't prove it was valid at capture. `capturedAtMs` must also fall within the grant's validity, no more than 2 minutes in the future and no more than 24 hours old. An action that can't sync before its grant expires is `rejected`; staff record it instead.
 - **The assignment:** it must be on a route the grant covers.
-- **Attendance:** the action must have been captured on that device's run while it was going.
+- **Attendance:** the action must have been captured on that device's run while it was going, between its start and the end as captured on the bus (`endCapturedAtMs`), even if the end reached the server later.
+- **Corrections:** ordered by capture time. A queued correction captured before the correction that is current now is `superseded`; a newer one becomes current. Rows are never edited or deleted.
 
 A rejected action is final, and the Pi shows it; a removal is not in effect until it is `accepted`. Request-level failures use §5: `400` (`INVALID_REQUEST`, `MALFORMED_JSON`, `UNSUPPORTED_SCHEMA_VERSION`), `401` `UNAUTHENTICATED`, `403` (`GRANT_NOT_AUTHORIZED`, `RUN_NOT_AUTHORIZED`), and `413` above 8 KiB.
 
