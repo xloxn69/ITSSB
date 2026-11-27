@@ -117,10 +117,12 @@ SERVER_REFUSAL_WORDS = {
     "RUN_NOT_AUTHORIZED": "The school server does not recognize this run for this device.",
     "UNAUTHENTICATED": "The school server did not accept this device's credential.",
 }
-QR_FALLBACK = (
-    "No current code from the school server, so none is shown. "
-    "Record attendance in Show Students instead."
-)
+QR_FALLBACK = {
+    "trip_check_in": "No current code from the school server, so none is shown. "
+    "Record attendance in Show Students instead.",
+    "route_enrollment": "No current code from the school server, so none is shown. "
+    "Families can ask school staff to add them instead.",
+}
 
 
 def ensure_schema(db: Database) -> None:
@@ -430,7 +432,7 @@ class StudentDesk:
         if cached is not None and cached.remaining_ms(now) > 0:
             return HTTPStatus.OK, self._qr_view(cached, now, refresh_failed=True)
         self._qr.pop(purpose, None)
-        return _error(HTTPStatus.SERVICE_UNAVAILABLE, "QR_UNAVAILABLE", QR_FALLBACK)
+        return _error(HTTPStatus.SERVICE_UNAVAILABLE, "QR_UNAVAILABLE", QR_FALLBACK[purpose])
 
     @staticmethod
     def _qr_view(c: _CachedQr, now: int, *, refresh_failed: bool) -> dict[str, Any]:

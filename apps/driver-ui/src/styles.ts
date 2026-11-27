@@ -117,7 +117,7 @@ svg.route .stop-n { fill: var(--color-on-brand); font-size: var(--font-size-capt
 
 /* D15-D19: QR codes and the roster */
 .qr-wrap { display: grid; grid-template-columns: auto 1fr; gap: var(--space-xl); align-items: start; }
-.qr-box { width: calc(var(--touch-driver-primary) * 5.5); height: calc(var(--touch-driver-primary) * 5.5); }
+.qr-box { width: calc(var(--touch-driver-primary) * 4.75); height: calc(var(--touch-driver-primary) * 4.75); }
 /* Dark modules on a light field in both themes, so every scanner reads it. */
 svg.qr { width: 100%; height: 100%; display: block; border-radius: var(--radius-md); }
 svg.qr .qr-light { fill: var(--color-brand); }

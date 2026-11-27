@@ -186,9 +186,16 @@ export function rosterRows(r: RosterResponse): RosterRow[] {
   const rowFor = (id: string, base: Omit<RosterRow, "actions" | "removal" | "attendancePending" | "assignmentId">): RosterRow => {
     const actions = byStudent.get(id) ?? [];
     const removal = actions.find((a) => a.type === "removeAssignment");
+    // A record the server returned for this device's change, newer than the
+    // roster it last sent, is the current record until the roster catches up.
+    let checkIn = base.checkIn;
+    for (const a of actions) {
+      if (a.sync === "synced" && a.checkIn && (checkIn === null || a.checkIn.receivedAtMs > checkIn.receivedAtMs)) checkIn = a.checkIn;
+    }
     return {
       assignmentId: id,
       ...base,
+      checkIn,
       actions,
       removal: removal ? syncLabel(removal) : null,
       attendancePending: actions.some((a) => a.sync === "pending" && (a.type === "recordAttendance" || a.type === "correctAttendance")),

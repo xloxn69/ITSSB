@@ -108,9 +108,10 @@ function button(text: string, onclick: () => void, opts: { primary?: boolean; di
   return h("button", { class: cls, onclick, disabled: opts.disabled ?? false }, text);
 }
 
-function syncPill(a: RosterAction): HTMLElement {
+/** A change's sync state; `what` also names the change (in the roster list). */
+function syncPill(a: RosterAction, what = false): HTMLElement {
   const level = a.sync === "synced" ? "ok" : a.sync === "rejected" ? "problem" : "warn";
-  return h("span", { class: `sync lv-${level}` }, syncLabel(a));
+  return h("span", { class: `sync lv-${level}` }, what ? `${actionText(a)} · ${syncLabel(a)}` : syncLabel(a));
 }
 
 // ── D15 / D16 QR codes ──────────────────────────────────────────────
@@ -155,7 +156,10 @@ export function qrView(o: Observed, ui: StudentUi, c: StudentController, now: nu
       "div",
       { class: "card qr-blank" },
       h("h2", {}, why),
-      mode.purpose === "trip_check_in"
+      // The device's refusal already names the fallback; otherwise say it here.
+      ui.qrError !== null && !(code && !showable)
+        ? null
+        : mode.purpose === "trip_check_in"
         ? h("p", { class: "muted" }, "Students without a phone or a working code: record them in Show Students.")
         : h("p", { class: "muted" }, "Families can also ask school staff to add them to this route."),
     );
@@ -227,7 +231,7 @@ export function rosterView(ui: StudentUi, c: StudentController, now: number): HT
             h("span", { class: "name" }, row.name),
             h("span", { class: "muted" }, studentLine(row)),
             h("span", {}, row.onRoster ? checkInText(row.checkIn) : (row.removal ?? "")),
-            latest ? syncPill(latest) : null,
+            latest ? syncPill(latest, true) : null,
           ),
           h(
             "div",

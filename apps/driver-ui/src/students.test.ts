@@ -165,6 +165,14 @@ describe("roster wording", () => {
     expect(robin?.removal).toBe("Removed from route · Synced");
   });
 
+  it("a synced change's record shows before the roster catches up, and an older one does not", () => {
+    const rec = { checkInId: "demo_check_in_009", status: "boarded", source: "staff_recorded", recordedAtMs: 5, receivedAtMs: 1_795_608_900_000 } as const;
+    const synced = action({ sync: "synced", result: "accepted", checkIn: rec });
+    expect(rosterRows({ ...roster, actions: [synced] }).find((r) => r.assignmentId === "demo_assignment_002")?.checkIn).toEqual(rec);
+    const older = action({ assignmentId: "demo_assignment_001", sync: "synced", result: "already_recorded", checkIn: { ...rec, receivedAtMs: 1 } });
+    expect(rosterRows({ ...roster, actions: [older] }).find((r) => r.assignmentId === "demo_assignment_001")?.checkIn?.source).toBe("student_qr_claim");
+  });
+
   it("lists students in stop order", () => {
     expect(rosterRows(roster).map((r) => r.name)).toEqual(["Blake Example", "Sam Example"]);
   });
