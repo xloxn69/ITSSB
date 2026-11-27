@@ -41,7 +41,8 @@ struct TrackView: View {
                 .font(AppFonts.body)
                 .foregroundStyle(AppColors.textSecondary)
         case let .tracking(context, run, clock):
-            TrackingScreen(context: context, run: run, clock: clock, picker: picker)
+            TrackingScreen(context: context, run: run, clock: clock, picker: picker,
+                           connectionLost: model.connectionLost)
         case .noActiveRun(let context):
             NoActiveRunScreen(context: context, picker: picker)
         case .accessUnavailable:
@@ -73,17 +74,20 @@ private struct TrackingScreen: View {
     let run: TrackedRun
     let clock: ServerClock
     let picker: AssignmentPicker
+    let connectionLost: Bool
 
     var body: some View {
         // Re-derive every second: age advances and stale arrives with no new update.
         TimelineView(.periodic(from: .now, by: 1)) { timeline in
             let presentation = LivePresentation.make(run: run, clock: clock, now: timeline.date)
+                .whileDisconnected(connectionLost)
             BusMapView(route: context.route, stop: run.assignedStop,
                        bus: presentation.showsMarker ? run.position : nil,
                        busLabel: run.busLabel, dimsBus: presentation.dimsMarker)
                 .safeAreaInset(edge: .top) { TripHeader(context: context, picker: picker) }
                 .safeAreaInset(edge: .bottom) {
-                    TripStatusCard(copy: StatusCopy.make(presentation, run: run, clock: clock, now: timeline.date),
+                    TripStatusCard(copy: StatusCopy.make(presentation, run: run, clock: clock, now: timeline.date,
+                                                         connectionLost: connectionLost),
                                    stopLabel: run.assignedStop.label,
                                    eta: EtaPresentation.make(run: run, clock: clock, now: timeline.date),
                                    progress: EtaPresentation.stopProgress(run))

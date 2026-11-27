@@ -139,13 +139,13 @@ Recorded 2026-11-26 against the development backend, with fictional data only. T
 | D06 interface restart only | The driver UI is a page over the read-only local API; the service holds no per-page state | Four driver page sessions opened and closed during drill 3; collection never paused | Pass |
 | D07 bus internet loss | `test_outages.py::test_d07_d08` | Queue grew to about 37 rows, 73 s behind; GPS stayed valid; the driver screen showed "School server: Not reachable" and the queue count | Pass |
 | D08 reconnect with backlog | `test_uploader.py` D08 tests (failed before the fix in #35); `test_outages.py::test_d07_d08` (newest first) | First acknowledgement 4.0 s after the link returned in both drills; backlog cleared within 2 s | Pass |
-| D09 GPS loss, internet up | Device: `test_outages.py::test_d09`, `test_health.py`. Backend: `health.test.ts`. Clients: web `tracking.test.ts` D09 gating, iOS `testGpsProblemNeedsRecentContact` | GPS `no_fix`, last fix kept its time, nothing recorded, network and backend ok; the driver screen showed "GPS: No fix — last fix 36 s ago" | Pass. Family path is tested, not yet seen live on dev |
+| D09 GPS loss, internet up | Device: `test_outages.py::test_d09`, `test_health.py`. Backend: `health.test.ts`. Clients: web `tracking.test.ts` D09 gating, iOS `testGpsProblemNeedsRecentContact` | GPS `no_fix`, last fix kept its time, nothing recorded, network and backend ok; the driver screen showed "GPS: No fix — last fix 36 s ago" | Pass. Live on dev, the backend stored the Pi's `no_fix` heartbeat within 30 s; the family query was not run live because another session's run held the only dev route |
 | D10 invalid / conflicting | `validate.test.ts` (NaN, range, future); `telemetry.test.ts` content conflict | — | Pass |
 | D13 end trip offline | `test_runs_api.py` end completes locally, stays pending, retries the same request | — | Pass (device); backend `tripEvents.test.ts` |
 | D15 end during a write | `test_recorder.py` run ended between check and write; `tripEvents.test.ts` final sequence boundary | — | Pass |
 | D11, D12, D14 | Not in this milestone: route progress and alerts (Phase 8), queue limits, staff assignment workflow | — | Not run |
 
-Phone internet loss is a client state. Web shows a "Connection lost" banner and never calls the position fresh while disconnected (`live.test.ts`). iOS ages the position on screen; its explicit connection banner is tracked separately.
+Phone internet loss is a client state. Web shows a "Connection lost" banner and never calls the position fresh while disconnected (`live.test.ts`). iOS does the same: while the phone reconnects, the status card says "Reconnecting — Your phone lost its connection" and never calls the position fresh (`TrackViewModelTests`, `StatusCopyTests`, `LivePresentationTests` connection-lost cases). Starting up is not treated as lost.
 
 The live PR for this phase holds the drill transcripts and screenshots.
 

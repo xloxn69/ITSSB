@@ -32,11 +32,16 @@ final class TrackViewModel {
     private(set) var state: TrackState = .loading
     private(set) var assignments: [AssignmentSummary] = []
     private(set) var selectedAssignmentId: String?
+    /// The phone lost its link after having had one (docs/06 I25). While it
+    /// is true nothing is shown as fresh and the card says the phone is
+    /// reconnecting. Starting up is not "lost".
+    private(set) var connectionLost = false
 
     private let source: any LiveRunSource
     /// Bumped on every selection change; results from older generations are dropped.
     private var generation = 0
     private var assignmentsTask: Task<Void, Never>?
+    private var connectionTask: Task<Void, Never>?
     private var selectionTask: Task<Void, Never>?
     private var route: RouteGeometry?
     private var runSnapshot: RunSnapshot?
@@ -50,12 +55,16 @@ final class TrackViewModel {
         stop()
         state = .loading
         assignmentsTask = Task { await observeAssignments() }
+        connectionTask = Task { await observeConnection() }
     }
 
     /// Cancels every subscription and drops protected data.
     func stop() {
         assignmentsTask?.cancel()
         assignmentsTask = nil
+        connectionTask?.cancel()
+        connectionTask = nil
+        connectionLost = false
         clearSelection()
         assignments = []
     }
@@ -87,6 +96,15 @@ final class TrackViewModel {
     }
 
     // MARK: Subscriptions
+
+    private func observeConnection() async {
+        var everConnected = false
+        for await connected in source.connection() {
+            guard !Task.isCancelled else { return }
+            everConnected = everConnected || connected
+            connectionLost = everConnected && !connected
+        }
+    }
 
     private func observeAssignments() async {
         do {

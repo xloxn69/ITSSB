@@ -13,9 +13,16 @@ struct StatusCopy: Equatable {
     let tone: Tone
 
     static func make(_ presentation: LivePresentation, run: TrackedRun, clock: ServerClock, now: Date,
-                     timeZone: TimeZone = .current) -> StatusCopy {
+                     timeZone: TimeZone = .current, connectionLost: Bool = false) -> StatusCopy {
         let age = run.position.map { AgeFormatter.updatedText(age: $0.age(at: now, clock: clock)) }
         let stop = run.assignedStop.label
+        if connectionLost, case .live = presentation {
+            // The phone is offline, not the bus (docs/06 I25).
+            return StatusCopy(title: "Reconnecting",
+                              detail: "Your phone lost its connection. The bus position keeps aging "
+                                + "until updates return.",
+                              age: age, systemImage: "wifi.slash", tone: .aging)
+        }
         switch presentation {
         case .live(.fresh):
             // Location only: route progress is unknown until the backend tracks it (docs/08 §8),

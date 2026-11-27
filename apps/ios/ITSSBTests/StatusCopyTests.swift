@@ -72,4 +72,17 @@ final class StatusCopyTests: XCTestCase {
         XCTAssertNil(done.age)
         XCTAssertEqual(copy(secondsAgo: 4, state: .cancelled).title, "Trip cancelled")
     }
+
+    /// I25: an offline phone says so instead of blaming the bus.
+    func testOfflinePhoneIsNotBlamedOnTheBus() {
+        let run = PreviewFixtures.run(position: PreviewFixtures.position(capturedSecondsAgo: 4, now: now))
+        let presentation = LivePresentation.make(run: run, clock: .deviceOnly, now: now).whileDisconnected(true)
+        let copy = StatusCopy.make(presentation, run: run, clock: .deviceOnly, now: now, timeZone: utc,
+                                   connectionLost: true)
+        XCTAssertEqual(copy.title, "Reconnecting")
+        XCTAssertTrue(copy.detail.contains("Your phone"))
+        XCTAssertFalse(copy.detail.contains("hasn't reported"))
+        XCTAssertEqual(copy.tone, .aging)
+        XCTAssertEqual(copy.age, "Updated just now")
+    }
 }
