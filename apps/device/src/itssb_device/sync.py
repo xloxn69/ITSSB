@@ -30,6 +30,21 @@ def with_jitter(delay_ms: int) -> int:
     return delay_ms + int(delay_ms * 0.2 * random.random())  # noqa: S311 - not security
 
 
+def note_request_failure(db: Database, sent_event_ids: Iterable[str], reason: str) -> None:
+    """A request-level failure (no answer, 5xx, unreadable body) says nothing
+    about any single event. Count the attempt but add no per-row delay: the
+    uploader's request-level pause already throttles retries, and a per-row
+    delay would hold the backlog back for minutes after the link returns
+    (docs/13 D08)."""
+    with db.transaction() as tx:
+        for event_id in dict.fromkeys(sent_event_ids):
+            tx.execute(
+                "UPDATE outbox SET attempts=attempts+1, last_error=? "
+                "WHERE event_id=? AND status='pending'",
+                (reason, event_id),
+            )
+
+
 def apply_results(
     db: Database,
     sent_event_ids: Iterable[str],

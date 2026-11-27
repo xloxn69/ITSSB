@@ -9,8 +9,8 @@ from itssb_device.database import Database
 from itssb_device.devtools.fake_backend import FakeBackend
 from itssb_device.models import Fix
 from itssb_device.status import StatusBoard
-from itssb_device.sync import backoff_ms
-from itssb_device.uploader import AUTH_PAUSE_MS, HttpTransport, Uploader, classify
+from itssb_device.sync import MAX_BACKOFF_MS, backoff_ms
+from itssb_device.uploader import AUTH_PAUSE_MS, HttpTransport, TransportError, Uploader, classify
 
 TOKEN = "fake-dev-token"  # noqa: S105 - obviously fake
 BOOT = "3cd44c56-c96b-4b83-a970-5414990bc25a"
@@ -214,3 +214,67 @@ def test_after_an_outage_the_newest_observation_goes_first(db, backend):
         pass
     sent = [e for r in backend.requests for e in r["eventIds"]]
     assert sorted(sent) == sorted(ids)  # each event sent exactly once
+
+
+class SwitchableTransport(HttpTransport):
+    """The real transport with a "bus internet" switch: while `offline`, every
+    connection fails the way a dead cellular link does (no route to host)."""
+
+    def __init__(self, origin):
+        super().__init__(origin, 2.0)
+        self.offline = False
+
+    def _connect(self):
+        if self.offline:
+            raise TransportError(OSError(errno.ENETUNREACH, "unreachable"), connected=False)
+        return super()._connect()
+
+    def probe(self):
+        if self.offline:
+            return "offline", "OSError"
+        return super().probe()
+
+
+def test_d08_reconnect_resumes_fresh_tracking_promptly_after_a_long_outage(db, backend):
+    """D07/D08: a long outage must not leave the uploader in a minutes-long
+    backoff once the internet is back. The probe that sees the network
+    return ends an offline pause, and the newest observation leads."""
+    transport = SwitchableTransport(backend.origin)
+    board = StatusBoard(BOOT, upload_enabled=True)
+    clock = Clock()
+    up = Uploader(db, board, transport, TOKEN, now_ms=clock)
+    transport.offline = True
+    history = add(db, 30)
+    for _ in range(12):  # about ten minutes of failed attempts
+        clock.t = max(clock.t, up.pause_until_ms) + 1
+        assert up.upload_once() == "transport_error"
+    assert board.snapshot()["network"]["status"] == "offline"
+    assert board.snapshot()["backend"]["lastOkAtMs"] is None  # no claimed sync
+    assert up.pause_until_ms - clock.t >= 60_000  # deep in backoff
+    assert backend.requests == []
+
+    transport.offline = False
+    [fresh] = [
+        db.record_observation(
+            "demo_run_001", Fix(1_795_609_090_000, 34.2, -83.9, None, None, None, 3), BOOT, 30
+        ).event_id
+    ]
+    clock.t += 1_000
+    up.probe_network()  # the uploader thread probes while paused
+    assert up.upload_once() == "ok"
+    assert backend.requests[0]["eventIds"][0] == fresh  # current position first
+
+    clock.t += MAX_BACKOFF_MS * 2  # bounded: history drains within the backoff cap
+    while up.upload_once() == "ok":
+        pass
+    sent = [e for r in backend.requests for e in r["eventIds"]]
+    assert sorted(sent) == sorted([*history, fresh])  # nothing lost, nothing twice
+    assert statuses(db, [*history, fresh]) == ["acknowledged"] * 31
+
+
+def test_a_probe_does_not_end_a_pause_the_server_asked_for(db, backend):
+    add(db, 1)
+    up, _, _ = make(db, backend.origin, token="wrong-fake-token")  # noqa: S106
+    assert up.upload_once() == "credential_rejected"
+    up.probe_network()  # network is fine; the credential is still wrong
+    assert up.upload_once() == "paused"
