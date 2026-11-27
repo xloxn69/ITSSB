@@ -41,8 +41,11 @@ def events_for(backend):
 
 class Env:
     def __init__(self, tmp_path, pin_hash, events, grant=GRANT, tz="America/New_York"):
+        # A clock that only moves when a test moves it: machine load can't
+        # age the parked fix out from under the test.
+        self.mono = 1000.0
         self.latest = ObservedFixHolder()
-        self.judge = MotionJudge(self.latest)
+        self.judge = MotionJudge(self.latest, monotonic=lambda: self.mono)
         self.latest.judge = self.judge
         self.db_path = tmp_path / "d.sqlite3"
         Database(self.db_path).close()
@@ -59,6 +62,7 @@ class Env:
             allowed_origins(8765),
             trip_events=events,
             service_timezone=tz,
+            monotonic=lambda: self.mono,
         )
         r = self.api.handle("GET", "/api/session", {}, b"")
         self.cookie = dict(r.headers)["Set-Cookie"].split(";", 1)[0]
@@ -68,9 +72,7 @@ class Env:
         self.post("/api/motion/parked")
 
     def park(self):
-        import time
-
-        self.latest.set(Fix(T0, 34.1, -83.98, 0.0, 0.0, 6.0, 3), time.monotonic())
+        self.latest.set(Fix(T0, 34.1, -83.98, 0.0, 0.0, 6.0, 3), self.mono)
 
     def post(self, path, data=None):
         headers = {
@@ -160,10 +162,8 @@ def test_start_refuses_routes_outside_the_drivers_list(tmp_path, pin_hash, backe
 
 
 def test_start_and_end_need_parked(tmp_path, pin_hash, backend):
-    import time
-
     env = Env(tmp_path, pin_hash, events_for(backend))
-    env.latest.set(Fix(T0 + 1000, 34.1, -83.98, 6.0, 0.0, 6.0, 3), time.monotonic())
+    env.latest.set(Fix(T0 + 1000, 34.1, -83.98, 6.0, 0.0, 6.0, 3), env.mono)
     code, body = env.post("/api/runs/start", {"requestId": rid(), "routeVersionId": ROUTE})
     assert (code, body["error"]) == (409, "NOT_PARKED")
     assert backend.trip_requests == {}
