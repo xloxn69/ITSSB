@@ -36,12 +36,18 @@ puts it in `apps/device/src/itssb_device/static/`, which the copy below
 includes.
 
 ```sh
-sudo mkdir -p /opt/itssb
-sudo rsync -a --delete --exclude .venv --exclude var --exclude tests \
-  apps/device/ /opt/itssb/current/
-sudo chown -R root:root /opt/itssb/current
-sudo chmod -R go-w /opt/itssb/current
+cd apps/device
+REV=$(git rev-parse HEAD); VER="$(date -u +%Y.%m.%d)-${REV:0:7}"
+sudo python3 deploy/itssb_release.py stage . --version "$VER" --revision "$REV"
+sudo python3 deploy/itssb_release.py activate "$VER"
+cd ../..
 ```
+
+This copies the release to `/opt/itssb/releases/<version>` (root-owned,
+read-only to the service), records its commit and file hashes in
+`RELEASE.json`, and points the `/opt/itssb/current` symlink at it. Later
+updates and rollbacks use the same tool
+([runbook](../../../docs/runbooks/pi-update-and-rollback.md)).
 
 ## 4. Settings and credential
 
@@ -116,10 +122,12 @@ curl -s http://127.0.0.1:8765/health   # new process.bootId; same run and outbox
 
 ## Update or roll back
 
-Stop the service, rsync the new reviewed release over `/opt/itssb/current`
-(keep the previous one for rollback), then start it again. Do this outside an
-active trip. `/var/lib/itssb` is never touched by an update; the database
-migrates forward on start.
+Follow the [Pi update and rollback runbook](../../../docs/runbooks/pi-update-and-rollback.md):
+`preflight` (refuses during an active trip), `stage`, stop, `backup`,
+`activate`, start, and `rollback` if the new release is not accepted.
+`/var/lib/itssb` is never touched by an update; the database migrates forward
+on start. An install made with the old rsync step is converted once (runbook,
+"Convert a first install").
 
 ## Remove
 
