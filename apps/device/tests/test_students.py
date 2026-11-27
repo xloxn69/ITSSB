@@ -265,8 +265,8 @@ def test_check_in_code_is_reused_then_refreshed_before_it_expires(tmp_path, pin_
 def test_an_expired_code_is_never_shown(tmp_path, pin_hash, backend):
     env = Env(tmp_path, pin_hash, backend)
     first = env.post("/api/qr-codes", {"purpose": "trip_check_in"})[1]
-    backend.mode = "down"
-    env.advance(600_000 - QR_REFRESH_BEFORE_MS + 1)  # due a refresh, server down
+    backend.mode = "rate_limited"  # the refresh is certainly not applied
+    env.advance(600_000 - QR_REFRESH_BEFORE_MS + 1)  # due a refresh
     code, body = env.post("/api/qr-codes", {"purpose": "trip_check_in"})
     assert code == 200 and body["token"] == first["token"]
     assert body["refreshFailed"] is True and 0 < body["remainingMs"] < QR_REFRESH_BEFORE_MS
@@ -275,6 +275,31 @@ def test_an_expired_code_is_never_shown(tmp_path, pin_hash, backend):
     assert (code, body["error"]) == (503, "QR_UNAVAILABLE")
     assert first["token"] not in json.dumps(body)
     assert "Show Students" in body["message"]  # the staff fallback
+
+
+@pytest.mark.parametrize("mode", ["down", "drop_response"])
+def test_a_refresh_that_may_have_revoked_the_code_drops_it(tmp_path, pin_hash, backend, mode):
+    # The server may have issued a new code (revoking the shown one) and the
+    # answer was lost: the old code must not stay on screen as valid.
+    env = Env(tmp_path, pin_hash, backend)
+    first = env.post("/api/qr-codes", {"purpose": "trip_check_in"})[1]
+    backend.mode = mode
+    env.advance(600_000 - QR_REFRESH_BEFORE_MS + 1)
+    code, body = env.post("/api/qr-codes", {"purpose": "trip_check_in"})
+    assert (code, body["error"]) == (503, "QR_UNAVAILABLE")
+    assert first["token"] not in json.dumps(body)
+    backend.mode = "ok"
+    code, body = env.post("/api/qr-codes", {"purpose": "trip_check_in"})
+    assert code == 200 and body["token"] != first["token"]
+
+
+def test_an_enrollment_code_stays_while_the_server_is_unreachable(tmp_path, pin_hash, backend):
+    env = Env(tmp_path, pin_hash, backend)
+    first = env.post("/api/qr-codes", {"purpose": "route_enrollment"})[1]
+    backend.mode = "down"  # refreshing an invitation does not revoke the last one
+    env.advance(86_400_000 - QR_REFRESH_BEFORE_MS + 1)
+    code, body = env.post("/api/qr-codes", {"purpose": "route_enrollment"})
+    assert code == 200 and body["token"] == first["token"] and body["refreshFailed"] is True
 
 
 def test_a_code_stops_when_the_run_ends(tmp_path, pin_hash, backend):
@@ -638,3 +663,63 @@ def test_an_action_whose_grant_ended_before_it_synced_is_rejected_not_pending(
     assert "staff" in a["problem"]
     env.advance(3_600_000)
     assert env.tick() == 0
+
+
+def test_changes_are_sent_in_capture_order(tmp_path, pin_hash, backend):
+    # A removal saved after an attendance record that is waiting to be resent
+    # must not overtake it, or the attendance would arrive for a removed student.
+    env = Env(tmp_path, pin_hash, backend)
+    env.roster()
+    backend.mode = "down"
+    first, second = rid(), rid()
+    env.action(
+        requestId=first,
+        type="recordAttendance",
+        assignmentId="demo_assignment_001",
+        status="boarded",
+    )
+    env.tick()  # fails; the first change now waits for its retry time
+    backend.mode = "ok"
+    env.advance(1)
+    env.action(
+        requestId=second,
+        type="removeAssignment",
+        assignmentId="demo_assignment_001",
+        reason="Moved",
+    )
+    assert env.tick() == 0  # the removal waits behind the attendance
+    env.advance(120_000)
+    assert env.tick() == 2
+    assert [r for r in backend.action_log if r in (first, second)] == [first, first, second]
+    actions = env.actions()
+    assert actions[first]["sync"] == "synced" and actions[second]["sync"] == "synced"
+
+
+def test_a_rejection_after_the_run_ended_is_still_shown(tmp_path, pin_hash, backend):
+    env = Env(tmp_path, pin_hash, backend)
+    env.roster()
+    backend.mode = "down"
+    request_id = rid()
+    env.action(
+        requestId=request_id,
+        type="recordAttendance",
+        assignmentId="demo_assignment_002",
+        status="boarded",
+    )
+    env.tick()  # not sent: still pending when the run ends
+    backend.mode = "ok"
+    assert env.post(f"/api/runs/{env.run_id}/end", {"requestId": rid()})[1]["endSync"] == "accepted"
+    backend.reject_actions = "grant_not_authorized"
+    env.advance(120_000)
+    env.tick()
+    changes = env.status()["studentChanges"]  # on the dashboard, with no run
+    assert changes["pending"] == 0
+    assert [a["requestId"] for a in changes["rejected"]] == [request_id]
+    assert "staff" in changes["rejected"][0]["problem"]
+    # And on the next run's roster.
+    backend.reject_actions = None
+    code, body = env.post("/api/runs/start", {"requestId": rid(), "routeVersionId": ROUTE})
+    assert code == 200, body
+    assert env.actions()[request_id]["sync"] == "rejected"
+    env.post("/api/session/lock")
+    assert env.status()["studentChanges"] is None  # no names behind the lock

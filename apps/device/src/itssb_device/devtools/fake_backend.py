@@ -75,6 +75,7 @@ class FakeBackend(ThreadingHTTPServer):
         self.check_ins: dict[tuple[str, str], list[dict[str, Any]]] = {}  # (run, assignment)
         self.action_receipts: dict[str, tuple[str, dict[str, Any]]] = {}
         self.action_bodies: dict[str, list[bytes]] = {}
+        self.action_log: list[str] = []  # requestIds in the order they arrived
         self.removed: set[str] = set()
         self.reject_actions: str | None = None
         self.qr_ttl_ms = 600_000
@@ -362,8 +363,12 @@ class _Handler(BaseHTTPRequestHandler):
                 except (ValueError, AttributeError):
                     rid = ""
                 srv.action_bodies.setdefault(rid, []).append(raw)
+                srv.action_log.append(rid)
         if srv.mode == "down":
             self._error(503, "TEMPORARILY_UNAVAILABLE")
+            return
+        if srv.mode == "rate_limited":
+            self._error(429, "RATE_LIMITED", {"Retry-After": "1"})
             return
         try:
             body = json.loads(raw)

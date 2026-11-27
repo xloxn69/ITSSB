@@ -268,6 +268,12 @@ class DriverApi:
             # every publish interval, and a just-ended run must not read as active.
             run = db.active_run()
             outbox = db.outbox_counts()
+            # Driver changes to students (students.py); names only when unlocked.
+            changes = (
+                self.students.summary(db, self.now_ms())
+                if self.students is not None and unlocked
+                else None
+            )
         snap.update(
             {
                 "motion": self.judge.snapshot(),
@@ -292,6 +298,7 @@ class DriverApi:
                 "lastEndedRun": last_ended,
                 "run": run,
                 "outbox": outbox,
+                "studentChanges": changes,
             }
         )
         return snap

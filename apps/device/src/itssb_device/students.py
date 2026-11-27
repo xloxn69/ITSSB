@@ -59,6 +59,8 @@ QR_REFRESH_BEFORE_MS = 120_000
 # A roster fetched this recently is reused instead of asking the server again.
 ROSTER_REUSE_MS = 5_000
 RESOLVED_KEEP_MS = 7 * 24 * 3600 * 1000
+# A rejection stays on the roster this long, across runs.
+REJECTED_SHOWN_MS = 24 * 3600 * 1000
 BACKOFF_MAX_MS = 60_000
 
 # Limits from packages/contracts/src/checkIns.ts (validateRosterAction).
@@ -147,6 +149,9 @@ class GrantReply:
     http_status: int | None
     data: dict[str, Any]
     code: str | None
+    # False only when the request certainly never reached the server (no
+    # connection, or a 429). An unknown reply may still have been applied.
+    maybe_applied: bool = True
 
 
 class DeviceGrantClient:
@@ -167,7 +172,9 @@ class DeviceGrantClient:
             with self._lock:
                 resp = self.transport.post(path, body, headers)
         except TransportError as exc:
-            return GrantReply("unknown", None, {}, exc.reason)
+            # "no_response": connected and possibly sent; anything else failed
+            # before the request went out.
+            return GrantReply("unknown", None, {}, exc.reason, exc.backend == "no_response")
         try:
             data = json.loads(resp.body)
         except ValueError:
@@ -182,7 +189,7 @@ class DeviceGrantClient:
         code = err.get("code") if isinstance(err, dict) else None
         code = code if isinstance(code, str) else f"HTTP_{resp.status}"
         if resp.status >= 500 or resp.status == 429:
-            return GrantReply("unknown", resp.status, data, code)
+            return GrantReply("unknown", resp.status, data, code, resp.status != 429)
         return GrantReply("refused", resp.status, data, code)
 
 
@@ -308,6 +315,25 @@ class StudentDesk:
     # ── Capabilities (for /api/status) ───────────────────────────────
 
     @staticmethod
+    def summary(db: Database, now: int) -> dict[str, Any]:
+        """Waiting and recently rejected changes, for the dashboard: shown even
+        with no run, so a rejection that arrives after the run ends is seen."""
+        exists = db.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='roster_actions'"
+        ).fetchone()
+        if exists is None:
+            return {"pending": 0, "rejected": []}
+        pending = db.conn.execute(
+            "SELECT COUNT(*) FROM roster_actions WHERE sync='pending'"
+        ).fetchone()[0]
+        rows = db.conn.execute(
+            "SELECT * FROM roster_actions WHERE sync='rejected' AND resolved_at_ms>=? "
+            "ORDER BY resolved_at_ms DESC LIMIT 5",
+            (now - REJECTED_SHOWN_MS,),
+        ).fetchall()
+        return {"pending": pending, "rejected": [_action_view(r) for r in rows]}
+
+    @staticmethod
     def capability(session: KioskSession, run: dict[str, Any] | None) -> dict[str, Any]:
         if run is None or run.get("state") != "active":
             return {
@@ -429,7 +455,11 @@ class StudentDesk:
                 code_name, f"The school server refused the code ({code_name})."
             )
             return _error(HTTPStatus.FORBIDDEN, code_name, words)
-        if cached is not None and cached.remaining_ms(now) > 0:
+        # Issuing a check-in code revokes the previous one on the server. If
+        # this refresh may have been applied, the cached code may be dead:
+        # never show it as valid. An enrollment code is not revoked that way.
+        keep = purpose == "route_enrollment" or not reply.maybe_applied
+        if keep and cached is not None and cached.remaining_ms(now) > 0:
             return HTTPStatus.OK, self._qr_view(cached, now, refresh_failed=True)
         self._qr.pop(purpose, None)
         return _error(HTTPStatus.SERVICE_UNAVAILABLE, "QR_UNAVAILABLE", QR_FALLBACK[purpose])
@@ -494,7 +524,7 @@ class StudentDesk:
                     )
                 fresh = {"body": _dumps(reply.data), "fetched_at_ms": now}
                 return HTTPStatus.OK, self._roster_view(db, run_id, fresh, now, None)
-        actions = self._actions(db, run_id)
+        actions = self._actions(db, run_id, now)
         if reply.kind == "refused":
             with db.transaction() as tx:
                 tx.execute("DELETE FROM roster_cache WHERE run_id=?", (run_id,))
@@ -526,15 +556,18 @@ class StudentDesk:
             "ageMs": max(0, now - fetched),
             "stale": stale_reason is not None,
             "staleReason": stale_reason,
-            "actions": self._actions(db, run_id),
+            "actions": self._actions(db, run_id, now),
         }
 
     @staticmethod
-    def _actions(db: Database, run_id: str) -> list[dict[str, Any]]:
+    def _actions(db: Database, run_id: str, now: int) -> list[dict[str, Any]]:
+        """This run's changes, everything still pending, and any recent
+        rejection, even from an earlier run: a rejection is never hidden."""
         rows = db.conn.execute(
             "SELECT * FROM roster_actions WHERE run_id=? OR sync='pending' "
+            "OR (sync='rejected' AND resolved_at_ms>=?) "
             "ORDER BY captured_at_ms, rowid",
-            (run_id,),
+            (run_id, now - REJECTED_SHOWN_MS),
         ).fetchall()
         return [_action_view(r) for r in rows]
 
@@ -700,14 +733,16 @@ class RosterSyncThread(threading.Thread):
         action that got no answer: the server is unreachable for the rest too."""
         ensure_schema(db)
         now = self.now_ms()
+        # Strictly in capture order: a later change (a removal) must never
+        # overtake an earlier one (attendance) that is waiting to be resent.
         rows = db.conn.execute(
-            "SELECT request_id, payload, attempts FROM roster_actions "
-            "WHERE sync='pending' AND next_attempt_at_ms<=? "
-            "ORDER BY captured_at_ms, rowid LIMIT 50",
-            (now,),
+            "SELECT request_id, payload, attempts, next_attempt_at_ms FROM roster_actions "
+            "WHERE sync='pending' ORDER BY captured_at_ms, rowid LIMIT 50"
         ).fetchall()
         sent = 0
         for row in rows:
+            if row["next_attempt_at_ms"] > now:
+                break  # the oldest waits, and so does everything after it
             reply = self.client.post(ACTIONS_PATH, row["payload"].encode())
             sent += 1
             if not self._resolve(db, row, reply, now):
