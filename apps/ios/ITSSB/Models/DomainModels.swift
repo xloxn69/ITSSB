@@ -38,21 +38,38 @@ enum Freshness: Equatable, Sendable {
 /// The server's clock reading at the moment a snapshot arrived on the phone.
 ///
 /// A query's `serverNowMs` can come from a cached result, so it may be old,
-/// and the phone clock may be wrong too (docs/08 §8.1). An **unverified**
-/// clock therefore takes the later of phone time and query-aligned time, and
-/// `LivePresentation` never calls a position fresh on it. A **verified** clock
-/// comes from the uncached `tracking:serverTime` mutation and is used exactly.
+/// and the phone clock may be wrong too (docs/08 §8.1).
+/// - **Unverified** (from a query): takes the later of phone time and
+///   query-aligned time, and `freshness` never reports `.fresh` on it.
+/// - **Verified** (from the uncached `tracking:serverTime` mutation): advances
+///   from the server's reading by monotonic elapsed time, which keeps counting
+///   through sleep and ignores phone clock changes, plus the round-trip
+///   uncertainty, so any error can only make a position look older.
 struct ServerClock: Equatable, Sendable {
     let serverNow: Date
     let receivedAt: Date
     var isVerified = false
+    /// Verified only: the monotonic instant that corresponds to `serverNow`.
+    var monotonicAt: ContinuousClock.Instant?
+    /// Verified only: half the round trip, added so the error never favors freshness.
+    var uncertainty: TimeInterval = 0
 
     /// Trusts the phone clock as is. For fixtures and previews only.
     static let deviceOnly = ServerClock(serverNow: .distantPast, receivedAt: .distantPast, isVerified: true)
 
-    func ageClock(at localNow: Date) -> Date {
+    func ageClock(at localNow: Date, monotonicNow: ContinuousClock.Instant = .now) -> Date {
+        if isVerified, let monotonicAt {
+            return serverNow.addingTimeInterval(monotonicAt.duration(to: monotonicNow).seconds + uncertainty)
+        }
+        if isVerified { return localNow }
         let aligned = localNow.addingTimeInterval(serverNow.timeIntervalSince(receivedAt))
-        return isVerified ? aligned : max(localNow, aligned)
+        return max(localNow, aligned)
+    }
+}
+
+extension Duration {
+    var seconds: TimeInterval {
+        Double(components.seconds) + Double(components.attoseconds) / 1e18
     }
 }
 
@@ -69,12 +86,17 @@ struct LivePosition: Equatable, Sendable {
     /// When the backend received it.
     let receivedAt: Date
 
-    func age(at now: Date, clock: ServerClock = .deviceOnly) -> TimeInterval {
-        max(0, clock.ageClock(at: now).timeIntervalSince(capturedAt))
+    func age(at now: Date, clock: ServerClock = .deviceOnly,
+             monotonicNow: ContinuousClock.Instant = .now) -> TimeInterval {
+        max(0, clock.ageClock(at: now, monotonicNow: monotonicNow).timeIntervalSince(capturedAt))
     }
 
-    func freshness(at now: Date, clock: ServerClock = .deviceOnly) -> Freshness {
-        Freshness(age: age(at: now, clock: clock))
+    /// The one place freshness is decided. Without verified server time a cached
+    /// snapshot and a slow phone clock can both understate age, so it is never `.fresh`.
+    func freshness(at now: Date, clock: ServerClock = .deviceOnly,
+                   monotonicNow: ContinuousClock.Instant = .now) -> Freshness {
+        let freshness = Freshness(age: age(at: now, clock: clock, monotonicNow: monotonicNow))
+        return !clock.isVerified && freshness == .fresh ? .aging : freshness
     }
 }
 

@@ -302,8 +302,12 @@ These are proposed values, owned by the open "Freshness and alert thresholds" de
 
 Age is `now - capturedAtMs`, measured on a server-aligned clock. A query result can be served from cache, so its `serverNowMs` may be much older than the moment it arrives, and a phone clock can be wrong too; together they can make an old position look current. So:
 
-- **Verified time.** The client calls the mutation `tracking:serverTime` (`{}` → `{ schemaVersion: 1, serverNowMs }`) when tracking starts. Mutations are never served from cache. The client sets its offset from the round trip: `serverNowMs` minus the request/response midpoint.
-- **Until that answer arrives** (or if it fails), the client uses the larger of the phone-clock age and the query-aligned age. It never classifies a position as fresh: at best it shows "waiting for an update".
+- **Verified time.** The client calls the mutation `tracking:serverTime` (`{}` → `{ schemaVersion: 1, serverNowMs }`) when tracking starts. Mutations are never served from cache.
+  - It pins the server's reading to the round trip's monotonic midpoint and adds half the round trip as uncertainty, so any error makes a position look older.
+  - From then on it advances that reading by monotonic elapsed time, which counts through sleep and ignores changes to the phone's clock.
+  - A sample whose round trip took longer than 5 seconds is rejected.
+  - One request is shared by every subscription and retried while any is still waiting.
+- **Until verified time exists** (or if it never arrives), the client uses the larger of the phone-clock age and the query-aligned age. It never classifies a position as fresh: at best it shows "waiting for an update".
 - **Never negative.** The age shown is never negative.
 
 `tracking:serverTime` needs no sign-in and reads no data; time is not protected.
