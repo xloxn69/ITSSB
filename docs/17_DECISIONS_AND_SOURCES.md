@@ -38,6 +38,7 @@ The existing report describes a successfully booting touchscreen assembly. The g
 | Service account | Non-root `itssb`; separate normal graphical desktop account for kiosk |
 | Device secret | Initial authorized administrator installation into root-owned mode0600 `device.env`; no general app sudo |
 | Shared backend | Convex TypeScript functions and database, with explicit user/device authorization |
+| Identity provider | Clerk (decided 26 November 2026; record in §8) |
 | iOS client | SwiftUI, MapKit, one authenticated Convex client, explicit domain/UI state |
 | First offline scope | Continue an already authorized run; new offline starts require a later explicit expiring grant |
 | ETA | Measurable remaining-route baseline before an evaluated learned model |
@@ -69,7 +70,6 @@ If implementation needs a different choice, change the contract and affected com
 |---|---|---|
 | Exact Pi OS release and desktop session | Version-specific setup | Actual `/etc/os-release`, architecture, and session inspection |
 | Supported Mac/Xcode and iPhone versions | Native project/dependency setup | Current Apple support matrix and intended device population |
-| Identity provider | Real sign-in integration | Supported Swift/web flow, email-code behavior, school needs, token verification |
 | School and pilot authority | Real student data or bus operation | Responsible organization, approval process, staff roles, operating procedures |
 | Mobile router/service | Moving test and deployment | Coverage, independent power/connectivity, measured data use |
 | Vehicle power and mount | Vehicle installation | Appropriate professional integration for the actual vehicle |
@@ -160,5 +160,16 @@ Official documentation supports platform capabilities and installation details. 
 ## 8. Change-record template
 
 For a material implementation decision, add a short record with: date, decision, reason, alternatives considered, affected documents/components, migration requirement, verification evidence, and person responsible. Examples include choosing the identity provider, changing telemetry cadence, adding offline starts, or introducing a different ETA model.
+
+### Record: identity provider (26 November 2026)
+
+- **Decision:** Clerk is the identity provider for people (students, guardians, drivers, staff).
+- **Reason:** it has a native Swift SDK and a web SDK, supports email one-time codes (no school-issued passwords to manage), and has documented Convex support: Convex verifies Clerk's JWTs itself, so functions see a verified identity through `ctx.auth`.
+- **Alternatives considered:** Convex Auth (no first-party native Swift SDK), Auth0 (heavier configuration for the same result), a custom password system (rejected by docs/11 §1).
+- **Affected:** `apps/backend/convex/auth.config.ts` (issuer from the `CLERK_JWT_ISSUER_DOMAIN` deployment variable, audience `convex`), `users.linkIdentity`, and later the iOS and web sign-in screens.
+- **Rule kept:** signing in proves identity only. Access still comes from a staff-approved `users` row, assignments and guardian links, checked on the server in every function. An unset issuer means nobody can sign in, which fails closed.
+- **Migration:** none; no one could sign in before.
+- **Verification:** backend tests with a Clerk-shaped identity (`issuer|subject`). Not yet run against a real Clerk application or Convex deployment; the owner creates those (apps/backend/README.md).
+- **Responsible:** the owner holds the Clerk application and its keys.
 
 Keep documented plans, executed checks, and measured outcomes separate. A finished Markdown guide is useful implementation work; it is not a substitute for the application and pilot evidence defined in [13_TESTING_AND_ACCEPTANCE.md](13_TESTING_AND_ACCEPTANCE.md).
