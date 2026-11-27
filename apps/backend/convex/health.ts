@@ -1,5 +1,6 @@
-import { type DeviceHealthReport, validateDeviceHealthReport } from "@itssb/contracts";
+import { type DeviceHealthReport, POSITION_STALE_AFTER_MS, validateDeviceHealthReport } from "@itssb/contracts";
 import { ConvexError, v } from "convex/values";
+import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, type QueryCtx } from "./_generated/server";
 
@@ -11,7 +12,13 @@ export type HealthOutcome =
  * Stores one health report for an authenticated device (docs/08 §7). The
  * device comes from the credential; the body's `runId` is kept for
  * diagnostics only. A report older than the stored one from the same boot
- * (a delayed retry) is accepted but does not replace it.
+ * (a delayed report, or the Pi clock stepping back) still counts as contact
+ * but does not replace the stored status.
+ *
+ * Each stored status expires: if no later report arrives within
+ * POSITION_STALE_AFTER_MS, `expire` marks it `unknown`, so no client
+ * (including older apps without a contact-age check) keeps showing
+ * "connected, no GPS" for a bus that went silent.
  */
 export const record = internalMutation({
   args: { deviceId: v.id("devices"), report: v.any(), nowMs: v.number() },
@@ -28,6 +35,8 @@ export const record = internalMutation({
       .withIndex("by_device", (q) => q.eq("deviceId", deviceId))
       .unique();
     if (existing && existing.bootId === r.bootId && r.capturedAtMs <= existing.capturedAtMs) {
+      await ctx.db.patch(existing._id, { receivedAtMs: nowMs });
+      await ctx.scheduler.runAfter(POSITION_STALE_AFTER_MS, internal.health.expire, { deviceId, receivedAtMs: nowMs });
       return { ok: true, receivedAtMs: nowMs };
     }
     const row = {
@@ -44,7 +53,22 @@ export const record = internalMutation({
     };
     if (existing) await ctx.db.replace(existing._id, row);
     else await ctx.db.insert("deviceHealth", row);
+    await ctx.scheduler.runAfter(POSITION_STALE_AFTER_MS, internal.health.expire, { deviceId, receivedAtMs: nowMs });
     return { ok: true, receivedAtMs: nowMs };
+  },
+});
+
+/** Marks a device's status `unknown` if nothing newer arrived since `receivedAtMs`. */
+export const expire = internalMutation({
+  args: { deviceId: v.id("devices"), receivedAtMs: v.number() },
+  handler: async (ctx, { deviceId, receivedAtMs }) => {
+    const health = await ctx.db
+      .query("deviceHealth")
+      .withIndex("by_device", (q) => q.eq("deviceId", deviceId))
+      .unique();
+    if (health && health.receivedAtMs === receivedAtMs && health.gpsStatus !== "unknown") {
+      await ctx.db.patch(health._id, { gpsStatus: "unknown" });
+    }
   },
 });
 

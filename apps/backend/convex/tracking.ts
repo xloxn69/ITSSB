@@ -209,7 +209,7 @@ export const myRun = query({
         // As last reported, with no expiry here: a query is not re-run as
         // time passes, so clients trust it only while lastDeviceContactAtMs
         // is recent (docs/08 §8). GPSD down on the Pi is not a fix status.
-        gpsStatus: health && health.gpsStatus !== "unknown" ? health.gpsStatus : null,
+        gpsStatus: reportedGpsStatus(health, live),
         lastPosition: live
           ? {
               eventId: live.eventId,
@@ -280,6 +280,20 @@ export const myRoute = query({
     };
   },
 });
+
+/**
+ * The bus's last reported GPS status for families. `unknown` (GPSD down, or
+ * expired by health.expire) is no status. A no-fix report is superseded by
+ * any position captured after it: both times come from the Pi's clock.
+ */
+function reportedGpsStatus(
+  health: Doc<"deviceHealth"> | null,
+  live: Doc<"liveState"> | null,
+): "valid" | "no_fix" | "receiver_missing" | null {
+  if (!health || health.gpsStatus === "unknown") return null;
+  if (health.gpsStatus !== "valid" && live && live.capturedAtMs > health.capturedAtMs) return null;
+  return health.gpsStatus;
+}
 
 async function activeRunFor(ctx: QueryCtx, assignment: Doc<"assignments">) {
   return await ctx.db

@@ -259,7 +259,7 @@ Unknown fields are refused. A health report never carries coordinates, secrets, 
 
 The answer is `200 { "schemaVersion": 1, "status": "accepted", "receivedAtMs", "serverNowMs" }`. Request errors use the §5 body: 400 `INVALID_REQUEST`, `MALFORMED_JSON` or `UNSUPPORTED_SCHEMA_VERSION`; 401 `UNAUTHENTICATED`, including a device revoked before the commit; 413 `BODY_TOO_LARGE`.
 
-The backend keeps the latest report per device and assigns `receivedAtMs`. A report older than the stored one from the same `bootId` is accepted but does not replace it. A missed heartbeat does not prove whether the cause is cellular service, device power, or software failure.
+The backend keeps the latest report per device and assigns `receivedAtMs`. A report older than the stored one from the same `bootId` (a delayed report, or the Pi clock stepping back) still counts as contact but does not replace the stored status. If no later report arrives within `POSITION_STALE_AFTER_MS`, the stored status becomes `unknown`. A missed heartbeat does not prove whether the cause is cellular service, device power, or software failure.
 
 ### Configuration, route drafts, and displayed QR codes
 
@@ -345,7 +345,7 @@ Field rules for `run`:
 | --- | --- |
 | `liveRevision` | Nonnegative safe integer. `0` before any position; increases each time the live position is replaced. |
 | `lastDeviceContactAtMs` | Last time the backend heard from the bus device during this run: the later of the last accepted telemetry receipt and the last health receipt (§7). `null` if neither has arrived since the run started. |
-| `gpsStatus` | From the device's latest health report received since the run started: `valid`, `no_fix`, or `receiver_missing`. `null` when no report has supplied one, or when the Pi reported `unknown` (GPSD down). Never inferred from a missing position. The backend does not expire it, because a query is not re-run as time passes. Clients trust it only while `lastDeviceContactAtMs` is younger than `POSITION_STALE_AFTER_MS` (§8.1). |
+| `gpsStatus` | From the device's latest health report received since the run started: `valid`, `no_fix`, or `receiver_missing`. `null` when no report has supplied one, or when the Pi reported `unknown` (GPSD down). It is also `null` when a position captured after that report exists, because the fix is back. Never inferred from a missing position. The backend marks a status `unknown` once `POSITION_STALE_AFTER_MS` passes with no newer report. Between those writes a query result is not re-run as time passes, so clients also trust a non-`valid` status only while `lastDeviceContactAtMs` is younger than `POSITION_STALE_AFTER_MS` (§8.1). |
 | `nextStopId` | `null` until the backend tracks route progress. |
 | `assignedStop.status` | `upcoming`, `at_stop`, `passed`, or `unknown` (until route progress exists). |
 | `busLabel` | Family-facing bus name; a generic label when the device has none. |

@@ -116,6 +116,66 @@ describe("POST /device/v1/health", () => {
     expect(run.lastDeviceContactAtMs).toBeNull();
   });
 
+  it("review: a position captured after a no-fix report means the fix is back", async () => {
+    const { t, assignmentId, deviceId, runId } = await setup();
+    const reportAt = Date.now() - 10_000;
+    await post(t, SECRET, report({ capturedAtMs: reportAt }));
+    expect((await myRun(t, assignmentId)).gpsStatus).toBe("no_fix");
+    await t.mutation(internal.telemetry.ingestBatch, {
+      deviceId,
+      events: [{ ...deviceTelemetry(), runId, capturedAtMs: reportAt + 5_000 }],
+      nowMs: Date.now(),
+    });
+    const run = await myRun(t, assignmentId);
+    expect(run.gpsStatus).toBeNull(); // the newer position speaks for itself
+    expect(run.lastPosition).not.toBeNull();
+  });
+
+  it("review: an out-of-order report from the same boot still counts as contact", async () => {
+    const { t, assignmentId } = await setup();
+    await post(t, SECRET, report({ gpsStatus: "valid" }));
+    const first = (await myRun(t, assignmentId)).lastDeviceContactAtMs!;
+    // Pi clock stepped back (e.g. NTP correction): status ignored, contact kept.
+    await new Promise((r) => setTimeout(r, 5));
+    await post(t, SECRET, report({ gpsStatus: "no_fix", capturedAtMs: Date.now() - 60_000 }));
+    const run = await myRun(t, assignmentId);
+    expect(run.gpsStatus).toBe("valid");
+    expect(run.lastDeviceContactAtMs).toBeGreaterThan(first);
+  });
+
+  it("review: a GPS status with no later report expires on the server", async () => {
+    // Older installed apps have no contact-age check, so the backend must not
+    // leave "connected, no GPS" in place for a bus that went silent.
+    const { t, assignmentId, deviceId } = await setup();
+    await post(t, SECRET, report({ gpsStatus: "receiver_missing" }));
+    const jobs = await t.run(async (ctx) => ctx.db.system.query("_scheduled_functions").collect());
+    expect(jobs.map((j) => j.name)).toContain("health:expire");
+    const receivedAtMs = (await myRun(t, assignmentId)).lastDeviceContactAtMs!;
+    await t.mutation(internal.health.expire, { deviceId, receivedAtMs });
+    const run = await myRun(t, assignmentId);
+    expect(run.gpsStatus).toBeNull();
+    expect(run.lastDeviceContactAtMs).toBe(receivedAtMs); // contact time is still true
+  });
+
+  it("review: expiry never clears a newer report", async () => {
+    const { t, assignmentId, deviceId } = await setup();
+    await post(t, SECRET, report({ gpsStatus: "no_fix" }));
+    const old = (await myRun(t, assignmentId)).lastDeviceContactAtMs!;
+    await new Promise((r) => setTimeout(r, 5));
+    await post(t, SECRET, report({ gpsStatus: "no_fix", capturedAtMs: Date.now() }));
+    await t.mutation(internal.health.expire, { deviceId, receivedAtMs: old });
+    expect((await myRun(t, assignmentId)).gpsStatus).toBe("no_fix");
+  });
+
+  it("review: the committing mutation rechecks revocation", async () => {
+    const { t, deviceId, assignmentId } = await setup();
+    await t.run(async (ctx) => ctx.db.patch(deviceId, { revoked: true }));
+    await expect(
+      t.mutation(internal.health.record, { deviceId, report: report(), nowMs: Date.now() }),
+    ).rejects.toThrow(/DEVICE_NOT_AUTHORIZED/);
+    expect((await myRun(t, assignmentId)).lastDeviceContactAtMs).toBeNull();
+  });
+
   it("refuses a missing, wrong, or revoked credential", async () => {
     const { t, deviceId } = await setup();
     expect((await post(t, null, report())).status).toBe(401);
