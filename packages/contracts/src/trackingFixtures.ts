@@ -6,6 +6,7 @@ import {
   type MyRunResult,
   POSITION_AGING_AFTER_MS,
   POSITION_STALE_AFTER_MS,
+  ETA_VALID_FOR_MS,
 } from "./tracking.js";
 
 /**
@@ -64,7 +65,7 @@ export const myRunReady: MyRunResult = {
     eta: {
       arrivalAtMs: 1795609445000,
       generatedAtMs: 1795609085450,
-      validUntilMs: 1795609115450,
+      validUntilMs: 1795609145000,
       lowerArrivalAtMs: null,
       upperArrivalAtMs: null,
       algorithmVersion: "baseline-v1",
@@ -177,6 +178,7 @@ export const serverTime: ServerTimeResult = { schemaVersion: 1, serverNowMs: SER
 export const freshnessPolicy = {
   positionAgingAfterMs: POSITION_AGING_AFTER_MS,
   positionStaleAfterMs: POSITION_STALE_AFTER_MS,
+  etaValidForMs: ETA_VALID_FOR_MS,
 };
 
 /** File name (without `.json`) → fixture. The Swift tests load these names. */

@@ -29,8 +29,12 @@ For a student's stop, add the expected travel times of the remaining route segme
 
 ```text
 remaining duration = remaining segment travel + intervening stop dwell
-arrivalAtMs = current evaluation time + remaining duration in milliseconds
+arrivalAtMs = source position capturedAtMs + remaining duration in milliseconds
 ```
+
+The estimate is anchored to when the position was captured, not when the server evaluated it, so an old position yields an arrival that is already too early and a validity that has already ended instead of a fresh-looking countdown.
+
+**Implemented baseline (`baseline-v1`).** Remaining segment travel is the remaining distance along the approved path at a configured average cruise speed; dwell is a configured time per intervening stop the bus has not left. Both values live in `apps/backend/convex/lib/eta.ts` and are tuned on training runs only (§6). Progress is computed inside telemetry ingest, in the same transaction, so a superseded asynchronous result cannot replace a newer one; predictions are stored for the newest live position of each batch, one per stop ahead. Per-segment historical durations are the next step once representative runs exist.
 
 ### Fictional example
 
@@ -93,6 +97,8 @@ Report results by prediction horizon and operating condition, not just one overa
 | Early/late bias | Whether the service systematically suggests the bus is sooner or later than it is. |
 
 Measure 2-, 5-, 10-, and 15-minute horizons where enough examples exist. Report the sample count. Keep a final test set that was not used to select the model or tune thresholds. If improvement is small or unreliable, retain the baseline.
+
+**Replay harness.** `bun run eval` in `apps/backend` builds deterministic fictional runs (`apps/backend/eval/tracks.ts`: an invented street grid with traffic, red lights, dwell, GPS noise and upload dropouts), replays every fix through the backend's own progress and estimate code, tunes the baseline on the earlier runs only, and reports the metrics above by horizon on later held-out runs. True arrivals come from the simulation, not from stop detection. Its numbers describe the simulation, not field accuracy; replace or extend the runs with reviewed real recordings (kept out of this public repository) before claiming accuracy for a pilot.
 
 ## 7. When to withhold or change a prediction
 

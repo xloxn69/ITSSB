@@ -7,6 +7,7 @@ import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx } from "./_generated/server";
 import { stillAuthorized } from "./lib/deviceAuth";
+import { ProgressTracker } from "./lib/progressStore";
 
 /** Fields that must match for a re-sent eventId to count as a duplicate. */
 const IDENTITY_FIELDS = [
@@ -66,9 +67,11 @@ export const ingestBatch = internalMutation({
       throw new ConvexError({ code: "DEVICE_NOT_AUTHORIZED" });
     }
     const results: EventResult[] = [];
+    const progress = new ProgressTracker(ctx);
     for (const raw of events) {
-      results.push(await ingestOne(ctx, deviceId, raw, nowMs));
+      results.push(await ingestOne(ctx, deviceId, raw, nowMs, progress));
     }
+    await progress.commit(nowMs);
     return results;
   },
 });
@@ -78,6 +81,7 @@ async function ingestOne(
   deviceId: Id<"devices">,
   raw: unknown,
   nowMs: number,
+  progress: ProgressTracker,
 ): Promise<EventResult> {
   const eventId =
     typeof raw === "object" && raw !== null && typeof (raw as { eventId?: unknown }).eventId === "string"
@@ -178,6 +182,7 @@ async function ingestOne(
     await ctx.db.replace(live._id, snapshot);
     liveStateApplied = true;
   }
+  if (liveStateApplied) await progress.observe(run, e, snapshot.revision);
 
   return { eventId, status: "accepted", receivedAtMs: nowMs, liveStateApplied };
 }

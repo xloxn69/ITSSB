@@ -15,6 +15,15 @@ import type { GpsStatus, RunState, SCHEMA_VERSION } from "./index.js";
 export const POSITION_AGING_AFTER_MS = 30_000;
 export const POSITION_STALE_AFTER_MS = 120_000;
 
+/**
+ * An arrival estimate is valid for this long after the capture time of the
+ * position it was computed from (`validUntilMs = capturedAtMs + this`).
+ * Shorter than `POSITION_STALE_AFTER_MS`, so an estimate always disappears
+ * before its position is called stale. Clients hide an estimate once their
+ * verified server clock passes `validUntilMs`, even with no new update.
+ */
+export const ETA_VALID_FOR_MS = 60_000;
+
 /** Safe reasons only: never reveal whether an unrelated record exists. */
 export const ACCESS_UNAVAILABLE_REASONS = ["unauthenticated", "not_permitted"] as const;
 export type AccessUnavailableReason = (typeof ACCESS_UNAVAILABLE_REASONS)[number];

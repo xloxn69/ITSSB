@@ -329,7 +329,7 @@ Every envelope carries `schemaVersion` and `serverNowMs`.
     "eta": {
       "arrivalAtMs": 1795609445000,
       "generatedAtMs": 1795609085450,
-      "validUntilMs": 1795609115450,
+      "validUntilMs": 1795609145000,
       "lowerArrivalAtMs": null,
       "upperArrivalAtMs": null,
       "algorithmVersion": "baseline-v1",
@@ -346,11 +346,12 @@ Field rules for `run`:
 | `liveRevision` | Nonnegative safe integer. `0` before any position; increases each time the live position is replaced. |
 | `lastDeviceContactAtMs` | Last time the backend heard from the bus device during this run: the later of the last accepted telemetry receipt and the last health receipt (§7). `null` if neither has arrived since the run started. |
 | `gpsStatus` | From the device's latest health report received since the run started: `valid`, `no_fix`, or `receiver_missing`. `null` when no report has supplied one, or when the Pi reported `unknown` (GPSD down). It is also `null` when a position captured after that report exists, because the fix is back. Never inferred from a missing position. The backend marks a status `unknown` once `POSITION_STALE_AFTER_MS` passes with no newer report. Between those writes a query result is not re-run as time passes, so clients also trust a non-`valid` status only while `lastDeviceContactAtMs` is younger than `POSITION_STALE_AFTER_MS` (§8.1). |
-| `nextStopId` | `null` until the backend tracks route progress. |
-| `assignedStop.status` | `upcoming`, `at_stop`, `passed`, or `unknown` (until route progress exists). |
+| `nextStopId` | First stop in travel order the bus has not departed, from route progress along the approved path (docs/10 §2). `null` before any matched position, when the route's stops have no travel order, or after the last stop. |
+| `assignedStop.status` | `upcoming`, `at_stop`, `passed`, or `unknown` (no matched position yet, or the route's stops have no travel order). Arrival and departure are inferred from GPS progress, never a staff-confirmed action. |
+| `eta` | The baseline estimate for the assigned stop (docs/10 §3), or `null`. Non-null only when the run is active, the stop is `upcoming`, the newest live position matched the route (not off route or ambiguous), the estimate was made from that position (`sourceEventId` equals `lastPosition.eventId`), the position is not stale, and the server's time is before `validUntilMs`. `arrivalAtMs` is anchored to the position's `capturedAtMs`; `generatedAtMs` is when the server computed it; `validUntilMs = capturedAtMs + ETA_VALID_FOR_MS`. Clients hide it once their verified server clock reaches `validUntilMs`, without waiting for an update, and never show it before verified time exists. |
 | `busLabel` | Family-facing bus name; a generic label when the device has none. |
 
-The 30-second example prediction validity is illustrative configuration, not a measured accuracy guarantee. The current schema permits `lastPosition: null` and `eta: null`. Optional calibrated bounds stay null until evaluation supports them. Completed/cancelled runs cannot retain an actionable approaching countdown.
+The 60-second prediction validity is provisional configuration, not a measured accuracy guarantee. The current schema permits `lastPosition: null` and `eta: null`. Optional calibrated bounds stay null until evaluation supports them. Completed/cancelled runs cannot retain an actionable approaching countdown.
 
 `status: "no_active_run"` returns `assignmentId`, `routeVersionId`, and `run: null`; schedule fields (next service, cancellation) are a later addition. `status: "access_unavailable"` contains only `schemaVersion`, `serverNowMs`, and a safe `reason`: `unauthenticated` (no verified identity at all: sign in) or `not_permitted` (a verified identity that is not linked to an approved person yet, and unknown, malformed, revoked, and forbidden assignments, all deliberately indistinguishable). A signed-in person is never told to sign in again. It has no protected route fields. Authentication/session failures can also surface as the SDK's typed error; the repository maps that error to the appropriate UI state. Distinguish an empty schedule from a failed query.
 
@@ -362,6 +363,7 @@ The app ages its freshness label locally between updates. It may estimate server
 | --- | --- | --- |
 | `POSITION_AGING_AFTER_MS` | `30000` | From this age the app says it is waiting for an update. |
 | `POSITION_STALE_AFTER_MS` | `120000` | From this age the position is shown as a last-known location with its capture time; movement animation and any estimate stop. |
+| `ETA_VALID_FOR_MS` | `60000` | An estimate is valid until its source position's `capturedAtMs` plus this. Shorter than the stale cutoff, so an estimate always disappears before its position is called stale. |
 
 These are proposed values, owned by the open "Freshness and alert thresholds" decision in [17](17_DECISIONS_AND_SOURCES.md) and to be tuned from measured runs. They are exported from `packages/contracts` and mirrored in the Swift app; change both together.
 
