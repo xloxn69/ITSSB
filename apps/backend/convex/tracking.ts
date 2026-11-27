@@ -10,7 +10,7 @@ import {
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, type QueryCtx, query } from "./_generated/server";
-import { getTrackableAssignment, getUser, listTrackableAssignments } from "./lib/authz";
+import { getTrackableAssignment, getUser, listTrackableAssignments, missingUserReason } from "./lib/authz";
 import { runState } from "./schema";
 
 /**
@@ -67,7 +67,7 @@ export const myAssignments = query({
   ),
   handler: async (ctx): Promise<MyAssignmentsResult> => {
     const user = await getUser(ctx);
-    if (!user) return denied("unauthenticated");
+    if (!user) return denied(await missingUserReason(ctx));
     const access = await listTrackableAssignments(ctx, user);
     const assignments = [];
     for (const { assignment, student, relationship } of access) {
@@ -161,7 +161,7 @@ export const myRun = query({
   ),
   handler: async (ctx, { assignmentId }): Promise<MyRunResult> => {
     const user = await getUser(ctx);
-    if (!user) return denied("unauthenticated");
+    if (!user) return denied(await missingUserReason(ctx));
     const access = await getTrackableAssignment(ctx, user, assignmentId);
     if (!access) return denied("not_permitted");
     const { assignment } = access;
@@ -248,7 +248,7 @@ export const myRoute = query({
   ),
   handler: async (ctx, { assignmentId }): Promise<MyRouteResult> => {
     const user = await getUser(ctx);
-    if (!user) return denied("unauthenticated");
+    if (!user) return denied(await missingUserReason(ctx));
     const access = await getTrackableAssignment(ctx, user, assignmentId);
     if (!access) return denied("not_permitted");
     const { assignment } = access;

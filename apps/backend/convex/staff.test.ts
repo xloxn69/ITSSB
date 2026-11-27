@@ -71,7 +71,8 @@ describe("access denial on every staff function", () => {
           schemaVersion: 1,
           status: "access_unavailable",
           serverNowMs: expect.any(Number),
-          reason: who === "test|unprovisioned" ? "unauthenticated" : "not_permitted",
+          // A verified but unlinked identity is signed in: not permitted, never "sign in again".
+          reason: "not_permitted",
         });
         const state = await t.run(async (ctx) => ({
           draft: await ctx.db.get(ids.draftId as Id<"routeDrafts">),

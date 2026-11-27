@@ -54,12 +54,13 @@ async function setup() {
 }
 
 describe("users.linkIdentity", () => {
-  it("a signed-in Clerk identity is signed out to the app until an approved account is linked", async () => {
+  it("a signed-in Clerk identity has no access (not 'signed out') until an approved account is linked", async () => {
     const { t, approved } = await setup();
     const asClerkUser = t.withIdentity(CLERK_IDENTITY);
+    // Signed in but unlinked: not_permitted, so clients don't loop on "sign in again".
     expect(await asClerkUser.query(api.tracking.myAssignments, {})).toMatchObject({
       status: "access_unavailable",
-      reason: "unauthenticated",
+      reason: "not_permitted",
     });
     await t.mutation(internal.users.linkIdentity, {
       userId: approved,
