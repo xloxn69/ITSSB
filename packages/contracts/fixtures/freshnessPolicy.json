@@ -1,4 +1,5 @@
 {
   "positionAgingAfterMs": 30000,
-  "positionStaleAfterMs": 120000
+  "positionStaleAfterMs": 120000,
+  "etaValidForMs": 60000
 }

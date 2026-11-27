@@ -1,6 +1,6 @@
 import { ETA_VALID_FOR_MS, POSITION_STALE_AFTER_MS } from "@itssb/contracts";
 import { convexTest } from "convex-test";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
@@ -9,14 +9,21 @@ const modules = import.meta.glob("./**/*.ts");
 
 /** Fictional coordinates only. */
 const BASE = { latitude: 34.1, longitude: -83.99 };
-const M_PER_DEG_LAT = 111_320;
-const M_PER_DEG_LON = 111_320 * Math.cos((BASE.latitude * Math.PI) / 180);
+const M_PER_DEG_LAT = (6_371_000 * Math.PI) / 180;
+const M_PER_DEG_LON = M_PER_DEG_LAT * Math.cos((BASE.latitude * Math.PI) / 180);
 const at = (east: number, north = 0) => ({
   latitude: BASE.latitude + north / M_PER_DEG_LAT,
   longitude: BASE.longitude + east / M_PER_DEG_LON,
 });
 
-const NOW = 1_795_609_085_000;
+/**
+ * Queries read the real server clock (convex-test does not fake it), so
+ * every time here is relative to the real current time.
+ */
+let NOW = 0;
+beforeEach(() => {
+  NOW = Date.now();
+});
 const STUDENT = "test|student";
 
 async function setup() {
@@ -46,7 +53,7 @@ async function setup() {
       routeVersionId,
       state: "active",
       startRequestId: "64869872-aaf9-4e4f-99df-621722bbac06",
-      startedAtMs: NOW - 120_000,
+      startedAtMs: NOW - 200_000,
     });
     return { assignmentId, deviceId, runId, stopIds };
   });
@@ -71,15 +78,12 @@ function event(runId: string, east: number, capturedAtMs: number, north = 0) {
   };
 }
 
-async function myRun(t: Awaited<ReturnType<typeof setup>>["t"], assignmentId: string, nowMs: number) {
-  vi.setSystemTime(nowMs);
+async function myRun(t: Awaited<ReturnType<typeof setup>>["t"], assignmentId: string) {
   const r = await t.withIdentity({ tokenIdentifier: STUDENT }).query(api.tracking.myRun, { assignmentId });
   if (r.status !== "ready") throw new Error(r.status);
   return r.run;
 }
 
-beforeEach(() => vi.useFakeTimers({ toFake: ["Date"] }));
-afterEach(() => vi.useRealTimers());
 
 describe("baseline ETA in tracking.myRun", () => {
   it("returns an ETA with its generation time, source event, and validity", async () => {
@@ -87,7 +91,7 @@ describe("baseline ETA in tracking.myRun", () => {
     const a = event(runId, 100, NOW - 10_000);
     const b = event(runId, 200, NOW - 5_000);
     await t.mutation(internal.telemetry.ingestBatch, { deviceId, events: [a, b], nowMs: NOW });
-    const run = await myRun(t, assignmentId, NOW + 1_000);
+    const run = await myRun(t, assignmentId);
     expect(run.eta).toMatchObject({
       generatedAtMs: NOW,
       validUntilMs: b.capturedAtMs + ETA_VALID_FOR_MS,
@@ -103,13 +107,24 @@ describe("baseline ETA in tracking.myRun", () => {
 
   it("withholds the ETA once its validity ends or the position is stale", async () => {
     const { t, assignmentId, deviceId, runId } = await setup();
-    const b = event(runId, 200, NOW - 5_000);
-    await t.mutation(internal.telemetry.ingestBatch, { deviceId, events: [b], nowMs: NOW });
-    expect((await myRun(t, assignmentId, b.capturedAtMs + ETA_VALID_FOR_MS - 1)).eta).not.toBeNull();
-    const expired = await myRun(t, assignmentId, b.capturedAtMs + ETA_VALID_FOR_MS);
-    expect(expired.eta).toBeNull();
-    expect(expired.lastPosition?.eventId).toBe(b.eventId);
-    expect((await myRun(t, assignmentId, b.capturedAtMs + POSITION_STALE_AFTER_MS)).eta).toBeNull();
+    // Still inside its validity (with 10 s of margin for the test itself).
+    const valid = event(runId, 200, NOW - ETA_VALID_FOR_MS + 10_000);
+    await t.mutation(internal.telemetry.ingestBatch, { deviceId, events: [valid], nowMs: NOW });
+    expect((await myRun(t, assignmentId)).eta).toMatchObject({ sourceEventId: valid.eventId });
+    // A position exactly at the end of its validity gives no estimate.
+    const { t: t2, assignmentId: a2, deviceId: d2, runId: r2 } = await setup();
+    const old = event(r2, 250, NOW - ETA_VALID_FOR_MS);
+    await t2.mutation(internal.telemetry.ingestBatch, { deviceId: d2, events: [old], nowMs: NOW });
+    const run = await myRun(t2, a2);
+    expect(run.eta).toBeNull();
+    expect(run.lastPosition?.eventId).toBe(old.eventId);
+    const { t: t3, assignmentId: a3, deviceId: d3, runId: r3 } = await setup();
+    await t3.mutation(internal.telemetry.ingestBatch, {
+      deviceId: d3,
+      events: [event(r3, 250, NOW - POSITION_STALE_AFTER_MS)],
+      nowMs: NOW,
+    });
+    expect((await myRun(t3, a3)).eta).toBeNull();
   });
 
   it("stores a prediction made from an already-old position but never shows it", async () => {
@@ -118,7 +133,7 @@ describe("baseline ETA in tracking.myRun", () => {
     await t.mutation(internal.telemetry.ingestBatch, { deviceId, events: [old], nowMs: NOW });
     const rows = await t.run((ctx) => ctx.db.query("etaPredictions").collect());
     expect(rows.length).toBeGreaterThan(0);
-    expect((await myRun(t, assignmentId, NOW)).eta).toBeNull();
+    expect((await myRun(t, assignmentId)).eta).toBeNull();
   });
 
   it("stores one prediction per stop ahead, only for the batch's newest event", async () => {
@@ -143,18 +158,18 @@ describe("baseline ETA in tracking.myRun", () => {
       events: [event(runId, 250, NOW - 5_000, 200)],
       nowMs: NOW,
     });
-    const run = await myRun(t, assignmentId, NOW);
+    const run = await myRun(t, assignmentId);
     expect(run.lastPosition).not.toBeNull();
     expect(run.eta).toBeNull();
   });
 
   it("advances stop status and the next stop as the bus moves", async () => {
     const { t, assignmentId, deviceId, runId, stopIds } = await setup();
-    let captured = NOW - 400_000;
+    let captured = NOW - 130_000;
     const events = [];
     for (let d = 100; d <= 1200; d += 50) events.push(event(runId, d, (captured += 5_000)));
     await t.mutation(internal.telemetry.ingestBatch, { deviceId, events, nowMs: captured + 500 });
-    const run = await myRun(t, assignmentId, captured + 1_000);
+    const run = await myRun(t, assignmentId);
     expect(run.nextStopId).toBe(stopIds[1]);
     expect(run.assignedStop.status).toBe("upcoming");
     expect(run.eta).not.toBeNull();
@@ -162,12 +177,12 @@ describe("baseline ETA in tracking.myRun", () => {
 
   it("shows no ETA while the bus is at the assigned stop", async () => {
     const { t, assignmentId, deviceId, runId } = await setup();
-    let captured = NOW - 600_000;
+    let captured = NOW - 150_000;
     const events = [];
-    for (let d = 100; d <= 3500; d += 50) events.push(event(runId, d, (captured += 5_000)));
+    for (let d = 100; d <= 3500; d += 50) events.push(event(runId, d, (captured += 2_000)));
     await t.mutation(internal.telemetry.ingestBatch, { deviceId, events: events.slice(0, 40), nowMs: captured });
     await t.mutation(internal.telemetry.ingestBatch, { deviceId, events: events.slice(40), nowMs: captured });
-    const run = await myRun(t, assignmentId, captured + 500);
+    const run = await myRun(t, assignmentId);
     expect(run.assignedStop.status).toBe("at_stop");
     expect(run.eta).toBeNull();
   });

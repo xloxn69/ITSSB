@@ -1,0 +1,245 @@
+/**
+ * Route progress along an approved route version (docs/10 §2). Pure code with
+ * no Convex imports, so the evaluation script replays it exactly as the
+ * backend runs it.
+ *
+ * Progress is distance along the approved path. Each fix is matched only to
+ * path segments inside a window around the last accepted progress, so a loop's
+ * return leg or a far-ahead segment is never chosen just because it is
+ * geometrically nearest. A fix that matches nothing is `off_route`; one that
+ * matches two separate parts of the path is `ambiguous`. Neither moves
+ * progress, and neither supports an estimate.
+ *
+ * Every distance below is a tuning parameter for controlled tests, not a
+ * guaranteed distance or a safety check.
+ */
+import type { RoutePoint, StopStatus } from "@itssb/contracts";
+
+/** Base lateral distance from the path a fix may be and still match it. */
+export const MATCH_LATERAL_M = 40;
+/** Worst reported GPS accuracy added to the lateral tolerance. */
+export const MAX_ACCURACY_ALLOWANCE_M = 50;
+/** How far behind accepted progress a fix may match (GPS noise). */
+export const BACKTRACK_M = 50;
+/** Fastest plausible bus speed for the forward search window. */
+export const MAX_PLAUSIBLE_SPEED_MPS = 35;
+/** Fixed forward slack on top of the speed allowance. */
+export const FORWARD_SLACK_M = 200;
+/** Progress within this distance before a stop counts as arrived. */
+export const ARRIVE_BEFORE_M = 30;
+/** Progress this far beyond a stop counts as departed. */
+export const DEPART_AFTER_M = 50;
+
+export interface RouteStopInput {
+  stopId: string;
+  /** Travel order; a stop without one cannot be placed honestly. */
+  sequence: number | undefined;
+  latitude: number;
+  longitude: number;
+}
+
+export interface PreparedStop {
+  stopId: string;
+  sequence: number;
+  /** Distance along the path, in meters. */
+  alongM: number;
+}
+
+export interface PreparedRoute {
+  points: RoutePoint[];
+  /** Cumulative distance at each point, meters; `cumM[0] === 0`. */
+  cumM: number[];
+  totalM: number;
+  /** In travel order. */
+  stops: PreparedStop[];
+}
+
+export type MatchStatus = "on_route" | "off_route" | "ambiguous";
+
+export interface Fix {
+  latitude: number;
+  longitude: number;
+  horizontalAccuracyM: number | null;
+  capturedAtMs: number;
+}
+
+export interface StopOutcome {
+  stopId: string;
+  /** Capture time of the first fix within the arrival band, if seen. */
+  arrivedAtMs: number | null;
+  /** Capture time of the first fix past the departure band. */
+  departedAtMs: number | null;
+}
+
+export interface ProgressState {
+  /** Last accepted distance along the path; never decreases. */
+  alongM: number;
+  /** Capture time of the last accepted fix (or the run start). */
+  atMs: number;
+  /** Result of matching the most recent fix. */
+  lastStatus: MatchStatus;
+  stops: StopOutcome[];
+}
+
+export type Located = { status: "on_route"; alongM: number; lateralM: number } | { status: "off_route" | "ambiguous" };
+
+const EARTH_RADIUS_M = 6_371_000;
+const rad = (d: number) => (d * Math.PI) / 180;
+
+/** Local planar coordinates in meters around `origin` (fine at route scale). */
+function planar(origin: RoutePoint, p: RoutePoint): [number, number] {
+  const x = rad(p.longitude - origin.longitude) * Math.cos(rad(origin.latitude)) * EARTH_RADIUS_M;
+  const y = rad(p.latitude - origin.latitude) * EARTH_RADIUS_M;
+  return [x, y];
+}
+
+function segmentLength(a: RoutePoint, b: RoutePoint): number {
+  const [x, y] = planar(a, b);
+  return Math.hypot(x, y);
+}
+
+/** Projection of `p` onto segment `i`: distance along the path and lateral distance. */
+function projectOnSegment(route: Pick<PreparedRoute, "points" | "cumM">, i: number, p: RoutePoint) {
+  const a = route.points[i]!;
+  const b = route.points[i + 1]!;
+  const [bx, by] = planar(a, b);
+  const [px, py] = planar(a, p);
+  const len2 = bx * bx + by * by;
+  const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, (px * bx + py * by) / len2));
+  const lateralM = Math.hypot(px - t * bx, py - t * by);
+  const segLen = route.cumM[i + 1]! - route.cumM[i]!;
+  return { alongM: route.cumM[i]! + t * segLen, lateralM };
+}
+
+/**
+ * Measures the path and places each stop on it in sequence order: a stop is
+ * matched only at or after the previous stop, at the earliest place the path
+ * passes close to it. Returns null (no progress, no estimate) for a path with
+ * fewer than two points or a stop without a sequence.
+ */
+export function prepareRoute(path: RoutePoint[], stops: RouteStopInput[]): PreparedRoute | null {
+  if (path.length < 2) return null;
+  if (stops.some((s) => s.sequence === undefined)) return null;
+  const cumM = [0];
+  for (let i = 1; i < path.length; i++) cumM.push(cumM[i - 1]! + segmentLength(path[i - 1]!, path[i]!));
+  const base = { points: path, cumM };
+  const ordered = stops.toSorted((a, b) => a.sequence! - b.sequence!);
+  const placed: PreparedStop[] = [];
+  let minAlong = 0;
+  for (const s of ordered) {
+    let nearest: { alongM: number; lateralM: number } | null = null;
+    let earliestClose: number | null = null;
+    for (let i = 0; i < path.length - 1; i++) {
+      if (cumM[i + 1]! < minAlong) continue;
+      const proj = projectOnSegment(base, i, s);
+      if (proj.alongM < minAlong) continue;
+      if (earliestClose === null && proj.lateralM <= MATCH_LATERAL_M) earliestClose = proj.alongM;
+      if (!nearest || proj.lateralM < nearest.lateralM) nearest = proj;
+    }
+    // Earliest close pass, refined to the closest point in that pass. The
+    // next stop is searched only after this pass ends, so a later stop at the
+    // same place (a loop's return leg) lands on the later pass.
+    let alongM = nearest?.alongM ?? minAlong;
+    let passEndM = alongM;
+    if (earliestClose !== null) {
+      let best = { alongM: earliestClose, lateralM: Infinity };
+      for (let i = 0; i < path.length - 1; i++) {
+        if (cumM[i + 1]! < earliestClose) continue;
+        const proj = projectOnSegment(base, i, s);
+        if (proj.lateralM > MATCH_LATERAL_M) {
+          // The first segment past the pass: the next stop starts here.
+          passEndM = cumM[i + 1]!;
+          break;
+        }
+        if (proj.lateralM < best.lateralM) best = proj;
+        passEndM = cumM[i + 1]!;
+      }
+      alongM = best.alongM;
+    }
+    placed.push({ stopId: s.stopId, sequence: s.sequence!, alongM });
+    minAlong = Math.max(alongM, passEndM);
+  }
+  return { points: path, cumM, totalM: cumM[cumM.length - 1]!, stops: placed };
+}
+
+/** Progress at run start: the beginning of the path, no stop reached yet. */
+export function initialProgress(route: PreparedRoute, startedAtMs: number): ProgressState {
+  return {
+    alongM: 0,
+    atMs: startedAtMs,
+    lastStatus: "on_route",
+    stops: route.stops.map((s) => ({ stopId: s.stopId, arrivedAtMs: null, departedAtMs: null })),
+  };
+}
+
+/**
+ * Matches one fix against the path inside the search window around `prev`.
+ * Candidate segments within the lateral tolerance are grouped into
+ * contiguous runs of path; more than one run is `ambiguous`.
+ */
+export function locate(route: PreparedRoute, prev: ProgressState, fix: Fix): Located {
+  const dtS = Math.max(0, (fix.capturedAtMs - prev.atMs) / 1000);
+  const lower = prev.alongM - BACKTRACK_M;
+  const upper = prev.alongM + MAX_PLAUSIBLE_SPEED_MPS * dtS + FORWARD_SLACK_M;
+  const tolerance = MATCH_LATERAL_M + Math.min(fix.horizontalAccuracyM ?? MAX_ACCURACY_ALLOWANCE_M, MAX_ACCURACY_ALLOWANCE_M);
+
+  const clusters: { endM: number; best: { alongM: number; lateralM: number } }[] = [];
+  for (let i = 0; i < route.points.length - 1; i++) {
+    if (route.cumM[i + 1]! < lower || route.cumM[i]! > upper) continue;
+    const proj = projectOnSegment(route, i, fix);
+    if (proj.lateralM > tolerance || proj.alongM < lower || proj.alongM > upper) continue;
+    const last = clusters[clusters.length - 1];
+    // Adjacent matching segments belong to one pass along the path.
+    if (last && route.cumM[i]! - last.endM <= tolerance) {
+      last.endM = route.cumM[i + 1]!;
+      // Prefer the closer match; on a near tie prefer forward progress.
+      const tie = Math.abs(proj.lateralM - last.best.lateralM) <= 1;
+      if (proj.lateralM < last.best.lateralM - 1 || (tie && proj.alongM > last.best.alongM)) last.best = proj;
+    } else {
+      clusters.push({ endM: route.cumM[i + 1]!, best: proj });
+    }
+  }
+  if (clusters.length === 0) return { status: "off_route" };
+  if (clusters.length > 1) return { status: "ambiguous" };
+  return { status: "on_route", alongM: clusters[0]!.best.alongM, lateralM: clusters[0]!.best.lateralM };
+}
+
+/**
+ * Applies one fix. An on-route match advances progress (never backward) and
+ * records stop arrivals and departures from separate bands, so jitter near a
+ * boundary cannot produce a second arrival. Off-route and ambiguous fixes
+ * leave progress and stop outcomes unchanged.
+ */
+export function advance(route: PreparedRoute, prev: ProgressState, fix: Fix): ProgressState {
+  // Not newer than accepted progress: history, not progress.
+  if (fix.capturedAtMs <= prev.atMs) return prev;
+  const located = locate(route, prev, fix);
+  if (located.status !== "on_route") return { ...prev, lastStatus: located.status };
+  const alongM = Math.max(prev.alongM, located.alongM);
+  const stops = prev.stops.map((outcome, i) => {
+    const stop = route.stops[i]!;
+    let { arrivedAtMs, departedAtMs } = outcome;
+    if (departedAtMs === null && alongM >= stop.alongM + DEPART_AFTER_M) {
+      departedAtMs = fix.capturedAtMs;
+    } else if (arrivedAtMs === null && departedAtMs === null && alongM >= stop.alongM - ARRIVE_BEFORE_M) {
+      arrivedAtMs = fix.capturedAtMs;
+    }
+    return { stopId: outcome.stopId, arrivedAtMs, departedAtMs };
+  });
+  return { alongM, atMs: fix.capturedAtMs, lastStatus: "on_route", stops };
+}
+
+export function stopStatus(route: PreparedRoute, state: ProgressState, stopId: string): StopStatus {
+  const i = route.stops.findIndex((s) => s.stopId === stopId);
+  const outcome = state.stops[i];
+  if (i < 0 || !outcome) return "unknown";
+  if (outcome.departedAtMs !== null) return "passed";
+  if (outcome.arrivedAtMs !== null) return "at_stop";
+  return "upcoming";
+}
+
+/** First stop in travel order the bus has not departed, or null at the end. */
+export function nextStopId(route: PreparedRoute, state: ProgressState): string | null {
+  const i = state.stops.findIndex((s) => s.departedAtMs === null);
+  return i < 0 ? null : route.stops[i]!.stopId;
+}

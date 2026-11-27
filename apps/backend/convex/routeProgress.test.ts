@@ -11,8 +11,8 @@ import {
 
 /** Fictional coordinates only. */
 const BASE = { latitude: 34.1, longitude: -83.99 };
-const M_PER_DEG_LAT = 111_320;
-const M_PER_DEG_LON = 111_320 * Math.cos((BASE.latitude * Math.PI) / 180);
+const M_PER_DEG_LAT = (6_371_000 * Math.PI) / 180;
+const M_PER_DEG_LON = M_PER_DEG_LAT * Math.cos((BASE.latitude * Math.PI) / 180);
 
 /** A point `east` and `north` meters from BASE. */
 function at(east: number, north = 0) {

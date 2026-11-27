@@ -154,6 +154,46 @@ export default defineSchema({
   }).index("by_run", ["runId"]),
 
   /**
+   * Route progress per run (docs/10 §2), updated from live-applied telemetry
+   * in the same transaction. `alongM` is distance along the approved path and
+   * never decreases; `stops` is in travel order. Arrival and departure times
+   * here are inferred from GPS, never a staff-confirmed action.
+   */
+  runProgress: defineTable({
+    runId: v.id("runs"),
+    routeVersionId: v.string(),
+    alongM: v.number(),
+    atMs: v.number(),
+    lastStatus: v.union(v.literal("on_route"), v.literal("off_route"), v.literal("ambiguous")),
+    /** Telemetry event most recently matched (or not) against the route. */
+    lastEventId: v.string(),
+    stops: v.array(
+      v.object({
+        stopId: v.string(),
+        arrivedAtMs: v.union(v.number(), v.null()),
+        departedAtMs: v.union(v.number(), v.null()),
+      }),
+    ),
+  }).index("by_run", ["runId"]),
+
+  /**
+   * Every arrival estimate as it was made (docs/10 §4), kept for evaluation
+   * against later arrival outcomes. Never rewritten after the fact.
+   */
+  etaPredictions: defineTable({
+    runId: v.id("runs"),
+    routeVersionId: v.string(),
+    stopId: v.string(),
+    sourceEventId: v.string(),
+    sourceCapturedAtMs: v.number(),
+    liveRevision: v.number(),
+    generatedAtMs: v.number(),
+    arrivalAtMs: v.number(),
+    validUntilMs: v.number(),
+    algorithmVersion: v.string(),
+  }).index("by_run_stop_generated", ["runId", "stopId", "generatedAtMs"]),
+
+  /**
    * An immutable approved route version: label, bounded path, and stops.
    * `runs.routeVersionId` stores this table's ID as a string.
    */

@@ -85,6 +85,8 @@ const SEED_GUARDED_TABLES = [
   "driverGrants",
   "telemetryEvents",
   "liveState",
+  "runProgress",
+  "etaPredictions",
   "routeVersions",
   "stops",
   "routes",
@@ -138,11 +140,13 @@ export const insert = internalMutation({
     const firstStopId = await ctx.db.insert("stops", {
       routeVersionId,
       label: "Maple & Elm (demo)",
+      sequence: 0,
       ...DEMO_ROUTE_POINTS.firstStop,
     });
     const assignedStopId = await ctx.db.insert("stops", {
       routeVersionId,
       label: "Oak & Pine (demo)",
+      sequence: 1,
       ...DEMO_ROUTE_POINTS.assignedStop,
     });
     const stopIds = [firstStopId, assignedStopId];

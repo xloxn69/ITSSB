@@ -29,8 +29,12 @@ For a student's stop, add the expected travel times of the remaining route segme
 
 ```text
 remaining duration = remaining segment travel + intervening stop dwell
-arrivalAtMs = current evaluation time + remaining duration in milliseconds
+arrivalAtMs = source position capturedAtMs + remaining duration in milliseconds
 ```
+
+The estimate is anchored to when the position was captured, not when the server evaluated it, so an old position yields an arrival that is already too early and a validity that has already ended instead of a fresh-looking countdown.
+
+**Implemented baseline (`baseline-v1`).** Remaining segment travel is the remaining distance along the approved path at a configured average cruise speed; dwell is a configured time per intervening stop the bus has not left. Both values live in `apps/backend/convex/lib/eta.ts` and are tuned on training runs only (§6). Progress is computed inside telemetry ingest, in the same transaction, so a superseded asynchronous result cannot replace a newer one; predictions are stored for the newest live position of each batch, one per stop ahead. Per-segment historical durations are the next step once representative runs exist.
 
 ### Fictional example
 

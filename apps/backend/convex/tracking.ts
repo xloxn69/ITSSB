@@ -1,5 +1,8 @@
 import {
   type AccessUnavailable,
+  type Eta,
+  POSITION_STALE_AFTER_MS,
+  type StopStatus,
   type AccessUnavailableReason,
   type MyAssignmentsResult,
   type MyRouteResult,
@@ -12,6 +15,7 @@ import type { Doc } from "./_generated/dataModel";
 import { mutation, type QueryCtx, query } from "./_generated/server";
 import { healthForRun } from "./health";
 import { getTrackableAssignment, getUser, listTrackableAssignments, missingUserReason } from "./lib/authz";
+import { getRunProgress } from "./lib/progressStore";
 import { runState } from "./schema";
 
 /**
@@ -182,17 +186,26 @@ export const myRun = query({
       };
     }
 
-    const [live, device, health] = await Promise.all([
+    const [live, device, health, progress] = await Promise.all([
       ctx.db
         .query("liveState")
         .withIndex("by_run", (q) => q.eq("runId", run._id))
         .unique(),
       ctx.db.get(run.deviceId),
       healthForRun(ctx, run),
+      getRunProgress(ctx, run._id),
     ]);
     // Last time the backend heard from this bus during the run: a health
     // heartbeat or an accepted observation, whichever came later.
     const contacts = [live?.receivedAtMs, health?.receivedAtMs].filter((ms): ms is number => ms !== undefined);
+    const outcome = progress?.stops.find((s) => s.stopId === stop._id);
+    const stopStatus: StopStatus = !outcome
+      ? "unknown"
+      : outcome.departedAtMs !== null
+        ? "passed"
+        : outcome.arrivedAtMs !== null
+          ? "at_stop"
+          : "upcoming";
 
     return {
       schemaVersion: SCHEMA_VERSION,
@@ -222,16 +235,18 @@ export const myRun = query({
               horizontalAccuracyM: live.horizontalAccuracyM ?? null,
             }
           : null,
-        // Route progress and ETA are later milestones; never guess them.
-        nextStopId: null,
+        nextStopId: progress?.stops.find((s) => s.departedAtMs === null)?.stopId ?? null,
         assignedStop: {
           stopId: stop._id,
           label: stop.label,
           latitude: stop.latitude,
           longitude: stop.longitude,
-          status: "unknown",
+          status: stopStatus,
         },
-        eta: null,
+        eta:
+          live && progress?.lastEventId === live.eventId && progress.lastStatus === "on_route" && stopStatus === "upcoming"
+            ? await currentEta(ctx, run._id, stop._id, live, serverNowMs)
+            : null,
       },
     };
   },
@@ -293,6 +308,37 @@ function reportedGpsStatus(
   if (!health || health.gpsStatus === "unknown") return null;
   if (health.gpsStatus !== "valid" && live && live.capturedAtMs > health.capturedAtMs) return null;
   return health.gpsStatus;
+}
+
+/**
+ * The stored estimate for this stop, only if it was made from the current
+ * live position, its validity has not ended, and that position is not stale.
+ * Anything else returns null: an old number is never shown as current.
+ */
+async function currentEta(
+  ctx: QueryCtx,
+  runId: Doc<"runs">["_id"],
+  stopId: string,
+  live: Doc<"liveState">,
+  serverNowMs: number,
+): Promise<Eta | null> {
+  if (serverNowMs - live.capturedAtMs >= POSITION_STALE_AFTER_MS) return null;
+  const p = await ctx.db
+    .query("etaPredictions")
+    .withIndex("by_run_stop_generated", (q) => q.eq("runId", runId).eq("stopId", stopId))
+    .order("desc")
+    .first();
+  if (!p || p.sourceEventId !== live.eventId || serverNowMs >= p.validUntilMs) return null;
+  return {
+    arrivalAtMs: p.arrivalAtMs,
+    generatedAtMs: p.generatedAtMs,
+    validUntilMs: p.validUntilMs,
+    // Calibrated bounds stay null until evaluation supports them (docs/10 §4).
+    lowerArrivalAtMs: null,
+    upperArrivalAtMs: null,
+    algorithmVersion: p.algorithmVersion,
+    sourceEventId: p.sourceEventId,
+  };
 }
 
 async function activeRunFor(ctx: QueryCtx, assignment: Doc<"assignments">) {

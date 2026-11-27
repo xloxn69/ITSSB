@@ -59,7 +59,7 @@ These files are a plan to implement, not files already supplied by this document
 | `convex/enrollment.ts` | Invitations, private details, stop requests, approvals. |
 | `convex/checkIns.ts` | Student claims, staff records, corrections. |
 | `convex/notifications.ts` | Preferences, push-token associations, outbox. |
-| `convex/predictions.ts` | Baseline results and controlled model integration. |
+| `convex/lib/routeProgress.ts`, `convex/lib/eta.ts`, `convex/lib/progressStore.ts` | Route progress, the baseline estimate, and stored predictions, updated inside telemetry ingest. Later model integration goes behind the same seam. |
 | `convex/audit.ts` | Append-only records of sensitive application decisions. |
 | `convex/lib/authorization.ts` | Reusable organization/role/relationship checks. |
 | `convex/lib/validation.ts` | Domain validation beyond basic field types. |
@@ -92,7 +92,7 @@ Every protected record must be traceable to its organization. A route number suc
 | `invitations`, `checkInChallenges` | Purpose-bound temporary tokens, scope, expiration, revocation. |
 | `alerts`, `notificationJobs`, `pushTokens` | Logical alert, delivery attempts, permitted recipient devices. |
 | `requestReceipts`, `auditEvents` | Idempotency results and sensitive change history. |
-| `modelVersions`, `predictionRecords` | Evaluation, activation status, predictions made before arrival. |
+| `runProgress`, `etaPredictions` | Per-run distance along the approved path with GPS-inferred stop arrivals and departures; every estimate as it was made, for evaluation. `modelVersions` (activation status) comes with learned models. |
 
 Do not return entire database rows just because they contain a useful field. Define explicit response objects. The family tracking query should never accidentally include device credentials, private enrollment addresses, or route-wide driver notes.
 

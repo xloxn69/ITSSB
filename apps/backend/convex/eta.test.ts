@@ -5,7 +5,7 @@ import { advance, initialProgress, prepareRoute, type RouteStopInput } from "./l
 
 /** Fictional coordinates only. */
 const BASE = { latitude: 34.1, longitude: -83.99 };
-const M_PER_DEG_LON = 111_320 * Math.cos((BASE.latitude * Math.PI) / 180);
+const M_PER_DEG_LON = ((6_371_000 * Math.PI) / 180) * Math.cos((BASE.latitude * Math.PI) / 180);
 const at = (east: number) => ({ latitude: BASE.latitude, longitude: BASE.longitude + east / M_PER_DEG_LON });
 const stop = (stopId: string, sequence: number, east: number): RouteStopInput => ({ stopId, sequence, ...at(east) });
 

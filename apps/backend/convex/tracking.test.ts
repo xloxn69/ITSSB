@@ -96,7 +96,7 @@ describe("tracking.myRun", () => {
     expect(r.run.busLabel).toBe("Bus 12");
     expect(r.run.liveRevision).toBe(1);
     expect(r.run.lastDeviceContactAtMs).toBe(NOW);
-    // Never guessed: no health reporting, progress model, or ETA yet.
+    // Never guessed: no health report, and these stops have no travel order, so no progress or ETA.
     expect(r.run.gpsStatus).toBeNull();
     expect(r.run.eta).toBeNull();
     expect(r.run.assignedStop.status).toBe("unknown");
