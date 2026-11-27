@@ -1,0 +1,4 @@
+{
+  "positionAgingAfterMs": 30000,
+  "positionStaleAfterMs": 120000
+}

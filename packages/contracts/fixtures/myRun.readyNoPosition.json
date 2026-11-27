@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "status": "ready",
+  "serverNowMs": 1795609085500,
+  "assignmentId": "demo_assignment_001",
+  "routeVersionId": "demo_route_version_003",
+  "run": {
+    "runId": "demo_run_001",
+    "state": "active",
+    "liveRevision": 0,
+    "busLabel": "Bus 12",
+    "lastDeviceContactAtMs": null,
+    "gpsStatus": null,
+    "lastPosition": null,
+    "nextStopId": null,
+    "assignedStop": {
+      "stopId": "demo_stop_003",
+      "label": "Oak & Pine",
+      "latitude": 34.105,
+      "longitude": -83.975,
+      "status": "unknown"
+    },
+    "eta": null
+  }
+}

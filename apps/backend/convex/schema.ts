@@ -33,6 +33,8 @@ export default defineSchema({
     label: v.string(),
     credentialHash: v.string(),
     revoked: v.boolean(),
+    /** Family-facing name of the bus this Pi is installed in ("Bus 12"). */
+    busLabel: v.optional(v.string()),
   }).index("by_credential_hash", ["credentialHash"]),
 
   /** One execution of an approved route version. */
@@ -45,6 +47,7 @@ export default defineSchema({
     endedAtMs: v.optional(v.number()),
   })
     .index("by_device_state", ["deviceId", "state"])
+    .index("by_route_version_state", ["routeVersionId", "state"])
     .index("by_start_request", ["startRequestId"]),
 
   /** Accepted telemetry history. `eventId` makes delivery idempotent. */
@@ -77,7 +80,50 @@ export default defineSchema({
     longitude: v.number(),
     speedMps: v.union(v.number(), v.null()),
     headingDegrees: v.union(v.number(), v.null()),
+    // Optional so rows written before these fields existed stay valid.
+    horizontalAccuracyM: v.optional(v.union(v.number(), v.null())),
+    /** Increments each time the live position is replaced (docs/08 `liveRevision`). */
+    revision: v.optional(v.number()),
   }).index("by_run", ["runId"]),
+
+  /**
+   * An immutable approved route version: label, bounded path, and stops.
+   * `runs.routeVersionId` stores this table's ID as a string.
+   */
+  routeVersions: defineTable({
+    label: v.string(),
+    path: v.array(v.object({ latitude: v.number(), longitude: v.number() })),
+  }),
+
+  stops: defineTable({
+    routeVersionId: v.id("routeVersions"),
+    label: v.string(),
+    latitude: v.number(),
+    longitude: v.number(),
+  }).index("by_route_version", ["routeVersionId"]),
+
+  /** A student record. `userId` is the student's own account, if they have one. */
+  students: defineTable({
+    displayName: v.string(),
+    userId: v.optional(v.id("users")),
+  }).index("by_user", ["userId"]),
+
+  /** A staff-approved student → route version → stop relationship (docs/07). */
+  assignments: defineTable({
+    studentId: v.id("students"),
+    routeVersionId: v.id("routeVersions"),
+    stopId: v.id("stops"),
+    status: v.union(v.literal("approved"), v.literal("revoked")),
+  }).index("by_student", ["studentId"]),
+
+  /** A school-approved guardian → student link. Never created by a name search. */
+  guardianLinks: defineTable({
+    guardianUserId: v.id("users"),
+    studentId: v.id("students"),
+    status: v.union(v.literal("approved"), v.literal("revoked")),
+  })
+    .index("by_guardian", ["guardianUserId"])
+    .index("by_guardian_student", ["guardianUserId", "studentId"]),
 
   /** Append-only record of sensitive actions. Never update or delete rows. */
   auditLog: defineTable({

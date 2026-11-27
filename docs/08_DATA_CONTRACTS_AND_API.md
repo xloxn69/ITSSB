@@ -219,6 +219,16 @@ Both QR purposes require current authorization and expiration checks. A backend 
 
 The signed-in identity is supplied through the authenticated client. The query verifies that this is the student's assignment or a permitted guardian relationship. It does not trust a caller-supplied role.
 
+Three queries make up the family tracking contract. TypeScript types live in `packages/contracts/src/tracking.ts`; canonical fixtures are generated to `packages/contracts/fixtures/*.json` and decoded by the backend and Swift tests.
+
+| Query | Args | Returns |
+| --- | --- | --- |
+| `tracking:myAssignments` | `{}` | `ready` with the caller's own and approved-guardian-linked `assignments` (`assignmentId`, `relationship: "self" \| "guardian"`, `studentDisplayName`, `routeLabel`, `stopLabel`), or `access_unavailable`. |
+| `tracking:myRun` | `{ assignmentId }` | The compact live envelope below. |
+| `tracking:myRoute` | `{ assignmentId }` | `ready` with `routeVersionId`, `routeLabel`, the approved `path` (ordered `{ latitude, longitude }`, at most 2000 points), and `assignedStop` (`stopId`, `label`, `latitude`, `longitude`), or `access_unavailable`. Geometry for a `routeVersionId` never changes, so clients cache it by that ID. |
+
+Every envelope carries `schemaVersion` and `serverNowMs`.
+
 ```json
 {
   "schemaVersion": 1,
@@ -264,11 +274,33 @@ The signed-in identity is supplied through the authenticated client. The query v
 }
 ```
 
+Field rules for `run`:
+
+| Field | Rule |
+| --- | --- |
+| `liveRevision` | Nonnegative safe integer. `0` before any position; increases each time the live position is replaced. |
+| `lastDeviceContactAtMs` | Last time the backend heard from the bus device, or `null` if never. Until device health reporting exists this is the last telemetry receipt. |
+| `gpsStatus` | `valid`, `no_fix`, `receiver_missing`, or `null` when no health report has supplied it. Never inferred from a missing position. |
+| `nextStopId` | `null` until the backend tracks route progress. |
+| `assignedStop.status` | `upcoming`, `at_stop`, `passed`, or `unknown` (until route progress exists). |
+| `busLabel` | Family-facing bus name; a generic label when the device has none. |
+
 The 30-second example prediction validity is illustrative configuration, not a measured accuracy guarantee. The current schema permits `lastPosition: null` and `eta: null`. Optional calibrated bounds stay null until evaluation supports them. Completed/cancelled runs cannot retain an actionable approaching countdown.
 
-`status: "no_active_run"` returns authorized schedule information with `run: null`. `status: "access_unavailable"` contains only a safe recovery reason and no protected route fields. Authentication/session failures can also surface as the SDK's typed error; the repository maps that error to the appropriate UI state. Distinguish an empty schedule from a failed query.
+`status: "no_active_run"` returns `assignmentId`, `routeVersionId`, and `run: null`; schedule fields (next service, cancellation) are a later addition. `status: "access_unavailable"` contains only `schemaVersion`, `serverNowMs`, and a safe `reason`: `unauthenticated` (sign in again) or `not_permitted` (unknown, malformed, revoked, and forbidden assignments are deliberately indistinguishable). It has no protected route fields. Authentication/session failures can also surface as the SDK's typed error; the repository maps that error to the appropriate UI state. Distinguish an empty schedule from a failed query.
 
 The app ages its freshness label locally between updates. It may estimate server clock offset from `serverNowMs`, but a server time field does not turn a reactive query into a clock. When no data changes, a subscription need not emit a fresh snapshot every second.
+
+### 8.1 Freshness policy (provisional)
+
+| Constant | Value | Meaning |
+| --- | --- | --- |
+| `POSITION_AGING_AFTER_MS` | `30000` | From this age the app says it is waiting for an update. |
+| `POSITION_STALE_AFTER_MS` | `120000` | From this age the position is shown as a last-known location with its capture time; movement animation and any estimate stop. |
+
+These are proposed values, owned by the open "Freshness and alert thresholds" decision in [17](17_DECISIONS_AND_SOURCES.md) and to be tuned from measured runs. They are exported from `packages/contracts` and mirrored in the Swift app; change both together.
+
+Age is `now - capturedAtMs`. A query result can be served from cache, so `serverNowMs` may be older than the moment it arrives; it can make the server-aligned clock look earlier, never later. The client therefore uses the **larger** of the phone-clock age and the server-aligned age (phone time plus `serverNowMs - receiptTime`), and never shows a negative age. An error in either clock can only make a position look older, not fresher.
 
 ## 9. Enrollment, QR, and app commands
 
