@@ -130,6 +130,8 @@ async function ingestOne(
     longitude: e.longitude,
     speedMps: e.speedMps,
     headingDegrees: e.headingDegrees,
+    horizontalAccuracyM: e.horizontalAccuracyM,
+    revision: (live?.revision ?? 0) + 1,
   };
   let liveStateApplied = false;
   if (!live) {

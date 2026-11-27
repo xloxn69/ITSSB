@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "status": "ready",
+  "serverNowMs": 1795609085500,
+  "assignmentId": "demo_assignment_001",
+  "routeVersionId": "demo_route_version_003",
+  "run": {
+    "runId": "demo_run_001",
+    "state": "active",
+    "liveRevision": 27,
+    "busLabel": "Bus 12",
+    "lastDeviceContactAtMs": 1795609085400,
+    "gpsStatus": "valid",
+    "lastPosition": {
+      "eventId": "5fe2a60d-7c11-45b9-995d-f50192adea42",
+      "capturedAtMs": 1795609085000,
+      "receivedAtMs": 1795609085400,
+      "latitude": 34.1,
+      "longitude": -83.98,
+      "speedMps": 7.2,
+      "headingDegrees": 95,
+      "horizontalAccuracyM": null
+    },
+    "nextStopId": "demo_stop_003",
+    "assignedStop": {
+      "stopId": "demo_stop_003",
+      "label": "Oak & Pine",
+      "latitude": 34.105,
+      "longitude": -83.975,
+      "status": "upcoming"
+    },
+    "eta": {
+      "arrivalAtMs": 1795609445000,
+      "generatedAtMs": 1795609085450,
+      "validUntilMs": 1795609115450,
+      "lowerArrivalAtMs": null,
+      "upperArrivalAtMs": null,
+      "algorithmVersion": "baseline-v1",
+      "sourceEventId": "5fe2a60d-7c11-45b9-995d-f50192adea42"
+    }
+  }
+}

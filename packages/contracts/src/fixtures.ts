@@ -18,3 +18,5 @@ export const demoTelemetryEvent: TelemetryEvent = {
   horizontalAccuracyM: null,
   fixMode: 3,
 };
+
+export * from "./trackingFixtures.js";

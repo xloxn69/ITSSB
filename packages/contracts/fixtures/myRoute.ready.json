@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "status": "ready",
+  "serverNowMs": 1795609085500,
+  "assignmentId": "demo_assignment_001",
+  "routeVersionId": "demo_route_version_003",
+  "routeLabel": "Route 17 Morning",
+  "path": [
+    {
+      "latitude": 34.092,
+      "longitude": -83.995
+    },
+    {
+      "latitude": 34.098,
+      "longitude": -83.99
+    },
+    {
+      "latitude": 34.1,
+      "longitude": -83.98
+    },
+    {
+      "latitude": 34.105,
+      "longitude": -83.975
+    },
+    {
+      "latitude": 34.111,
+      "longitude": -83.968
+    }
+  ],
+  "assignedStop": {
+    "stopId": "demo_stop_003",
+    "label": "Oak & Pine",
+    "latitude": 34.105,
+    "longitude": -83.975
+  }
+}

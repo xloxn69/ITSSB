@@ -43,10 +43,12 @@ struct PreviewLiveRunSource: LiveRunSource {
     func currentPosition() async throws -> TrackState {
         let captured = Date().addingTimeInterval(-capturedSecondsAgo)
         return .tracking(LivePosition(
+            eventId: "5fe2a60d-7c11-45b9-995d-f50192adea42",
             latitude: 34.1,
             longitude: -83.98,
             speedMps: 7.2,
             headingDegrees: 95,
+            horizontalAccuracyM: nil,
             capturedAt: captured,
             receivedAt: captured.addingTimeInterval(0.4)
         ))
