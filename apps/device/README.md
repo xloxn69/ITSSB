@@ -22,7 +22,15 @@ Python service that runs on the bus Raspberry Pi. Spec:
 | `devtools/fake_backend.py` | Local fake of the telemetry endpoint with outage modes (`down`, `drop_response`, `partial`, ...) |
 
 Still to build (see [roadmap](../../docs/15_BUILD_ROADMAP.md)): the HTTP
-`RunStarter` (needs the backend's trip-events endpoint), systemd unit.
+`RunStarter` (needs the backend's trip-events endpoint).
+
+## Install on the Pi
+
+The owner installs the reviewed systemd unit
+[`deploy/itssb-device.service`](deploy/itssb-device.service) with sudo,
+following [`deploy/INSTALL.md`](deploy/INSTALL.md). `scripts/pi_proof.sh` re-runs
+the Phase 2 proof (real GPSD, GPSD stopped/started, kill -9 recovery) without
+sudo.
 
 ## Commands
 

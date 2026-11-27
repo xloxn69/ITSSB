@@ -107,6 +107,8 @@ device_api_origin = "https://REPLACE_WITH_DEVICE_HTTP_ORIGIN"
 allow_new_offline_run = false
 ~~~
 
+> **Implementation note (Phase 2):** the first implementation reads all settings from environment variables, which systemd injects from `/etc/itssb/device.env`. There is no separate TOML file yet. Names and defaults are listed in [`apps/device/deploy/device.env.example`](../apps/device/deploy/device.env.example).
+
 Validate configuration on startup. Refuse impossible intervals, non-loopback local binding, unsupported schema versions, or a malformed production HTTPS origin. Expose an understandable configuration error without printing the token.
 
 The protected environment file can define the application's chosen variable `ITSSB_DEVICE_TOKEN`. The authorized administrator supplies its real value. This is an application-specific name, not a pre-existing Convex environment variable.
@@ -344,6 +346,8 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 ~~~
+
+> **Implementation note (Phase 2):** the shipped unit is [`apps/device/deploy/itssb-device.service`](../apps/device/deploy/itssb-device.service), with owner steps in [`deploy/INSTALL.md`](../apps/device/deploy/INSTALL.md). The runtime is the standard library only, so it runs the source tree with `/usr/bin/python3` and `PYTHONPATH` instead of a virtualenv. `StateDirectory=itssb` creates `/var/lib/itssb`, and `RestartPreventExitStatus=2` keeps a configuration error from becoming a restart loop.
 
 The service waits for local OS/network startup ordering, not successful internet access. It must remain useful when the cloud is unavailable. GPSD is wanted rather than making all UI operation fail when GPS is missing. The leading minus makes the credential file optional at process startup so an unpaired device can show restricted setup and diagnostics. Missing credentials must disable cloud uploads, trip starts, and protected operation; they must never grant default access.
 

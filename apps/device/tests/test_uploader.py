@@ -1,5 +1,7 @@
+import errno
 import logging
 import socket
+import ssl
 
 import pytest
 
@@ -8,7 +10,7 @@ from itssb_device.devtools.fake_backend import FakeBackend
 from itssb_device.models import Fix
 from itssb_device.status import StatusBoard
 from itssb_device.sync import backoff_ms
-from itssb_device.uploader import AUTH_PAUSE_MS, HttpTransport, Uploader
+from itssb_device.uploader import AUTH_PAUSE_MS, HttpTransport, Uploader, classify
 
 TOKEN = "fake-dev-token"  # noqa: S105 - obviously fake
 BOOT = "3cd44c56-c96b-4b83-a970-5414990bc25a"
@@ -111,7 +113,7 @@ def test_server_error_keeps_rows_pending_and_backs_off(db, backend):
     assert statuses(db, ids) == ["acknowledged", "acknowledged"]
 
 
-def test_backend_unreachable_is_network_offline(db):
+def test_refused_connection_means_network_up_backend_unreachable(db):
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         dead = f"http://127.0.0.1:{s.getsockname()[1]}"
@@ -119,11 +121,28 @@ def test_backend_unreachable_is_network_offline(db):
     up, board, _ = make(db, dead)
     assert up.upload_once() == "transport_error"
     snap = board.snapshot()
-    assert snap["network"]["status"] == "offline"
+    assert snap["network"]["status"] == "online"  # the host answered (refused)
     assert snap["backend"]["status"] == "unreachable"
     assert statuses(db, ids) == ["pending"]
     up.probe_network()
-    assert board.snapshot()["network"]["status"] == "offline"
+    assert board.snapshot()["network"]["status"] == "online"
+
+
+@pytest.mark.parametrize(
+    ("exc", "connected", "expected"),
+    [
+        (socket.gaierror(socket.EAI_NONAME, "no name"), False, ("offline", "unreachable")),
+        (TimeoutError(), False, ("offline", "unreachable")),
+        (OSError(errno.ENETUNREACH, "unreachable"), False, ("offline", "unreachable")),
+        (OSError(errno.EHOSTUNREACH, "no route"), False, ("offline", "unreachable")),
+        (ConnectionRefusedError(errno.ECONNREFUSED, "refused"), False, ("online", "unreachable")),
+        (ssl.SSLCertVerificationError("bad cert"), False, ("online", "tls_error")),
+        (TimeoutError(), True, ("online", "no_response")),
+        (ConnectionResetError(), True, ("online", "no_response")),
+    ],
+)
+def test_failure_classification_keeps_network_and_backend_apart(exc, connected, expected):
+    assert classify(exc, connected) == expected
 
 
 def test_bad_credential_pauses_and_keeps_queue(db, backend, caplog):
