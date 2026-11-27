@@ -27,6 +27,23 @@ export interface TrackingSource {
   route(assignmentId: string, onValue: (raw: unknown) => void, onError: (error: unknown) => void): Unsubscribe;
   /** `tracking:serverTime`: uncached `serverNowMs`. Rejects when unavailable. */
   serverTime(): Promise<number>;
+  /**
+   * Reports whether live updates can currently arrive. A disconnected client
+   * keeps its last answers without an error, so the store must know.
+   */
+  connection?(onChange: (connected: boolean) => void): Unsubscribe;
+}
+
+/**
+ * While disconnected, a remembered "no trip" or "no access" answer can't be
+ * confirmed, so it is replaced; a tracking view stays (its age keeps
+ * advancing toward stale) with a connection notice.
+ */
+export function connectionNotice(state: TrackState, connectionLost: boolean): "replace" | "banner" | null {
+  if (!connectionLost) return null;
+  if (state.kind === "no_active_run" || state.kind === "access_unavailable") return "replace";
+  if (state.kind === "tracking") return "banner";
+  return null;
 }
 
 export interface TrackContext {
@@ -63,10 +80,13 @@ export class TrackStore {
   state: TrackState = { kind: "loading" };
   assignments: AssignmentSummary[] = [];
   selectedAssignmentId: string | null = null;
+  /** True while live updates can't arrive (after a connection existed). */
+  connectionLost = false;
 
   private listeners = new Set<() => void>();
   private generation = 0;
   private unsubAssignments: Unsubscribe | null = null;
+  private unsubConnection: Unsubscribe | null = null;
   private unsubSelection: Unsubscribe[] = [];
   private route: RouteGeometry | null = null;
   private snapshot: { value: RunSnapshot; receivedAtWallMs: number } | null = null;
@@ -88,6 +108,14 @@ export class TrackStore {
     this.stop();
     this.set({ kind: "loading" });
     this.verifyServerTime();
+    this.unsubConnection =
+      this.source.connection?.((connected) => {
+        if (this.connectionLost === !connected) return;
+        this.connectionLost = !connected;
+        // Back online: time may have drifted while away, so measure it again.
+        if (connected) this.verifyServerTime();
+        this.set(this.state);
+      }) ?? null;
     this.unsubAssignments = this.source.assignments(
       (raw) => this.applyAssignments(raw),
       (error) => this.fail(error),
@@ -98,6 +126,9 @@ export class TrackStore {
   stop(): void {
     this.unsubAssignments?.();
     this.unsubAssignments = null;
+    this.unsubConnection?.();
+    this.unsubConnection = null;
+    this.connectionLost = false;
     this.clearSelection();
     this.assignments = [];
   }
@@ -261,7 +292,8 @@ export class TrackStore {
   }
 
   private set(state: TrackState): void {
-    this.state = state;
+    // A new object each time, so subscribers see a change even for the same state.
+    this.state = { ...state };
     for (const listener of this.listeners) listener();
   }
 }

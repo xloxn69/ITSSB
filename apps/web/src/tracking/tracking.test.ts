@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 import { ageClockMs, type Instant, queryClock, type ServerClock, verifiedClock } from "./clock";
 import { MappingError, runSnapshot } from "./mapping";
 import { freshnessForAge, positionFreshness, type TrackedRun } from "./model";
-import { livePresentation, showsMarker, statusCopy, updatedText } from "./presentation";
+import { livePresentation, showsMarker, statusCopy, updatedText, whileDisconnected } from "./presentation";
 import { SessionExpiredError, TRANSPORT_FAILURE, TrackStore, type TrackingSource } from "./store";
 
 const ready = myRunReady as Extract<MyRunResult, { status: "ready" }>;
@@ -183,6 +183,13 @@ describe("state mapping from the tracking contract", () => {
 
   it("a wrong schema version is a mapping error, not no-trip", () => {
     expect(() => runSnapshot({ ...myRunNoActiveRun, schemaVersion: 2 })).toThrow(MappingError);
+  });
+
+  it("nothing is fresh while disconnected; stale stays stale", () => {
+    const p = livePresentation(runFrom(myRunReady), verified, at);
+    expect(whileDisconnected(p, true)).toEqual({ kind: "live", freshness: "aging" });
+    expect(whileDisconnected(p, false)).toEqual(p);
+    expect(whileDisconnected({ kind: "stale" }, true)).toEqual({ kind: "stale" });
   });
 
   it("formats ages like iOS", () => {

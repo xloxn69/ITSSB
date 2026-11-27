@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { TrackPage } from "../family/TrackPage";
+import { Shell } from "../Shell";
 import { TrackStore } from "../tracking/store";
 import { FIXTURE_SCENARIOS, type FixtureScenario, fixtureSource } from "./fixtureSource";
 
@@ -11,15 +12,7 @@ export default function DevFixtures() {
     : null;
   const store = useMemo(() => (scenario ? new TrackStore(fixtureSource(scenario)) : null), [scenario]);
   return (
-    <>
-      <header className="topbar">
-        <span className="brand">
-          <i className="brand-mark" aria-hidden />
-          ITSSB
-        </span>
-        <span className="badge">Fictional data</span>
-      </header>
-      <main className="shell">
+    <Shell right={<span className="badge">Fictional data</span>}>
         {store ? (
           <TrackPage store={store} onSignIn={() => location.reload()} />
         ) : (
@@ -32,7 +25,6 @@ export default function DevFixtures() {
             ))}
           </nav>
         )}
-      </main>
-    </>
+    </Shell>
   );
 }
