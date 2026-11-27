@@ -12,6 +12,8 @@ public enum AppSpacing {
 
     /// Standard inset from the screen edge.
     public static let screen: CGFloat = lg
+    /// Width of the route line on the map.
+    public static let routeLine: CGFloat = 5
     /// Minimum tappable size (Apple HIG).
     public static let touchTarget: CGFloat = 44
 }

@@ -24,6 +24,13 @@ public enum AppColors {
     /// Text/icons placed on `brand`.
     public static let onBrand = Color(light: "16181B", dark: "16181B")
 
+    // MARK: Map
+
+    /// The school's approved route line. Distinct from the brand-yellow bus marker.
+    public static let route = Color(light: "2F6FDE", dark: "6FA0FF")
+    /// The family's own assigned stop.
+    public static let assignedStop = Color(light: "16181B", dark: "F2F3F5")
+
     // MARK: Data freshness
 
     public static let statusFresh = Color(light: "1F8A4C", dark: "3DBE72")

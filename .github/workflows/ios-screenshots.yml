@@ -1,0 +1,37 @@
+name: iOS screenshots
+
+# Simulator screenshots of every tracking screen state, from fictional DEBUG
+# scenarios. Download them from the run's "ios-screenshots" artifact.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'apps/ios/ITSSB/**'
+      - 'apps/ios/Packages/**'
+      - 'apps/ios/scripts/screenshots.sh'
+      - '.github/workflows/ios-screenshots.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-screenshots-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  screenshots:
+    name: Capture screen states
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Toolchain
+        run: brew install xcodegen
+      - name: Capture
+        working-directory: apps/ios
+        run: xcodegen && bash scripts/screenshots.sh build/screenshots
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-screenshots
+          path: apps/ios/build/screenshots/*.png
+          retention-days: 30
