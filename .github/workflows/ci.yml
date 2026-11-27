@@ -60,6 +60,8 @@ jobs:
           filters: |
             ios:
               - 'apps/ios/**'
+              # Swift tests decode the shared contract fixtures.
+              - 'packages/contracts/fixtures/**'
               - '.swiftlint.yml'
               - '.github/workflows/ci.yml'
 
