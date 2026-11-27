@@ -1,7 +1,8 @@
 import ITSSBDesignSystem
-import MapKit
 import SwiftUI
 
+/// I09/I12 tracking and its honest alternatives: I25 stale, I26 GPS
+/// unavailable, I27 no active trip, I28 session or access unavailable.
 struct TrackView: View {
     @State private var model: TrackViewModel
     let onSignIn: () -> Void
@@ -13,6 +14,7 @@ struct TrackView: View {
 
     var body: some View {
         content
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(AppColors.background)
             .onAppear { model.start() }
             .onDisappear { model.stop() }
@@ -23,111 +25,210 @@ struct TrackView: View {
         switch model.state {
         case .loading:
             ProgressView("Finding your bus…")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        case .noActiveRun:
-            message("No trip right now", systemImage: "bus", detail: "Your bus isn't running a route at the moment.")
+                .font(AppFonts.body)
+                .foregroundStyle(AppColors.textSecondary)
+        case let .tracking(context, run, clock):
+            TrackingScreen(context: context, run: run, clock: clock, picker: picker)
+        case .noActiveRun(let context):
+            NoActiveRunScreen(context: context, picker: picker)
         case .accessUnavailable:
-            message("Tracking not available", systemImage: "lock",
-                    detail: "Your account isn't linked to an approved route. Your school can approve it.")
+            StateMessage(title: "Tracking not available", systemImage: "lock.fill",
+                         detail: "This account isn't linked to an approved route, or that access was removed. "
+                             + "Your school can approve or restore it.")
         case .sessionExpired:
-            ContentUnavailableView {
-                Label("Signed out", systemImage: "person.crop.circle.badge.exclamationmark")
-            } description: {
-                Text("Your session ended. Sign in again to see your bus.")
-            } actions: {
-                Button("Sign in", action: onSignIn)
-            }
+            StateMessage(title: "You're signed out", systemImage: "person.crop.circle.badge.exclamationmark",
+                         detail: "Your session ended, so bus information is hidden. Sign in again to continue.",
+                         action: ("Sign in", onSignIn))
         case .failed(let text):
-            ContentUnavailableView {
-                Label("Something went wrong", systemImage: "exclamationmark.triangle")
-            } description: {
-                Text(text)
-            } actions: {
-                Button("Try again") { model.retry() }
-            }
-        case let .tracking(_, run, clock):
-            tracking(run, clock: clock)
+            StateMessage(title: "Couldn't load your bus", systemImage: "wifi.exclamationmark",
+                         detail: text, action: ("Try again", { model.retry() }))
         }
     }
 
-    @ViewBuilder
-    private func tracking(_ run: TrackedRun, clock: ServerClock) -> some View {
-        if let position = run.position {
-            let coordinate = CLLocationCoordinate2D(latitude: position.latitude, longitude: position.longitude)
-            Map(initialPosition: .camera(MapCamera(centerCoordinate: coordinate, distance: 1500))) {
-                Annotation(run.busLabel, coordinate: coordinate) {
-                    Image(systemName: "bus.fill")
-                        .foregroundStyle(AppColors.onBrand)
-                        .padding(AppSpacing.sm)
-                        .background(AppColors.brand, in: .circle)
-                }
-            }
-            .safeAreaInset(edge: .bottom) {
-                FreshnessCard(position: position, clock: clock)
-                    .padding(AppSpacing.screen)
-            }
-        } else {
-            message("Waiting for the bus", systemImage: "location.slash",
-                    detail: "The trip has started, but the bus hasn't reported a location yet.")
+    /// Student switcher for guardians with more than one linked student.
+    private var picker: AssignmentPicker {
+        AssignmentPicker(assignments: model.assignments, selected: model.selectedAssignmentId) {
+            model.select(assignmentId: $0)
         }
-    }
-
-    private func message(_ title: String, systemImage: String, detail: String) -> some View {
-        ContentUnavailableView(title, systemImage: systemImage, description: Text(detail))
     }
 }
 
-/// Shows how old the position is. Re-renders every second on its own, so the
-/// age keeps advancing even when no new update arrives.
-struct FreshnessCard: View {
-    let position: LivePosition
-    var clock: ServerClock = .deviceOnly
+// MARK: Screens
+
+private struct TrackingScreen: View {
+    let context: TrackContext
+    let run: TrackedRun
+    let clock: ServerClock
+    let picker: AssignmentPicker
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            let freshness = position.freshness(at: context.date, clock: clock)
-            HStack(spacing: AppSpacing.md) {
-                Image(systemName: icon(for: freshness))
-                    .foregroundStyle(color(for: freshness))
+        // Re-derive every second: age advances and stale arrives with no new update.
+        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+            let presentation = LivePresentation.make(run: run, clock: clock, now: timeline.date)
+            BusMapView(route: context.route, stop: run.assignedStop,
+                       bus: presentation.showsMarker ? run.position : nil,
+                       busLabel: run.busLabel, dimsBus: presentation.dimsMarker)
+                .safeAreaInset(edge: .top) { TripHeader(context: context, picker: picker) }
+                .safeAreaInset(edge: .bottom) {
+                    TripStatusCard(copy: StatusCopy.make(presentation, run: run, clock: clock, now: timeline.date),
+                                   stopLabel: run.assignedStop.label)
+                }
+        }
+    }
+}
+
+private struct NoActiveRunScreen: View {
+    let context: TrackContext
+    let picker: AssignmentPicker
+
+    var body: some View {
+        Group {
+            if let route = context.route {
+                // The approved route and stop stay useful; there is no bus marker.
+                BusMapView(route: route, stop: route.assignedStop, bus: nil)
+            } else {
+                AppColors.background
+            }
+        }
+        .safeAreaInset(edge: .top) { TripHeader(context: context, picker: picker) }
+        .safeAreaInset(edge: .bottom) {
+            TripStatusCard(copy: StatusCopy(title: "No trip right now",
+                                            detail: "Your bus isn't running this route at the moment. "
+                                                + "The live location appears when the trip starts.",
+                                            age: nil, systemImage: "bus", tone: .unknown),
+                           stopLabel: context.assignment.stopLabel)
+        }
+    }
+}
+
+// MARK: Pieces
+
+/// Keeps the selected student visible so a map is never shown under the wrong name.
+private struct TripHeader: View {
+    let context: TrackContext
+    let picker: AssignmentPicker
+
+    var body: some View {
+        HStack(spacing: AppSpacing.md) {
+            VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                Text(context.assignment.studentDisplayName)
+                    .font(AppFonts.headline)
+                    .foregroundStyle(AppColors.textPrimary)
+                Text(context.assignment.routeLabel)
+                    .font(AppFonts.caption)
+                    .foregroundStyle(AppColors.textSecondary)
+            }
+            Spacer()
+            if picker.assignments.count > 1 { picker }
+        }
+        .cardStyle()
+        .padding(.horizontal, AppSpacing.screen)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct AssignmentPicker: View {
+    let assignments: [AssignmentSummary]
+    let selected: String?
+    let onSelect: (String) -> Void
+
+    var body: some View {
+        Menu {
+            ForEach(assignments) { item in
+                Button(item.studentDisplayName) { onSelect(item.assignmentId) }
+                    .disabled(item.assignmentId == selected)
+            }
+        } label: {
+            Label("Switch student", systemImage: "person.2")
+                .font(AppFonts.callout)
+        }
+        .tint(AppColors.textPrimary)
+    }
+}
+
+struct TripStatusCard: View {
+    let copy: StatusCopy
+    let stopLabel: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            HStack(alignment: .firstTextBaseline, spacing: AppSpacing.md) {
+                Image(systemName: copy.systemImage)
+                    .foregroundStyle(color)
                 VStack(alignment: .leading, spacing: AppSpacing.xxs) {
-                    Text(label(for: freshness))
+                    Text(copy.title)
                         .font(AppFonts.headline)
                         .foregroundStyle(AppColors.textPrimary)
-                    Text(AgeFormatter.updatedText(age: position.age(at: context.date, clock: clock)))
-                        .font(AppFonts.numeric)
-                        .foregroundStyle(AppColors.textSecondary)
+                    if let age = copy.age {
+                        Text(age)
+                            .font(AppFonts.numeric)
+                            .foregroundStyle(color)
+                    }
                 }
-                Spacer()
             }
-            .cardStyle()
-            .accessibilityElement(children: .combine)
+            Text(copy.detail)
+                .font(AppFonts.callout)
+                .foregroundStyle(AppColors.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Label("Your stop: \(stopLabel)", systemImage: "figure.wave")
+                .font(AppFonts.caption)
+                .foregroundStyle(AppColors.textSecondary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardStyle()
+        .padding(AppSpacing.screen)
+        .accessibilityElement(children: .combine)
     }
 
-    private func label(for freshness: Freshness) -> String {
-        switch freshness {
-        case .fresh: "Bus location"
-        case .aging: "Waiting for an update"
-        case .stale: "Last known location"
-        }
-    }
-
-    private func icon(for freshness: Freshness) -> String {
-        switch freshness {
-        case .fresh: "location.fill"
-        case .aging: "clock"
-        case .stale: "exclamationmark.triangle.fill"
-        }
-    }
-
-    private func color(for freshness: Freshness) -> Color {
-        switch freshness {
+    private var color: Color {
+        switch copy.tone {
         case .fresh: AppColors.statusFresh
         case .aging: AppColors.statusAging
         case .stale: AppColors.statusStale
+        case .unknown: AppColors.statusUnknown
         }
     }
 }
 
+private struct StateMessage: View {
+    let title: String
+    let systemImage: String
+    let detail: String
+    var action: (String, () -> Void)?
+
+    var body: some View {
+        ContentUnavailableView {
+            Label(title, systemImage: systemImage)
+                .font(AppFonts.title)
+                .foregroundStyle(AppColors.textPrimary)
+        } description: {
+            Text(detail)
+                .font(AppFonts.body)
+                .foregroundStyle(AppColors.textSecondary)
+        } actions: {
+            if let action {
+                Button(action.0, action: action.1)
+                    .font(AppFonts.headline)
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppColors.brand)
+                    .foregroundStyle(AppColors.onBrand)
+            }
+        }
+    }
+}
+
+// MARK: Previews (one per state, fictional data)
+
 #Preview("Live") { TrackView(source: PreviewLiveRunSource(scenario: .live)) }
+#Preview("Aging") { TrackView(source: PreviewLiveRunSource(scenario: .aging)) }
 #Preview("Stale") { TrackView(source: PreviewLiveRunSource(scenario: .stale)) }
+#Preview("Awaiting position") { TrackView(source: PreviewLiveRunSource(scenario: .awaitingPosition)) }
+#Preview("GPS unavailable") { TrackView(source: PreviewLiveRunSource(scenario: .gpsUnavailable)) }
+#Preview("No active run") { TrackView(source: PreviewLiveRunSource(scenario: .noActiveRun)) }
+#Preview("Loading") { TrackView(source: PreviewLiveRunSource(scenario: .loading)) }
+#Preview("Access unavailable") { TrackView(source: PreviewLiveRunSource(scenario: .accessUnavailable)) }
+#Preview("Session expired") { TrackView(source: PreviewLiveRunSource(scenario: .sessionExpired)) }
+#Preview("Failed") { TrackView(source: PreviewLiveRunSource(scenario: .failed)) }
+#Preview("Sign-in unavailable") {
+    SignInRequiredView(reason: .signInUnavailable, error: nil) {}
+}
