@@ -375,6 +375,41 @@ Add optional fields compatibly where possible. Do not silently rename a field, c
 
 Pin the contract revision in each release. All state-changing commands carry stable request identities, and every operation documents whether it is accepted, queued, or still uncertain. That is the basis of reliable recovery across the Pi, backend, and Swift app.
 
+## 11. Staff console
+
+The staff web calls these Convex functions. The Pi and the iOS app never do, so the device models and Swift DTOs are not affected. TypeScript types live in `packages/contracts/src/staff.ts`. Every function resolves the caller from the authenticated identity and requires the `staff` role on the server. A non-staff caller gets `access_unavailable` (`unauthenticated` or `not_permitted`, the same envelope as §8) before anything is read. Every envelope carries `schemaVersion` and `serverNowMs`.
+
+| Function | Args | Returns |
+| --- | --- | --- |
+| `routes:list` (query) | `{}` | `ready` with `routes` (`routeId`, `label`, `direction: "to_school" \| "from_school"`, `currentVersion` or `null`: `routeVersionId`, `versionNumber`, `approvedAtMs`, `approvedByName`, `effectiveFromMs`, `stopCount`). |
+| `routes:listDrafts` (query) | `{}` | `ready` with `drafts`: waiting drafts first, then recent decisions. Each has `draftId`, `routeId` (null for a new route), `label`, `direction`, `status: "submitted" \| "approved" \| "rejected"`, `submittedAtMs`, `pointCount`, `stopCount`, `reviewedAtMs`, `reviewerName`, `decisionReason`, `approvedVersionId`. |
+| `routes:getDraft` (query) | `{ draftId }` | `ready` with the draft summary plus `path`, ordered `stops` (`sequence`, `label`, `latitude`, `longitude`, `instructions`) and `checks`; or `not_found`. |
+| `routes:approveDraft` (mutation) | `{ draftId }` | `approved` with `routeId`, `routeVersionId`, `versionNumber`; or `refused` with a `code` and `message`. |
+| `routes:rejectDraft` (mutation) | `{ draftId, reason }` | `rejected`, or `refused`. |
+| `fleet:listDevices` (query) | `{}` | `ready` with `devices` (`deviceId`, `label`, `busLabel`, `revoked`, `activeRun` or `null`: `runId`, `routeLabel`, `startedAtMs`; and `lastContactAtMs`). No credential or hash is ever returned. |
+| `fleet:setBusLabel` (mutation) | `{ deviceId, busLabel }` | `ok`, or `refused` (`not_found`, or `invalid_label` for 0 or over 40 characters after trimming). |
+| `fleet:revokeDevice` (mutation) | `{ deviceId }` | `ok` (idempotent), or `refused` (`not_found`). |
+| `fleet:listDrivers` (query) | `{}` | `ready` with `drivers` (`userId`, `displayName`). |
+
+**Checks.** `checks` entries have a `code`, a `severity` (`blocking` or `warning`) and a `message`.
+- Blocking, which prevents approval: `too_few_points` (under 2), `too_many_points` (over 2000, `MAX_ROUTE_PATH_POINTS`), `invalid_coordinate`, `no_stops`.
+- Warnings, which the reviewer decides on: `path_gap` (consecutive points over 500 m apart) and `stop_off_path` (a stop over 150 m from every path point).
+
+**Approval and version pinning.**
+- Approval copies the draft into a new immutable `routeVersions` row and its ordered `stops`, and sets `routes.currentVersionId`.
+- A new run pins `routes.currentVersionId` at creation (`approvedVersionForNewRun` in `apps/backend/convex/lib/routeVersions.ts`). A run already started keeps its version, and approved versions are never edited.
+- Approving an approved draft returns the same version.
+- Refusal codes:
+  - `not_found`
+  - `already_decided`
+  - `blocking_checks`
+  - `route_has_assignments`: approved assignments still point at the current version, and moving them to a new version (enrollment) does not exist yet. Approving would leave those families seeing no trip while the bus runs.
+  - `reason_required`: a rejection without a reason.
+
+**Audit.** Each allowed staff mutation appends an `auditLog` row. Mutations return typed results instead of throwing, so a denied attempt by a signed-in person is recorded too.
+
+Route drafts are created only by the internal `routes:recordDraft`, for the authorized driver upload path (§6); there is no public create-draft.
+
 ## Sources
 
 - [Convex HTTP action routing and body validation](https://docs.convex.dev/functions/http-actions)
