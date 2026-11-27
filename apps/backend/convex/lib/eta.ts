@@ -25,7 +25,7 @@ export interface BaselineParams {
  */
 export const BASELINE_V1: BaselineParams = {
   algorithmVersion: "baseline-v1",
-  cruiseSpeedMps: 8,
+  cruiseSpeedMps: 8.25,
   dwellMs: 30_000,
 };
 

@@ -98,6 +98,8 @@ Report results by prediction horizon and operating condition, not just one overa
 
 Measure 2-, 5-, 10-, and 15-minute horizons where enough examples exist. Report the sample count. Keep a final test set that was not used to select the model or tune thresholds. If improvement is small or unreliable, retain the baseline.
 
+**Replay harness.** `bun run eval` in `apps/backend` builds deterministic fictional runs (`apps/backend/eval/tracks.ts`: an invented street grid with traffic, red lights, dwell, GPS noise and upload dropouts), replays every fix through the backend's own progress and estimate code, tunes the baseline on the earlier runs only, and reports the metrics above by horizon on later held-out runs. True arrivals come from the simulation, not from stop detection. Its numbers describe the simulation, not field accuracy; replace or extend the runs with reviewed real recordings (kept out of this public repository) before claiming accuracy for a pilot.
+
 ## 7. When to withhold or change a prediction
 
 Suppress or downgrade the ETA when GPS is stale, no valid position exists, the route version is mismatched, progress is ambiguous, the run has ended, or a detour is outside the supported model. A staff-confirmed delay can be displayed immediately even if an accurate new ETA is unavailable.

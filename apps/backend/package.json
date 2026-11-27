@@ -9,9 +9,10 @@
     "dev": "convex dev",
     "deploy": "convex deploy",
     "codegen": "convex codegen",
-    "lint": "oxlint convex",
-    "typecheck": "tsc --noEmit -p convex",
-    "test": "vitest run"
+    "lint": "oxlint convex eval",
+    "typecheck": "tsc --noEmit -p convex && tsc --noEmit -p eval",
+    "test": "vitest run",
+    "eval": "bun eval/run.ts"
   },
   "dependencies": {
     "@itssb/contracts": "workspace:*",
