@@ -15,6 +15,40 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # AGENTS.md "No AI attribution": the PR's own commits, title, and body.
+  # Pull requests only: main already holds one older attributed commit.
+  commits:
+    name: Commit attribution
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Commits carry no AI attribution and use conventional subjects
+        run: >-
+          node scripts/check-commit-attribution.mjs
+          ${{ github.event.pull_request.base.sha }}
+          ${{ github.event.pull_request.head.sha }}
+
+      - name: PR title and body carry no AI attribution
+        env:
+          PR_TEXT: |
+            ${{ github.event.pull_request.title }}
+            ${{ github.event.pull_request.body }}
+        run: |
+          node --input-type=module -e '
+            import { attributionLines } from "./scripts/check-commit-attribution.mjs";
+            const lines = attributionLines(process.env.PR_TEXT);
+            if (lines.length) {
+              console.error("Remove AI attribution from the PR title or body:\n" + lines.join("\n"));
+              process.exit(1);
+            }
+            console.log("OK: PR title and body carry no AI attribution");
+          '
+
   # TypeScript (contracts, ui, backend, driver-ui, web) + Python device service.
   # GitHub-hosted runners only: this is a public repo, and a self-hosted runner
   # would execute code from any fork's pull request on your machine.
