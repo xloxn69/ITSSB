@@ -15,6 +15,7 @@ import { grantForDevice } from "./driverGrants";
 import { stillAuthorized } from "./lib/deviceAuth";
 import { isApprovedForNewRuns } from "./lib/routeVersions";
 import { stopJobsForRun } from "./notificationJobs";
+import { linkReplacement } from "./runOps";
 
 /**
  * Online run start and end (docs/07 §8, docs/08 §6), committed in one
@@ -195,6 +196,8 @@ async function startRun(
   });
   const run = await ctx.db.get(runId);
   if (!run) throw new Error("run vanished inside its own transaction");
+  // Staff sent this bus to replace a cancelled run on this route today.
+  await linkReplacement(ctx, run);
   return accepted(run, "startRun", r.requestId, nowMs);
 }
 

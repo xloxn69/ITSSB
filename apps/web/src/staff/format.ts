@@ -66,3 +66,23 @@ export function sweepSummary(deleted: string | null): string | null {
   const [positions, live] = [Number(m[1]), Number(m[2])];
   return `${plural(positions, "position", "positions")} and ${plural(live, "last-known position", "last-known positions")} deleted`;
 }
+
+/**
+ * A maintenance window from a `datetime-local` value (the browser's time
+ * zone) and a length in hours, or null when either is unusable.
+ */
+export function maintenanceWindow(startLocal: string, hours: number): { startsAtMs: number; endsAtMs: number } | null {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(startLocal)) return null;
+  const startsAtMs = new Date(startLocal).getTime();
+  if (!Number.isFinite(startsAtMs) || !Number.isFinite(hours) || hours <= 0 || hours > 12) return null;
+  return { startsAtMs, endsAtMs: startsAtMs + Math.round(hours * 60) * 60_000 };
+}
+
+/** "Sat, Nov 28" for a `YYYY-MM-DD` service date, read as that calendar day. */
+export function serviceDateLabel(serviceDate: string): string {
+  const [y, m, d] = serviceDate.split("-").map(Number);
+  if (!y || !m || !d) return serviceDate;
+  return new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" }).format(
+    Date.UTC(y, m - 1, d),
+  );
+}

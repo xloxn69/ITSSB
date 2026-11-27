@@ -5,6 +5,8 @@
  * `import.meta.env.DEV`. The real rules live in apps/backend/convex/routes.ts.
  */
 import type {
+  MaintenanceWindow,
+  ServiceDay,
   DeviceSummary,
   DraftDetail,
   DriverSummary,
@@ -12,7 +14,7 @@ import type {
   RouteSummary,
 } from "@itssb/contracts";
 import { myRouteReady } from "@itssb/contracts/fixtures";
-import type { StaffActionName, StaffMutationName, StaffQueryName, StaffSource } from "../staff/source";
+import type { StaffActionName, StaffArgs, StaffMutationName, StaffQueryName, StaffSource } from "../staff/source";
 import { enrollmentAct, enrollmentAnswer, enrollmentFixtureState, enrollmentMutate } from "./enrollmentStaffFixtures";
 
 export const STAFF_VARIANTS = ["staff", "staff-empty", "staff-denied", "staff-error", "staff-loading"] as const;
@@ -162,6 +164,19 @@ function initialState(variant: StaffVariant) {
 export function staffFixtureSource(variant: StaffVariant): StaffSource {
   const state = initialState(variant);
   const enrollment = enrollmentFixtureState(variant === "staff-empty");
+  const dayMs = 24 * 60 * 60_000;
+  const isoDay = (offsetDays: number) => new Date(Date.now() + offsetDays * dayMs).toISOString().slice(0, 10);
+  const days: ServiceDay[] =
+    variant === "staff"
+      ? [
+          { serviceDate: isoDay(3), timezone: "America/New_York", status: "late_start", lateStartMinutes: 120, notice: "Two-hour delay for the teacher workshop", setByName: "Riley Staff", setAtMs: Date.now() - dayMs },
+          { serviceDate: isoDay(9), timezone: "America/New_York", status: "no_service", lateStartMinutes: null, notice: "No buses: Thanksgiving break", setByName: "Riley Staff", setAtMs: Date.now() - 2 * dayMs },
+        ]
+      : [];
+  const windows: MaintenanceWindow[] =
+    variant === "staff"
+      ? [{ windowId: "demo_window_001", deviceId: "demo_device_003", deviceLabel: "Spare Pi", startsAtMs: Date.now() + 20 * 60 * 60_000, endsAtMs: Date.now() + 22 * 60 * 60_000, reason: "Software update", scheduledByName: "Riley Staff" }]
+      : [];
   const listeners = new Set<() => void>();
   const changed = () => {
     for (const l of listeners) l();
@@ -213,13 +228,18 @@ export function staffFixtureSource(variant: StaffVariant): StaffSource {
                 : null,
           })),
         });
+      case "fleet:listMaintenance":
+        return env({ status: "ready", windows });
+      case "calendar:listDays":
+        return env({ status: "ready", days: days.toSorted((a, b) => a.serviceDate.localeCompare(b.serviceDate)) });
       default:
         return enrollmentAnswer(enrollment, name, args);
     }
   }
 
 
-  function mutate(name: StaffMutationName, args: Record<string, string>): unknown {
+  function mutate(name: StaffMutationName, raw: StaffArgs): unknown {
+    const args = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, String(v)]));
     if (variant === "staff-denied") return env({ status: "access_unavailable", reason: "not_permitted" });
     const d = state.drafts.find((x) => x.draftId === args.draftId);
     switch (name) {
@@ -265,6 +285,62 @@ export function staffFixtureSource(variant: StaffVariant): StaffSource {
         const label = args.busLabel?.trim() ?? "";
         if (!label || label.length > 40) return refuse("invalid_label", "Use 1 to 40 characters.");
         device.busLabel = label;
+        changed();
+        return env({ status: "ok" });
+      }
+      case "runOps:cancelRun":
+      case "runOps:replaceDevice": {
+        const device = state.devices.find((x) => x.activeRun?.runId === args.runId);
+        if (!device) return refuse("not_active", "This run has already ended.");
+        if (!args.reason?.trim()) return refuse("reason_required", "Say why, in 1 to 200 characters.");
+        device.activeRun = null;
+        changed();
+        return env({ status: "ok" });
+      }
+      case "calendar:setDay": {
+        if (!args.notice?.trim()) return refuse("notice_required", "Write the notice for families, 1 to 200 characters.");
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(args.serviceDate ?? "")) return refuse("invalid_date", "Use a real date (YYYY-MM-DD).");
+        const i = days.findIndex((day) => day.serviceDate === args.serviceDate);
+        if (i >= 0) days.splice(i, 1);
+        days.push({
+          serviceDate: args.serviceDate!,
+          timezone: args.timezone ?? "America/New_York",
+          status: args.status === "late_start" ? "late_start" : "no_service",
+          lateStartMinutes: args.status === "late_start" ? Number(args.lateStartMinutes) : null,
+          notice: args.notice.trim(),
+          setByName: "Riley Staff",
+          setAtMs: Date.now(),
+        });
+        changed();
+        return env({ status: "ok" });
+      }
+      case "calendar:removeDay": {
+        const i = days.findIndex((day) => day.serviceDate === args.serviceDate);
+        if (i < 0) return refuse("not_found", "There is no entry for that date.");
+        days.splice(i, 1);
+        changed();
+        return env({ status: "ok" });
+      }
+      case "fleet:scheduleMaintenance": {
+        if (!args.reason?.trim()) return refuse("reason_required", "Say why, in 1 to 200 characters.");
+        const device = state.devices.find((x) => x.deviceId === args.deviceId);
+        if (!device || device.revoked) return refuse("device_unavailable", "That device doesn't exist or is revoked.");
+        windows.push({
+          windowId: `demo_window_${windows.length + 2}`,
+          deviceId: device.deviceId,
+          deviceLabel: device.label,
+          startsAtMs: Number(args.startsAtMs),
+          endsAtMs: Number(args.endsAtMs),
+          reason: args.reason.trim(),
+          scheduledByName: "Riley Staff",
+        });
+        changed();
+        return env({ status: "ok" });
+      }
+      case "fleet:cancelMaintenance": {
+        const i = windows.findIndex((w) => w.windowId === args.windowId);
+        if (i < 0) return refuse("not_found", "That window doesn't exist.");
+        windows.splice(i, 1);
         changed();
         return env({ status: "ok" });
       }

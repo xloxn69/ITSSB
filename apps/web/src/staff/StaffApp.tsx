@@ -1,6 +1,8 @@
 import type {
   DeviceSummary,
   DiagnosticsResult,
+  ListMaintenanceResult,
+  ListServiceDaysResult,
   DraftDetail,
   GetDraftResult,
   ListDevicesResult,
@@ -11,7 +13,15 @@ import type {
 import { useEffect, useState } from "react";
 import { DraftDiagram } from "./DraftDiagram";
 import { AttendancePage, AuditPage, EnrollmentPage, GuardianLinksPage, InvitationsPage, RunAttendancePage, StudentsPage } from "./EnrollmentPages";
-import { approvalBlocker, contactStatus, DIRECTION_LABEL, dateTime, sweepSummary } from "./format";
+import {
+  approvalBlocker,
+  contactStatus,
+  DIRECTION_LABEL,
+  dateTime,
+  maintenanceWindow,
+  serviceDateLabel,
+  sweepSummary,
+} from "./format";
 import { type CredentialOutcome, credentialOutcome, type StaffActionName, type StaffSource } from "./source";
 import { Empty, Loaded, Outcome, type Ready, useMutation, useNow, useStaffQuery } from "./ui";
 
@@ -24,6 +34,7 @@ export function StaffApp({ source }: { source: StaffSource }) {
     ["routes", "Routes"],
     ["review", "Route review"],
     ["devices", "Buses & devices"],
+    ["calendar", "Service calendar"],
     ["drivers", "Drivers"],
     ["diagnostics", "Diagnostics"],
     ["enrollment", "Enrollment"],
@@ -46,6 +57,7 @@ export function StaffApp({ source }: { source: StaffSource }) {
       {page === "review" && !parts[2] && <ReviewQueuePage source={source} />}
       {page === "review" && parts[2] && <DraftPage source={source} draftId={parts[2]} />}
       {page === "devices" && <DevicesPage source={source} />}
+      {page === "calendar" && <CalendarPage source={source} />}
       {page === "drivers" && <DriversPage source={source} />}
       {page === "diagnostics" && <DiagnosticsPage source={source} />}
       {page === "enrollment" && <EnrollmentPage source={source} />}
@@ -374,11 +386,13 @@ function DevicesPage({ source }: { source: StaffSource }) {
             <Empty text="No devices are enrolled yet." />
           ) : (
             <div className="stack">
+              <MaintenanceSection source={source} devices={devices} />
               {devices.map((d) => (
                 <DeviceRow
                   key={d.deviceId}
                   source={source}
                   device={d}
+                  spares={devices.filter((x) => !x.revoked && !x.activeRun && x.deviceId !== d.deviceId)}
                   serverNowMs={serverNowMs}
                   receivedAtWallMs={receivedAtWallMs}
                 />
@@ -394,11 +408,13 @@ function DevicesPage({ source }: { source: StaffSource }) {
 function DeviceRow({
   source,
   device,
+  spares,
   serverNowMs,
   receivedAtWallMs,
 }: {
   source: StaffSource;
   device: DeviceSummary;
+  spares: DeviceSummary[];
   serverNowMs: number;
   receivedAtWallMs: number;
 }) {
@@ -443,6 +459,7 @@ function DeviceRow({
           ? `Active run: ${device.activeRun.routeLabel ?? "unknown route"}, started ${dateTime(device.activeRun.startedAtMs)}`
           : "No active run"}
       </p>
+      {device.activeRun && !device.revoked && <RunActions source={source} runId={device.activeRun.runId} spares={spares} />}
       {!device.revoked && (
         <form
           className="row"
@@ -585,6 +602,249 @@ function DiagnosticsPage({ source }: { source: StaffSource }) {
           </div>
         )}
       </Loaded>
+    </section>
+  );
+}
+
+// MARK: Run actions (docs/12 §7)
+
+function RunActions({ source, runId, spares }: { source: StaffSource; runId: string; spares: DeviceSummary[] }) {
+  const [reason, setReason] = useState("");
+  const [spare, setSpare] = useState("");
+  const { busy, outcome, run } = useMutation(source);
+  const cancel = () => {
+    if (window.confirm("Cancel this run? The bus's positions stop being accepted, and families' apps show no trip running.")) {
+      void run("runOps:cancelRun", { runId, reason }, "Run cancelled.");
+    }
+  };
+  const replace = () => {
+    const label = spares.find((d) => d.deviceId === spare)?.label ?? "the chosen bus";
+    if (window.confirm(`Cancel this run and send ${label}? Its driver then starts the same route as usual.`)) {
+      void run("runOps:replaceDevice", { runId, replacementDeviceId: spare, reason }, `Run cancelled; ${label} can start the route.`);
+    }
+  };
+  return (
+    <details className="run-actions">
+      <summary>Cancel or replace this run</summary>
+      <div className="stack" style={{ gap: "var(--space-sm)", paddingTop: "var(--space-sm)" }}>
+        <label>
+          Reason (staff and drivers see it)
+          <input value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} placeholder="Bus broke down at Elm St" />
+        </label>
+        <div className="row">
+          <button type="button" className="btn" disabled={busy} onClick={cancel}>
+            Cancel run
+          </button>
+          <label style={{ flex: "1 1 10rem" }}>
+            Replacement bus
+            <select value={spare} onChange={(e) => setSpare(e.target.value)}>
+              <option value="">Choose a free bus</option>
+              {spares.map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label}
+                  {d.busLabel ? ` (${d.busLabel})` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="button" className="btn" disabled={busy || !spare} onClick={replace} style={{ alignSelf: "flex-end" }}>
+            Send replacement
+          </button>
+        </div>
+        <Outcome outcome={outcome} />
+      </div>
+    </details>
+  );
+}
+
+// MARK: Maintenance windows (docs/14 §5)
+
+function MaintenanceSection({ source, devices }: { source: StaffSource; devices: DeviceSummary[] }) {
+  const { state } = useStaffQuery<Ready<ListMaintenanceResult>>(source, "fleet:listMaintenance");
+  const usable = devices.filter((d) => !d.revoked);
+  const [deviceId, setDeviceId] = useState("");
+  const [start, setStart] = useState("");
+  const [hours, setHours] = useState("2");
+  const [reason, setReason] = useState("");
+  const { busy, outcome, run } = useMutation(source);
+  const window_ = maintenanceWindow(start, Number(hours));
+  return (
+    <details className="card stack maintenance">
+      <summary>
+        <strong>Maintenance windows</strong>
+      </summary>
+      <p className="muted small">
+        When a bus&apos;s software may be updated. The Pi&apos;s update tool still refuses to switch during an active run.
+      </p>
+      <Loaded state={state}>
+        {({ windows }) =>
+          windows.length === 0 ? (
+            <Empty text="No upcoming maintenance." />
+          ) : (
+            <ul className="stack" style={{ gap: "var(--space-sm)", margin: 0, paddingLeft: "var(--space-lg)" }}>
+              {windows.map((w) => (
+                <li key={w.windowId}>
+                  <strong>{w.deviceLabel}</strong>: {dateTime(w.startsAtMs)} to {dateTime(w.endsAtMs)}: {w.reason}
+                  <span className="muted small"> · Scheduled by {w.scheduledByName ?? "unknown"}.</span>{" "}
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={busy}
+                    onClick={() => void run("fleet:cancelMaintenance", { windowId: w.windowId }, "Window cancelled.")}
+                  >
+                    Cancel window
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )
+        }
+      </Loaded>
+      <form
+        className="row"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!window_) return;
+          void run("fleet:scheduleMaintenance", { deviceId, ...window_, reason }, "Maintenance scheduled.");
+        }}
+      >
+        <label style={{ flex: "1 1 10rem" }}>
+          Device
+          <select value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
+            <option value="">Choose a device</option>
+            {usable.map((d) => (
+              <option key={d.deviceId} value={d.deviceId}>
+                {d.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label style={{ flex: "1 1 12rem" }}>
+          Starts
+          <input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} />
+        </label>
+        <label style={{ flex: "0 1 6rem" }}>
+          Hours
+          <input type="number" min={0.5} max={12} step={0.5} value={hours} onChange={(e) => setHours(e.target.value)} />
+        </label>
+        <label style={{ flex: "2 1 14rem" }}>
+          Reason
+          <input value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} placeholder="Software update" />
+        </label>
+        <button type="submit" className="btn" disabled={busy || !deviceId || !window_} style={{ alignSelf: "flex-end" }}>
+          Schedule
+        </button>
+      </form>
+      <Outcome outcome={outcome} />
+    </details>
+  );
+}
+
+// MARK: Service calendar (docs/12 §3, §7)
+
+const DAY_STATUS_LABEL = { no_service: "No service", late_start: "Late start" } as const;
+const DEFAULT_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+function CalendarPage({ source }: { source: StaffSource }) {
+  const { state } = useStaffQuery<Ready<ListServiceDaysResult>>(source, "calendar:listDays");
+  const [date, setDate] = useState("");
+  const [status, setStatus] = useState<"no_service" | "late_start">("no_service");
+  const [minutes, setMinutes] = useState("120");
+  const [notice, setNotice] = useState("");
+  const { busy, outcome, run } = useMutation(source);
+  return (
+    <section className="card stack">
+      <h1>Service calendar</h1>
+      <p className="muted small">
+        Days with no service or a late start. Every other day runs normally. Past days can&apos;t be changed. Family
+        apps don&apos;t show these notices yet, so also send them through the school&apos;s usual channel.
+      </p>
+      <Loaded state={state}>
+        {({ days }) =>
+          days.length === 0 ? (
+            <Empty text="No closures or late starts are planned." />
+          ) : (
+            <div className="stack" style={{ gap: "var(--space-sm)" }}>
+              {days.map((d) => (
+                <article key={d.serviceDate} className="card stack" style={{ gap: "var(--space-xs)" }}>
+                  <div className="row spread">
+                    <h2>{serviceDateLabel(d.serviceDate)}</h2>
+                    <span className="badge">
+                      {DAY_STATUS_LABEL[d.status]}
+                      {d.lateStartMinutes !== null && `: ${d.lateStartMinutes} min`}
+                    </span>
+                  </div>
+                  <p>{d.notice}</p>
+                  <p className="muted small">
+                    {d.serviceDate} ({d.timezone}). Set by {d.setByName ?? "unknown"}, {dateTime(d.setAtMs)}.
+                  </p>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={busy}
+                    style={{ alignSelf: "flex-start" }}
+                    onClick={() => {
+                      if (window.confirm(`Return ${d.serviceDate} to a normal operating day?`)) {
+                        void run("calendar:removeDay", { serviceDate: d.serviceDate }, "Back to a normal day.");
+                      }
+                    }}
+                  >
+                    Remove
+                  </button>
+                </article>
+              ))}
+            </div>
+          )
+        }
+      </Loaded>
+      <form
+        className="card stack"
+        style={{ gap: "var(--space-sm)" }}
+        onSubmit={(e) => {
+          e.preventDefault();
+          void run(
+            "calendar:setDay",
+            {
+              serviceDate: date,
+              timezone: DEFAULT_TIMEZONE,
+              status,
+              notice,
+              ...(status === "late_start" ? { lateStartMinutes: Number(minutes) } : {}),
+            },
+            "Saved.",
+          );
+        }}
+      >
+        <h2>Add or change a day</h2>
+        <div className="row">
+          <label style={{ flex: "1 1 10rem" }}>
+            Date
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </label>
+          <label style={{ flex: "1 1 10rem" }}>
+            Service
+            <select value={status} onChange={(e) => setStatus(e.target.value as "no_service" | "late_start")}>
+              <option value="no_service">No service</option>
+              <option value="late_start">Late start</option>
+            </select>
+          </label>
+          {status === "late_start" && (
+            <label style={{ flex: "0 1 8rem" }}>
+              Minutes late
+              <input type="number" min={1} max={240} value={minutes} onChange={(e) => setMinutes(e.target.value)} />
+            </label>
+          )}
+        </div>
+        <label>
+          Notice for families
+          <input value={notice} maxLength={200} onChange={(e) => setNotice(e.target.value)} placeholder="Snow day: no buses" />
+        </label>
+        <p className="muted small">Time zone: {DEFAULT_TIMEZONE}</p>
+        <button type="submit" className="btn btn-primary" disabled={busy || !date} style={{ alignSelf: "flex-start" }}>
+          Save day
+        </button>
+        <Outcome outcome={outcome} />
+      </form>
     </section>
   );
 }

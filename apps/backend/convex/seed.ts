@@ -103,6 +103,8 @@ const SEED_GUARDED_TABLES = [
   "pushTokens",
   "alerts",
   "notificationJobs",
+  "serviceDays",
+  "maintenanceWindows",
   "auditLog",
   "deviceHealth",
 ] as const satisfies readonly TableNames[];

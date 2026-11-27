@@ -1,5 +1,12 @@
 import {
   type CredentialIssuedResult,
+  type ListMaintenanceResult,
+  MAINTENANCE_REFUSAL_CODES,
+  type MaintenanceRefusalCode,
+  type MaintenanceResult,
+  type MaintenanceWindow,
+  MAX_MAINTENANCE_MS,
+  MAX_STAFF_REASON_LENGTH,
   type DeviceDiagnostics,
   type DiagnosticsResult,
   type CredentialRefusalCode,
@@ -16,6 +23,7 @@ import { internal } from "./_generated/api";
 import { action, internalMutation, mutation, query } from "./_generated/server";
 import { generateDeviceSecret, sha256Hex } from "./lib/deviceAuth";
 import { accessUnavailable, audit, denied, staffCaller } from "./lib/staff";
+import { boundedText, okResult, refusedResult, staffActionResult } from "./lib/staffResults";
 import { RAW_GPS_RETENTION_DAYS } from "./retention";
 
 // The Convex runtime provides `process.env`.
@@ -426,5 +434,132 @@ export const diagnostics = query({
       },
       devices,
     };
+  },
+});
+
+// ── Maintenance windows (docs/14 §5) ──────────────────────────────────
+//
+// A planned period when a device's software may be updated. The Pi release
+// tool independently refuses to switch releases during an active run
+// (docs/runbooks/pi-update-and-rollback.md); the window is the staff-side
+// plan that tells drivers and support when a bus is out.
+
+const maintenanceResult = staffActionResult(MAINTENANCE_REFUSAL_CODES);
+const maintenanceOk = okResult<MaintenanceRefusalCode>;
+const maintenanceRefused = refusedResult<MaintenanceRefusalCode>;
+/** Clock slack for a window that starts "now". */
+const START_SLACK_MS = 5 * 60 * 1000;
+
+export const listMaintenance = query({
+  args: {},
+  returns: v.union(
+    v.object({
+      schemaVersion: v.literal(SCHEMA_VERSION),
+      status: v.literal("ready"),
+      serverNowMs: v.number(),
+      windows: v.array(
+        v.object({
+          windowId: v.string(),
+          deviceId: v.string(),
+          deviceLabel: v.string(),
+          startsAtMs: v.number(),
+          endsAtMs: v.number(),
+          reason: v.string(),
+          scheduledByName: nullable(v.string()),
+        }),
+      ),
+    }),
+    accessUnavailable,
+  ),
+  handler: async (ctx): Promise<ListMaintenanceResult> => {
+    const caller = await staffCaller(ctx);
+    if (!caller.ok) return denied(caller.reason);
+    const nowMs = Date.now();
+    const windows: MaintenanceWindow[] = [];
+    for (const w of await ctx.db.query("maintenanceWindows").order("desc").take(500)) {
+      if (w.cancelledAtMs !== undefined || w.endsAtMs <= nowMs) continue;
+      windows.push({
+        windowId: w._id,
+        deviceId: w.deviceId,
+        deviceLabel: (await ctx.db.get(w.deviceId))?.label ?? "Unknown device",
+        startsAtMs: w.startsAtMs,
+        endsAtMs: w.endsAtMs,
+        reason: w.reason,
+        scheduledByName: (await ctx.db.get(w.scheduledByUserId))?.displayName ?? null,
+      });
+    }
+    windows.sort((a, b) => a.startsAtMs - b.startsAtMs);
+    return { schemaVersion: SCHEMA_VERSION, status: "ready", serverNowMs: nowMs, windows };
+  },
+});
+
+export const scheduleMaintenance = mutation({
+  args: { deviceId: v.string(), startsAtMs: v.number(), endsAtMs: v.number(), reason: v.string() },
+  returns: maintenanceResult,
+  handler: async (ctx, { deviceId, startsAtMs, endsAtMs, reason }): Promise<MaintenanceResult> => {
+    const caller = await staffCaller(ctx);
+    if (!caller.ok) {
+      await audit(ctx, caller.user, "maintenance.schedule", "device", deviceId, "denied");
+      return denied(caller.reason);
+    }
+    const id = ctx.db.normalizeId("devices", deviceId);
+    const device = id ? await ctx.db.get(id) : null;
+    if (!device || device.revoked) {
+      return maintenanceRefused("device_unavailable", "That device doesn't exist or is revoked.");
+    }
+    const text = boundedText(reason, MAX_STAFF_REASON_LENGTH);
+    if (!text) return maintenanceRefused("reason_required", `Say why, in 1 to ${MAX_STAFF_REASON_LENGTH} characters.`);
+    const nowMs = Date.now();
+    if (
+      !Number.isFinite(startsAtMs) ||
+      !Number.isFinite(endsAtMs) ||
+      endsAtMs <= startsAtMs ||
+      endsAtMs - startsAtMs > MAX_MAINTENANCE_MS ||
+      startsAtMs < nowMs - START_SLACK_MS
+    ) {
+      return maintenanceRefused("invalid_window", "Pick a future window of at most 12 hours that ends after it starts.");
+    }
+    if (startsAtMs <= nowMs + START_SLACK_MS) {
+      const running = await ctx.db
+        .query("runs")
+        .withIndex("by_device_state", (q) => q.eq("deviceId", device._id).eq("state", "active"))
+        .first();
+      if (running) return maintenanceRefused("device_busy", "This bus is on a run now. Schedule the window after it ends.");
+    }
+    const existing = await ctx.db
+      .query("maintenanceWindows")
+      .withIndex("by_device", (q) => q.eq("deviceId", device._id).lt("startsAtMs", endsAtMs))
+      .collect();
+    if (existing.some((w) => w.cancelledAtMs === undefined && w.endsAtMs > startsAtMs)) {
+      return maintenanceRefused("overlaps", "This overlaps another window for the same device.");
+    }
+    await ctx.db.insert("maintenanceWindows", {
+      deviceId: device._id,
+      startsAtMs,
+      endsAtMs,
+      reason: text,
+      scheduledByUserId: caller.user._id,
+      scheduledAtMs: nowMs,
+    });
+    await audit(ctx, caller.user, "maintenance.schedule", "device", device._id, "allowed");
+    return maintenanceOk();
+  },
+});
+
+export const cancelMaintenance = mutation({
+  args: { windowId: v.string() },
+  returns: maintenanceResult,
+  handler: async (ctx, { windowId }): Promise<MaintenanceResult> => {
+    const caller = await staffCaller(ctx);
+    if (!caller.ok) {
+      await audit(ctx, caller.user, "maintenance.cancel", "maintenanceWindows", windowId, "denied");
+      return denied(caller.reason);
+    }
+    const id = ctx.db.normalizeId("maintenanceWindows", windowId);
+    const window = id ? await ctx.db.get(id) : null;
+    if (!window || window.cancelledAtMs !== undefined) return maintenanceRefused("not_found", "That window doesn't exist.");
+    await ctx.db.patch(window._id, { cancelledAtMs: Date.now(), cancelledByUserId: caller.user._id });
+    await audit(ctx, caller.user, "maintenance.cancel", "maintenanceWindows", window._id, "allowed");
+    return maintenanceOk();
   },
 });

@@ -86,6 +86,7 @@ th { color: var(--color-text-secondary); font-weight: 600; font-size: 0.875rem; 
 .secret { width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.875rem; }
 .add-device summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+.run-actions summary, .maintenance summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
 .row { display: flex; gap: var(--space-md); align-items: center; flex-wrap: wrap; }
 .spread { justify-content: space-between; }
 label { display: flex; flex-direction: column; gap: var(--space-xs); }

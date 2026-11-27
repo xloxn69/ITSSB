@@ -28,7 +28,7 @@ export function convexStaffSource(client: LiveClient & Pick<ConvexReactClient, "
       };
     },
     mutate(name, args) {
-      return client.mutation(makeFunctionReference<"mutation", Record<string, string>, unknown>(name), args);
+      return client.mutation(makeFunctionReference<"mutation", Record<string, string | number>, unknown>(name), args);
     },
     act(name, args) {
       return client.action(makeFunctionReference<"action", Record<string, string | number>, unknown>(name), args);

@@ -242,3 +242,79 @@ export interface Diagnostics {
 }
 
 export type DiagnosticsResult = Ready<Diagnostics> | AccessUnavailable;
+// MARK: runOps, calendar, maintenance (docs/12 §3, §7; docs/14 §5)
+
+/** Reasons and notices are short, human-written, and shown to staff or families. */
+export const MAX_STAFF_REASON_LENGTH = 200;
+export const MAX_LATE_START_MINUTES = 240;
+/** A maintenance window is a bounded period, never an open-ended outage. */
+export const MAX_MAINTENANCE_MS = 12 * 60 * 60 * 1000;
+
+/** `ok`, a refusal with a stable code, or a denial. */
+export type StaffOpResult<Code extends string> =
+  | { schemaVersion: typeof SCHEMA_VERSION; status: "ok"; serverNowMs: number }
+  | { schemaVersion: typeof SCHEMA_VERSION; status: "refused"; serverNowMs: number; code: Code; message: string }
+  | AccessUnavailable;
+
+export const RUN_OP_REFUSAL_CODES = [
+  "not_found",
+  "not_active",
+  "reason_required",
+  "device_unavailable",
+  "device_busy",
+  "same_device",
+] as const;
+export type RunOpRefusalCode = (typeof RUN_OP_REFUSAL_CODES)[number];
+export type RunOpResult = StaffOpResult<RunOpRefusalCode>;
+
+export const SERVICE_DAY_STATUSES = ["no_service", "late_start"] as const;
+export type ServiceDayStatus = (typeof SERVICE_DAY_STATUSES)[number];
+
+/** A calendar exception. Days without one are normal operating days. */
+export interface ServiceDay {
+  /** `YYYY-MM-DD` in `timezone`. */
+  serviceDate: string;
+  timezone: string;
+  status: ServiceDayStatus;
+  lateStartMinutes: number | null;
+  /** Family-facing notice. */
+  notice: string;
+  setByName: string | null;
+  setAtMs: number;
+}
+
+export type ListServiceDaysResult = Ready<{ days: ServiceDay[] }> | AccessUnavailable;
+
+export const CALENDAR_REFUSAL_CODES = [
+  "past_date",
+  "invalid_date",
+  "invalid_timezone",
+  "notice_required",
+  "invalid_delay",
+  "not_found",
+] as const;
+export type CalendarRefusalCode = (typeof CALENDAR_REFUSAL_CODES)[number];
+export type CalendarResult = StaffOpResult<CalendarRefusalCode>;
+
+export interface MaintenanceWindow {
+  windowId: string;
+  deviceId: string;
+  deviceLabel: string;
+  startsAtMs: number;
+  endsAtMs: number;
+  reason: string;
+  scheduledByName: string | null;
+}
+
+export type ListMaintenanceResult = Ready<{ windows: MaintenanceWindow[] }> | AccessUnavailable;
+
+export const MAINTENANCE_REFUSAL_CODES = [
+  "device_unavailable",
+  "device_busy",
+  "invalid_window",
+  "reason_required",
+  "overlaps",
+  "not_found",
+] as const;
+export type MaintenanceRefusalCode = (typeof MAINTENANCE_REFUSAL_CODES)[number];
+export type MaintenanceResult = StaffOpResult<MaintenanceRefusalCode>;
