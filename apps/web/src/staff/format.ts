@@ -1,4 +1,5 @@
 import {
+  type DeviceSummary,
   type DraftDetail,
   POSITION_AGING_AFTER_MS,
   POSITION_STALE_AFTER_MS,
@@ -85,4 +86,13 @@ export function serviceDateLabel(serviceDate: string): string {
   return new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" }).format(
     Date.UTC(y, m - 1, d),
   );
+}
+
+/**
+ * Cancel and replace are offered for every active run, including one on a
+ * revoked bus: revoking mid-run leaves the run active and its route occupied,
+ * and only staff can clear it.
+ */
+export function runActionsAvailable(device: Pick<DeviceSummary, "activeRun" | "revoked">): boolean {
+  return device.activeRun !== null;
 }

@@ -271,6 +271,35 @@ describe("calendar", () => {
     expect(await staff.query(api.calendar.listDays, {})).toMatchObject({ days: [] });
   });
 
+  it("an entry already past in its own time zone can't be rewritten by naming another zone", async () => {
+    const { t, staff, staffId } = await setup();
+    // Kiritimati (UTC+14) is a day or more ahead of Pago Pago (UTC-11): today
+    // in Pago Pago is already past in Kiritimati.
+    const day = localDate(Date.now(), "Pacific/Pago_Pago");
+    expect(day < localDate(Date.now(), "Pacific/Kiritimati")).toBe(true);
+    await t.run((ctx) =>
+      ctx.db.insert("serviceDays", {
+        serviceDate: day,
+        timezone: "Pacific/Kiritimati",
+        status: "no_service",
+        notice: "What was announced",
+        setByUserId: staffId,
+        setAtMs: Date.now() - DAY,
+      }),
+    );
+    expect(
+      await staff.mutation(api.calendar.setDay, {
+        serviceDate: day,
+        timezone: "Pacific/Pago_Pago",
+        status: "late_start",
+        lateStartMinutes: 30,
+        notice: "Rewritten",
+      }),
+    ).toMatchObject({ status: "refused", code: "past_date" });
+    const rows = await t.run((ctx) => ctx.db.query("serviceDays").collect());
+    expect(rows.map((r) => r.notice)).toEqual(["What was announced"]);
+  });
+
   it("removes a day, and only staff can change the calendar", async () => {
     const { staff, driver } = await setup();
     const day = tomorrow();
@@ -323,6 +352,8 @@ describe("maintenance windows", () => {
       [{ ...slot(deviceB, 10 * HOUR, 1), endsAtMs: Date.now() + 9 * HOUR }, "invalid_window"],
       [slot(deviceB, 10 * HOUR, 13), "invalid_window"],
       [slot(deviceB, -HOUR, 2), "invalid_window"],
+      // Inside the "starting now" allowance but already over: never "scheduled".
+      [{ ...slot(deviceB, -4 * 60_000, 1), endsAtMs: Date.now() - 3 * 60_000 }, "invalid_window"],
       [slot(deviceB, 10 * HOUR, 1, " "), "reason_required"],
       [slot(revokedDevice, HOUR, 1), "device_unavailable"],
       [slot("nope", HOUR, 1), "device_unavailable"],

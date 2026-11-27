@@ -19,6 +19,7 @@ import {
   DIRECTION_LABEL,
   dateTime,
   maintenanceWindow,
+  runActionsAvailable,
   serviceDateLabel,
   sweepSummary,
 } from "./format";
@@ -459,7 +460,9 @@ function DeviceRow({
           ? `Active run: ${device.activeRun.routeLabel ?? "unknown route"}, started ${dateTime(device.activeRun.startedAtMs)}`
           : "No active run"}
       </p>
-      {device.activeRun && !device.revoked && <RunActions source={source} runId={device.activeRun.runId} spares={spares} />}
+      {device.activeRun && runActionsAvailable(device) && (
+        <RunActions source={source} runId={device.activeRun.runId} spares={spares} />
+      )}
       {!device.revoked && (
         <form
           className="row"

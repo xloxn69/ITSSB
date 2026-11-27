@@ -515,7 +515,10 @@ export const scheduleMaintenance = mutation({
       !Number.isFinite(endsAtMs) ||
       endsAtMs <= startsAtMs ||
       endsAtMs - startsAtMs > MAX_MAINTENANCE_MS ||
-      startsAtMs < nowMs - START_SLACK_MS
+      // A start up to a few minutes ago counts as "now" (clock slack), but a
+      // window that is already over is never accepted as scheduled.
+      startsAtMs < nowMs - START_SLACK_MS ||
+      endsAtMs <= nowMs
     ) {
       return maintenanceRefused("invalid_window", "Pick a future window of at most 12 hours that ends after it starts.");
     }

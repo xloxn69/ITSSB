@@ -5,6 +5,7 @@ import {
   approvalBlocker,
   contactStatus,
   maintenanceWindow,
+  runActionsAvailable,
   serviceDateLabel,
   sweepSummary,
 } from "./format";
@@ -181,5 +182,16 @@ describe("fixture service operations", () => {
     expect(mutationOutcome(await source.mutate("runOps:cancelRun", { runId: "demo_run_001", reason: "Again" }), "x").kind).toBe(
       "refused",
     );
+  });
+});
+
+describe("runActionsAvailable", () => {
+  const device = { deviceId: "d", label: "Pi", busLabel: null, lastContactAtMs: null };
+  const run = { runId: "r", routeLabel: null, startedAtMs: null };
+  it("offers cancel and replace for any active run, including on a revoked bus", () => {
+    expect(runActionsAvailable({ ...device, revoked: false, activeRun: run })).toBe(true);
+    // Revoking mid-run leaves the run active and the route occupied; staff must be able to clear it.
+    expect(runActionsAvailable({ ...device, revoked: true, activeRun: run })).toBe(true);
+    expect(runActionsAvailable({ ...device, revoked: false, activeRun: null })).toBe(false);
   });
 });

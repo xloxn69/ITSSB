@@ -99,7 +99,17 @@ export const setDay = mutation({
     }
     if (!isCalendarDate(args.serviceDate)) return refused("invalid_date", "Use a real date (YYYY-MM-DD).");
     if (!isValidTimeZone(args.timezone)) return refused("invalid_timezone", "Use a time zone like America/New_York.");
-    if (args.serviceDate < localDate(Date.now(), args.timezone)) {
+    const existing = await ctx.db
+      .query("serviceDays")
+      .withIndex("by_date", (q) => q.eq("serviceDate", args.serviceDate))
+      .unique();
+    // Past in the requested zone, or in the zone the entry was announced in:
+    // naming another zone must not reopen a day that already happened.
+    const nowMs = Date.now();
+    if (
+      args.serviceDate < localDate(nowMs, args.timezone) ||
+      (existing && existing.serviceDate < localDate(nowMs, existing.timezone))
+    ) {
       return refused("past_date", "Past days can't be changed; they record what was announced.");
     }
     const notice = boundedText(args.notice, MAX_STAFF_REASON_LENGTH);
@@ -121,10 +131,6 @@ export const setDay = mutation({
       setAtMs: Date.now(),
       ...(lateStart !== null ? { lateStartMinutes: lateStart } : {}),
     };
-    const existing = await ctx.db
-      .query("serviceDays")
-      .withIndex("by_date", (q) => q.eq("serviceDate", args.serviceDate))
-      .unique();
     if (existing) await ctx.db.replace(existing._id, row);
     else await ctx.db.insert("serviceDays", row);
     await audit(ctx, caller.user, "calendar.setDay", "serviceDays", args.serviceDate, "allowed");
