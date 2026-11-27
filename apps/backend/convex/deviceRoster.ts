@@ -226,7 +226,14 @@ async function decide(
   // a capture time alone never overrides an expired or revoked grant), and
   // the action must have been captured while it was valid.
   const grant = await grantForDevice(ctx, grantHash, device);
-  if (!grant || grant.expiresAtMs <= nowMs || a.capturedAtMs < grant.issuedAtMs || a.capturedAtMs > grant.expiresAtMs) {
+  // Grant times are server times and the capture time is the Pi's clock, so
+  // allow the same skew the rest of the device contract allows.
+  if (
+    !grant ||
+    grant.expiresAtMs <= nowMs ||
+    a.capturedAtMs < grant.issuedAtMs - MAX_FUTURE_SKEW_MS ||
+    a.capturedAtMs > grant.expiresAtMs
+  ) {
     return reject(a, "grant_not_authorized", "The driver was not authorized for this when it was recorded.", nowMs);
   }
   const assignmentId = ctx.db.normalizeId("assignments", a.assignmentId);
@@ -275,7 +282,8 @@ async function decide(
     run.deviceId !== device._id ||
     run.routeVersionId !== assignment.routeVersionId ||
     run.startedAtMs === undefined ||
-    a.capturedAtMs < run.startedAtMs ||
+    // The start as captured on the same device clock; else the server's, with skew.
+    a.capturedAtMs < (run.startCapturedAtMs ?? run.startedAtMs - MAX_FUTURE_SKEW_MS) ||
     // The end as captured on the bus, not when it reached the server.
     a.capturedAtMs > (run.endCapturedAtMs ?? run.endedAtMs ?? Number.POSITIVE_INFINITY) ||
     (run.state !== "active" && run.state !== "completed")
