@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "status": "rejected",
+  "serverNowMs": 1795608300000,
+  "code": "run_not_active",
+  "message": "This trip isn't running now."
+}

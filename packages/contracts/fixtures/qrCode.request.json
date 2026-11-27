@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "driverOperatingGrant": "EXAMPLE_ONLY_NOT_A_REAL_GRANT_0000000",
+  "purpose": "trip_check_in",
+  "runId": "demo_run_001"
+}

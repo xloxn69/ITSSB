@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "purpose": "trip_check_in",
+  "token": "EXMP-LEN0-TREA-LT0K-EN00",
+  "linkPath": "/checkin",
+  "expiresAtMs": 1795608600000,
+  "serverNowMs": 1795608000000
+}

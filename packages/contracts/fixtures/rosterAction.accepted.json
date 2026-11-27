@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "requestId": "7d3c2b1a-0f9e-4d8c-b7a6-5e4d3c2b1a09",
+  "status": "accepted",
+  "checkIn": {
+    "checkInId": "demo_check_in_002",
+    "status": "boarded",
+    "source": "staff_recorded",
+    "recordedAtMs": 1795608500000,
+    "receivedAtMs": 1795608900000
+  },
+  "serverNowMs": 1795608900000
+}

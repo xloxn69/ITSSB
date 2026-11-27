@@ -416,6 +416,38 @@ Types: `packages/contracts/src/enrollment.ts`; fixtures `enrollment.*.json`, `gu
 
 The Pi does not call these functions, so the device models are unaffected; the iOS app decodes the family results with the fixtures above.
 
+### 9.2 Trip check-in, roster and driver actions (implemented)
+
+Types: `packages/contracts/src/checkIns.ts`; fixtures `checkIns.*.json`, `qrCode.*.json`, `roster.*.json`, `rosterAction.*.json`; device models `apps/device/src/itssb_device/roster_contracts.py`.
+
+**Records.** A check-in has `status: "boarded" | "not_boarded"`, which is what was claimed or recorded, not a sensor reading. Its `source` is one of:
+- `student_qr_claim`
+- `staff_recorded` (a driver or staff member)
+- `staff_correction`
+
+The first record for a student, run and `boarding` phase is the logical record; a repeat returns it. Only a correction adds a newer row, which names the row it corrects and becomes current. Rows are never edited or deleted.
+
+| Function / endpoint | Who | Body or args | Result |
+| --- | --- | --- | --- |
+| `checkIns:record` (mutation) | approved student | `{ requestId, token, runId }` | `accepted` or `already_recorded` with `checkIn`; `token_problem`; or `rejected` (`wrong_run`, `run_not_active`, `not_assigned`, `request_id_conflict`, `invalid_request`). Identity comes from the session; a guardian gets `not_assigned`. The same `requestId` returns the stored outcome, even after the challenge expires. |
+| `checkIns:forAssignment` (query) | student or linked guardian | `{ assignmentId }` | `ready` with the active `runId` (or `null`) and the current `checkIn` (or `null`). |
+| `POST /device/v1/qr-codes` | device + current grant | `{ schemaVersion, driverOperatingGrant, purpose, runId \| routeVersionId }` | `200` `{ purpose, token, linkPath, expiresAtMs, serverNowMs }`. A check-in challenge lasts 10 minutes (`CHECK_IN_CHALLENGE_TTL_MS`), belongs to the device's active run on a route in the grant, and replaces that run's previous challenge. An enrollment invitation lasts one day and needs the route's current version in the grant. |
+| `POST /device/v1/roster` | device + current grant | `{ schemaVersion, driverOperatingGrant, runId }` | `200` with `students` in stop order (`assignmentId`, `studentDisplayName`, `stopId`, `stopLabel`, `stopSequence`, `seatLabel`, `driverNote`, `checkIn`). No addresses, accounts or guardians. |
+| `POST /device/v1/roster-actions` | device + grant valid when captured | `{ schemaVersion, requestId, driverOperatingGrant, capturedAtMs, type, assignmentId, … }` with `type` `recordAttendance` (`runId`, `status`), `correctAttendance` (`runId`, `status`, `correctsCheckInId`, `reason`), `setSeatNote` (`seatLabel`, `driverNote`, nullable) or `removeAssignment` (`reason`) | `200` `{ requestId, status, checkIn, serverNowMs }` with `status` `accepted`, `already_recorded` or `superseded` (an older seat note); or `{ status: "rejected", code, message }` with `code` `grant_not_authorized`, `assignment_not_authorized`, `run_not_authorized`, `already_removed`, `correction_target_invalid`, `capture_time_out_of_range` or `request_id_conflict`. |
+| `checkIns:staffRecord` (mutation) | staff | `{ runId, assignmentId, status }` | Staff fallback for an active run: `accepted` or `already_recorded` with `checkIn`, or `refused`. |
+| `checkIns:runAttendance`, `checkIns:recentRuns` (queries) | staff | `{ runId }`, `{}` | Each student's current record and full history (with who recorded it and why), and recent runs with assigned and boarded counts. |
+| `routes:removeAssignment` (mutation) | staff | `{ requestId, assignmentId, reason }` | `accepted`, or `refused` (`reason_required`, `not_found`, `already_removed`). |
+
+**Offline driver actions.** The Pi persists each action with its `requestId` and `capturedAtMs` before sending, shows it as pending sync, and retries with the same identity until it receives a result. The backend rechecks authority when it accepts the action:
+- **The grant:** it must belong to this device, must not be revoked, and must still be current when the action arrives: a capture time never overrides an expired or revoked grant (§6). Revocation time is not recorded, so a revoked grant can't prove it was valid at capture. `capturedAtMs` must also fall within the grant's validity (allowing 2 minutes of clock skew before its issue time), no more than 2 minutes in the future and no more than 24 hours old. An action that can't sync before its grant expires is `rejected`; staff record it instead.
+- **The assignment:** it must be on a route the grant covers.
+- **Attendance:** the action must have been captured on that device's run while it was going, between its start and end as captured on the bus (`startCapturedAtMs`, `endCapturedAtMs`; the same device clock), even if the end reached the server later.
+- **Corrections:** ordered by capture time. A queued correction captured before the correction that is current now is `superseded`; a newer one becomes current. Rows are never edited or deleted.
+
+A rejected action is final, and the Pi shows it; a removal is not in effect until it is `accepted`. Request-level failures use §5: `400` (`INVALID_REQUEST`, `MALFORMED_JSON`, `UNSUPPORTED_SCHEMA_VERSION`), `401` `UNAUTHENTICATED`, `403` (`GRANT_NOT_AUTHORIZED`, `RUN_NOT_AUTHORIZED`), and `413` above 8 KiB.
+
+**Not proved.** A check-in records that an account presented a valid challenge, or that staff recorded an action. It does not prove that a particular child boarded (docs/09 §7).
+
 Private enrollment fields belong only in authenticated submissions and appropriately restricted storage. Treat a scanned link as untrusted input: allow expected scheme/host/path and a bounded token, then ask the backend to validate purpose, expiration, revocation, route, and account eligibility.
 
 The shared trip challenge supports multiple legitimate students. Do not invalidate it globally after the first student scans it. Deduplicate the resulting check-in by student/run/phase. A scan result must identify its source as a student claim; staff-confirmed corrections remain distinguishable.
