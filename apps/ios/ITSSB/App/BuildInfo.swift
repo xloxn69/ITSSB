@@ -32,6 +32,16 @@ struct BuildInfo: Equatable {
         BuildInfo(infoDictionary: bundle.infoDictionary ?? [:])
     }
 
+    /// Shown on screen for any non-production build (docs/14 §2), so a test
+    /// build is never mistaken for the real app. Nil in production.
+    var environmentLabel: String? {
+        switch environment {
+        case .development: "Development build"
+        case .staging: "Staging build"
+        case .production: nil
+        }
+    }
+
     /// One line for support: "0.1.0 (1) abc1234 development".
     var summary: String {
         let commit = sourceRevision.map { String($0.prefix(7)) } ?? "unknown"

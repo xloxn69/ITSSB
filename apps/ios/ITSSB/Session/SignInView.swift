@@ -44,6 +44,7 @@ struct SignInView: View {
             Text("Sign in")
                 .font(AppFonts.largeTitle)
                 .foregroundStyle(AppColors.textPrimary)
+            EnvironmentBadge()
             Text("Bus locations are shown only to students and guardians your school has approved.")
                 .font(AppFonts.body)
                 .foregroundStyle(AppColors.textSecondary)
@@ -185,6 +186,13 @@ struct AccountView: View {
                     Text(session.accountLabel ?? "Your account")
                         .font(AppFonts.body)
                         .foregroundStyle(AppColors.textPrimary)
+                }
+                Section("This build") {
+                    EnvironmentBadge()
+                    Text(BuildInfo.fromBundle().summary)
+                        .font(AppFonts.caption)
+                        .foregroundStyle(AppColors.textSecondary)
+                        .textSelection(.enabled)
                 }
                 Section {
                     Button("Sign out", role: .destructive) { confirmingSignOut = true }

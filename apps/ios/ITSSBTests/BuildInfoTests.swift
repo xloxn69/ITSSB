@@ -40,3 +40,17 @@ final class BuildInfoTests: XCTestCase {
         XCTAssertEqual(info.environment, .development)
     }
 }
+
+/// docs/14 §2: a non-production build says so on screen; production shows nothing.
+final class EnvironmentLabelTests: XCTestCase {
+    func testLabelsEveryNonProductionBuild() {
+        let label = { (env: String) in BuildInfo(infoDictionary: ["ITSSBEnvironment": env]).environmentLabel }
+        XCTAssertEqual(label("development"), "Development build")
+        XCTAssertEqual(label("staging"), "Staging build")
+        XCTAssertEqual(BuildInfo(infoDictionary: [:]).environmentLabel, "Development build")
+    }
+
+    func testProductionShowsNoLabel() {
+        XCTAssertNil(BuildInfo(infoDictionary: ["ITSSBEnvironment": "production"]).environmentLabel)
+    }
+}
