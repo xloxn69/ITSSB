@@ -300,7 +300,13 @@ The app ages its freshness label locally between updates. It may estimate server
 
 These are proposed values, owned by the open "Freshness and alert thresholds" decision in [17](17_DECISIONS_AND_SOURCES.md) and to be tuned from measured runs. They are exported from `packages/contracts` and mirrored in the Swift app; change both together.
 
-Age is `now - capturedAtMs`. A query result can be served from cache, so `serverNowMs` may be older than the moment it arrives; it can make the server-aligned clock look earlier, never later. The client therefore uses the **larger** of the phone-clock age and the server-aligned age (phone time plus `serverNowMs - receiptTime`), and never shows a negative age. An error in either clock can only make a position look older, not fresher.
+Age is `now - capturedAtMs`, measured on a server-aligned clock. A query result can be served from cache, so its `serverNowMs` may be much older than the moment it arrives, and a phone clock can be wrong too; together they can make an old position look current. So:
+
+- **Verified time.** The client calls the mutation `tracking:serverTime` (`{}` → `{ schemaVersion: 1, serverNowMs }`) when tracking starts. Mutations are never served from cache. The client sets its offset from the round trip: `serverNowMs` minus the request/response midpoint.
+- **Until that answer arrives** (or if it fails), the client uses the larger of the phone-clock age and the query-aligned age. It never classifies a position as fresh: at best it shows "waiting for an update".
+- **Never negative.** The age shown is never negative.
+
+`tracking:serverTime` needs no sign-in and reads no data; time is not protected.
 
 ## 9. Enrollment, QR, and app commands
 

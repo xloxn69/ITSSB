@@ -6,6 +6,10 @@ import XCTest
 private struct FixtureQuerying: ConvexQuerying {
     var fixtures: [String: String] = [:]
     var error: Error?
+    /// Fixture for `tracking:serverTime`, or nil to make the mutation fail (offline).
+    var serverTimeFixture: String? = "serverTime"
+    /// Keep the subscription open after its value, like a live query.
+    var keepOpen = false
     private(set) var calls = CallLog()
 
     final class CallLog: @unchecked Sendable {
@@ -27,12 +31,22 @@ private struct FixtureQuerying: ConvexQuerying {
             do {
                 let dto = try JSONDecoder().decode(T.self, from: ContractFixture.data(fixture))
                 continuation.yield(try transform(dto))
-                continuation.finish()
+                if !keepOpen { continuation.finish() }
             } catch {
                 continuation.finish(throwing: error)
             }
         }
         return stream
+    }
+}
+
+extension FixtureQuerying {
+    func mutation<T: Decodable, Value: Sendable>(
+        _ name: String, as type: T.Type, transform: @escaping @Sendable (T) throws -> Value
+    ) async throws -> Value {
+        calls.append((name, [:]))
+        guard name == "tracking:serverTime", let serverTimeFixture else { throw TrackingError.transport }
+        return try transform(JSONDecoder().decode(T.self, from: ContractFixture.data(serverTimeFixture)))
     }
 }
 
@@ -68,6 +82,32 @@ final class ConvexLiveRunSourceTests: XCTestCase {
         XCTAssertEqual(route.path.count, 5)
         guard case let .ready(list)? = try await first(source.assignments()) else { return XCTFail("expected list") }
         XCTAssertEqual(list.count, 1)
+    }
+
+    private func clocks(_ client: FixtureQuerying) async throws -> [ServerClock] {
+        var result: [ServerClock] = []
+        for try await snapshot in ConvexLiveRunSource(client: client).run(assignmentId: "x") {
+            if case let .ready(_, _, _, clock) = snapshot { result.append(clock) }
+        }
+        return result
+    }
+
+    func testRunIsRemeasuredOnceVerifiedTimeArrives() async throws {
+        let client = FixtureQuerying(fixtures: ["tracking:myRun": "myRun.ready"], keepOpen: true)
+        var iterator = ConvexLiveRunSource(client: client).run(assignmentId: "x").makeAsyncIterator()
+        var seen: [ServerClock] = []
+        while seen.last?.isVerified != true, seen.count < 2,
+              case let .ready(_, _, _, clock)? = try await iterator.next() {
+            seen.append(clock)
+        }
+        XCTAssertEqual(seen.last?.isVerified, true, "the latest snapshot carries verified time: \(seen)")
+    }
+
+    func testWithoutServerTimeNothingIsVerified() async throws {
+        let clocks = try await clocks(FixtureQuerying(fixtures: ["tracking:myRun": "myRun.ready"],
+                                                      serverTimeFixture: nil))
+        XCTAssertEqual(clocks.count, 1)
+        XCTAssertFalse(clocks[0].isVerified)
     }
 
     func testErrorMapping() {

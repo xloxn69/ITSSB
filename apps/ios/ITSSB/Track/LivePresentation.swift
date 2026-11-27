@@ -24,8 +24,11 @@ enum LivePresentation: Equatable {
         guard let position = run.position else {
             return gpsProblem.map(LivePresentation.gpsUnavailable) ?? .awaitingFirstPosition
         }
-        let freshness = position.freshness(at: now, clock: clock)
+        var freshness = position.freshness(at: now, clock: clock)
         if freshness == .stale { return .stale }
+        // Without verified server time, a cached snapshot and a slow phone clock can both
+        // understate age (docs/08 §8.1); never call that fresh.
+        if !clock.isVerified, freshness == .fresh { freshness = .aging }
         if let gpsProblem { return .gpsUnavailable(gpsProblem) }
         return .live(freshness)
     }

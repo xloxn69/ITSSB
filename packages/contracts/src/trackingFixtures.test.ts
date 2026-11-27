@@ -8,6 +8,7 @@ import myRunNoActiveRun from "../fixtures/myRun.noActiveRun.json" with { type: "
 import myRunReady from "../fixtures/myRun.ready.json" with { type: "json" };
 import myRunReadyNoPosition from "../fixtures/myRun.readyNoPosition.json" with { type: "json" };
 import myRunStale from "../fixtures/myRun.stale.json" with { type: "json" };
+import serverTime from "../fixtures/serverTime.json" with { type: "json" };
 import { MAX_ROUTE_PATH_POINTS, POSITION_STALE_AFTER_MS } from "./tracking.js";
 import { trackingFixtureFiles } from "./trackingFixtures.js";
 
@@ -21,6 +22,7 @@ const json: Record<keyof typeof trackingFixtureFiles, unknown> = {
   "myRoute.ready": myRouteReady,
   "myRoute.accessUnavailable": myRouteAccessUnavailable,
   freshnessPolicy,
+  serverTime,
 };
 
 describe("tracking fixtures", () => {

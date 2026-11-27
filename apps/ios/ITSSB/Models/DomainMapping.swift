@@ -78,6 +78,17 @@ enum DomainMapping {
         )
     }
 
+    // MARK: serverTime
+
+    /// A verified clock from one `tracking:serverTime` round trip. The server's reading is
+    /// taken to correspond to the midpoint between sending and receiving.
+    static func verifiedClock(from dto: ServerTimeDTO, sentAt: Date, receivedAt: Date) throws -> ServerClock {
+        try checkVersion(dto.schemaVersion)
+        let midpoint = sentAt.addingTimeInterval(receivedAt.timeIntervalSince(sentAt) / 2)
+        return ServerClock(serverNow: try timestamp(dto.serverNowMs, field: "serverNowMs"),
+                           receivedAt: midpoint, isVerified: true)
+    }
+
     // MARK: myRoute
 
     static func route(from dto: MyRouteDTO) throws -> RouteSnapshot {

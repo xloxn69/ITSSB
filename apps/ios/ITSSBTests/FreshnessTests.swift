@@ -59,6 +59,38 @@ final class FreshnessTests: XCTestCase {
         XCTAssertEqual(position().age(at: phoneNow, clock: clock), 70, accuracy: 0.001)
     }
 
+    /// Review regression: phone 15 min slow + a cached snapshot whose serverNowMs is 1 s after
+    /// capture, for a position that is really 10 min old. Unverified, it must not read as fresh;
+    /// with verified server time it is stale.
+    func testCachedSnapshotAndSlowPhoneNeverLookFresh() {
+        let trueNow = captured.addingTimeInterval(600)
+        let phoneNow = trueNow.addingTimeInterval(-900)
+        let cached = ServerClock(serverNow: captured.addingTimeInterval(1), receivedAt: phoneNow)
+        let run = PreviewFixtures.run(position: position())
+        XCTAssertNotEqual(LivePresentation.make(run: run, clock: cached, now: phoneNow), .live(.fresh))
+
+        // tracking:serverTime answered trueNow when the phone read phoneNow.
+        let verified = ServerClock(serverNow: trueNow, receivedAt: phoneNow, isVerified: true)
+        XCTAssertEqual(position().age(at: phoneNow, clock: verified), 600, accuracy: 0.001)
+        XCTAssertEqual(LivePresentation.make(run: run, clock: verified, now: phoneNow), .stale)
+    }
+
+    func testVerifiedClockIsUsedExactlyWhenThePhoneIsFast() {
+        // Phone 60 s fast; verified server time corrects it rather than taking the larger age.
+        let phoneNow = captured.addingTimeInterval(70)
+        let verified = ServerClock(serverNow: captured.addingTimeInterval(10), receivedAt: phoneNow, isVerified: true)
+        XCTAssertEqual(position().age(at: phoneNow, clock: verified), 10, accuracy: 0.001)
+    }
+
+    func testVerifiedClockFromARoundTripUsesTheMidpoint() throws {
+        let dto = try ContractFixture.decode(ServerTimeDTO.self, "serverTime")
+        let sent = Date(timeIntervalSince1970: 1_000)
+        let clock = try DomainMapping.verifiedClock(from: dto, sentAt: sent, receivedAt: sent.addingTimeInterval(2))
+        XCTAssertTrue(clock.isVerified)
+        XCTAssertEqual(clock.receivedAt, sent.addingTimeInterval(1))
+        XCTAssertEqual(clock.serverNow.timeIntervalSince1970, 1_795_609_085.5, accuracy: 0.000_1)
+    }
+
     func testAgeText() {
         XCTAssertEqual(AgeFormatter.updatedText(age: 2), "Updated just now")
         XCTAssertEqual(AgeFormatter.updatedText(age: 12.9), "Updated 12s ago")

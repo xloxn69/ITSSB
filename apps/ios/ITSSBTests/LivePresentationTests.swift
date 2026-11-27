@@ -47,6 +47,13 @@ final class LivePresentationTests: XCTestCase {
         }
     }
 
+    func testUnverifiedClockIsNeverFresh() {
+        let unverified = ServerClock(serverNow: now, receivedAt: now)
+        let tracked = run(secondsAgo: 5)
+        XCTAssertEqual(LivePresentation.make(run: tracked, clock: unverified, now: now), .live(.aging))
+        XCTAssertEqual(LivePresentation.make(run: run(secondsAgo: 200), clock: unverified, now: now), .stale)
+    }
+
     func testOnlyLiveIsUndimmed() {
         XCTAssertFalse(LivePresentation.live(.fresh).dimsMarker)
         XCTAssertTrue(LivePresentation.stale.dimsMarker)

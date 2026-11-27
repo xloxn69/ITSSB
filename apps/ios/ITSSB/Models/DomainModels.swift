@@ -37,20 +37,22 @@ enum Freshness: Equatable, Sendable {
 
 /// The server's clock reading at the moment a snapshot arrived on the phone.
 ///
-/// A cached query result can carry an old `serverNowMs`, which makes the
-/// server-aligned clock look *earlier*. `ageClock` therefore takes the later
-/// of phone time and server-aligned time (docs/08 §8.1): clock error can make
-/// a position look older, never fresher.
+/// A query's `serverNowMs` can come from a cached result, so it may be old,
+/// and the phone clock may be wrong too (docs/08 §8.1). An **unverified**
+/// clock therefore takes the later of phone time and query-aligned time, and
+/// `LivePresentation` never calls a position fresh on it. A **verified** clock
+/// comes from the uncached `tracking:serverTime` mutation and is used exactly.
 struct ServerClock: Equatable, Sendable {
     let serverNow: Date
     let receivedAt: Date
+    var isVerified = false
 
-    /// Uses the phone clock alone, for fixtures and previews.
-    static let deviceOnly = ServerClock(serverNow: .distantPast, receivedAt: .distantPast)
+    /// Trusts the phone clock as is. For fixtures and previews only.
+    static let deviceOnly = ServerClock(serverNow: .distantPast, receivedAt: .distantPast, isVerified: true)
 
     func ageClock(at localNow: Date) -> Date {
         let aligned = localNow.addingTimeInterval(serverNow.timeIntervalSince(receivedAt))
-        return max(localNow, aligned)
+        return isVerified ? aligned : max(localNow, aligned)
     }
 }
 
@@ -131,6 +133,12 @@ enum RunSnapshot: Equatable, Sendable {
     case ready(assignmentId: String, routeVersionId: String, run: TrackedRun, clock: ServerClock)
     case noActiveRun(assignmentId: String, routeVersionId: String)
     case accessUnavailable(AccessUnavailableReason)
+
+    /// The same snapshot measured against another clock (a verified one, once it arrives).
+    func with(clock: ServerClock) -> RunSnapshot {
+        guard case let .ready(assignmentId, routeVersionId, run, _) = self else { return self }
+        return .ready(assignmentId: assignmentId, routeVersionId: routeVersionId, run: run, clock: clock)
+    }
 }
 
 /// One validated `tracking:myRoute` result: the school's approved path.

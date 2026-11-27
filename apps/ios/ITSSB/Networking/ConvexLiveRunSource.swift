@@ -13,6 +13,11 @@ protocol ConvexQuerying: Sendable {
         _ name: String, args: [String: String], as type: T.Type,
         transform: @escaping @Sendable (T) throws -> Value
     ) -> AsyncThrowingStream<Value, Error>
+
+    /// Runs a mutation once. Mutation results are never served from the query cache.
+    func mutation<T: Decodable, Value: Sendable>(
+        _ name: String, as type: T.Type, transform: @escaping @Sendable (T) throws -> Value
+    ) async throws -> Value
 }
 
 /// `LiveRunSource` over the family tracking queries (docs/08 §8).
@@ -31,12 +36,37 @@ struct ConvexLiveRunSource: LiveRunSource {
         })
     }
 
+    /// Run snapshots, re-measured against verified server time once `tracking:serverTime`
+    /// answers (docs/08 §8.1). Until then each snapshot carries an unverified clock.
     func run(assignmentId: String) -> AsyncThrowingStream<RunSnapshot, Error> {
         let now = now
+        let client = client
         let args = ["assignmentId": assignmentId]
-        return mapErrors(client.subscribe("tracking:myRun", args: args, as: MyRunDTO.self) {
+        let snapshots = mapErrors(client.subscribe("tracking:myRun", args: args, as: MyRunDTO.self) {
             try DomainMapping.snapshot(from: $0, receivedAt: now())
         })
+        return AsyncThrowingStream { continuation in
+            let gate = VerifiedClockGate(continuation: continuation)
+            let timeTask = Task {
+                let sentAt = now()
+                guard let clock = try? await client.mutation("tracking:serverTime", as: ServerTimeDTO.self, transform: {
+                    try DomainMapping.verifiedClock(from: $0, sentAt: sentAt, receivedAt: now())
+                }) else { return } // Offline or rejected: stay unverified, so nothing shows as fresh.
+                await gate.verify(with: clock)
+            }
+            let runTask = Task {
+                do {
+                    for try await snapshot in snapshots { await gate.forward(snapshot) }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in
+                runTask.cancel()
+                timeTask.cancel()
+            }
+        }
     }
 
     func route(assignmentId: String) -> AsyncThrowingStream<RouteSnapshot, Error> {
@@ -73,13 +103,35 @@ struct ConvexLiveRunSource: LiveRunSource {
     }
 }
 
+/// Serializes snapshot delivery with the arrival of verified time, so an older
+/// unverified snapshot can never be yielded after its verified replacement.
+private actor VerifiedClockGate {
+    private let continuation: AsyncThrowingStream<RunSnapshot, Error>.Continuation
+    private var verified: ServerClock?
+    private var latest: RunSnapshot?
+
+    init(continuation: AsyncThrowingStream<RunSnapshot, Error>.Continuation) {
+        self.continuation = continuation
+    }
+
+    func forward(_ snapshot: RunSnapshot) {
+        latest = snapshot
+        continuation.yield(verified.map { snapshot.with(clock: $0) } ?? snapshot)
+    }
+
+    func verify(with clock: ServerClock) {
+        verified = clock
+        if let latest { continuation.yield(latest.with(clock: clock)) }
+    }
+}
+
 /// Adapts the process-wide Convex client (docs/06 §8: one client per process).
 ///
 /// `@unchecked Sendable`: `ConvexClient` isn't annotated, but its FFI client
 /// and Combine subjects are safe to use from any thread, and this wrapper
 /// stores nothing mutable.
 final class ConvexClientQuerying: ConvexQuerying, @unchecked Sendable {
-    private let client: ConvexClient
+    fileprivate let client: ConvexClient
 
     init(client: ConvexClient) {
         self.client = client
@@ -111,6 +163,14 @@ final class ConvexClientQuerying: ConvexQuerying, @unchecked Sendable {
             )
             continuation.onTermination = { _ in box.cancellable?.cancel() }
         }
+    }
+}
+
+extension ConvexClientQuerying {
+    func mutation<T: Decodable, Value: Sendable>(
+        _ name: String, as type: T.Type, transform: @escaping @Sendable (T) throws -> Value
+    ) async throws -> Value {
+        try transform(try await client.mutation(name, with: nil))
     }
 }
 
