@@ -6,7 +6,8 @@ according to its own result; events with no result stay pending.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+import random
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from .database import Database
@@ -20,19 +21,34 @@ def backoff_ms(attempts: int) -> int:
     return min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** max(0, attempts - 1))
 
 
+def no_jitter(delay_ms: int) -> int:
+    return delay_ms
+
+
+def with_jitter(delay_ms: int) -> int:
+    """Adds up to 20% so many devices don't retry in lockstep."""
+    return delay_ms + int(delay_ms * 0.2 * random.random())  # noqa: S311 - not security
+
+
 def apply_results(
     db: Database,
     sent_event_ids: Iterable[str],
     results: Iterable[Mapping[str, Any]],
     now_ms: int,
-) -> None:
-    sent = set(sent_event_ids)
+    jitter: Callable[[int], int] = no_jitter,
+) -> dict[str, int]:
+    """Applies results in one transaction. Returns a per-status count of what
+    happened to the sent events (`missing` = no result returned)."""
+    summary = {"accepted": 0, "duplicate": 0, "rejected": 0, "retryable": 0, "missing": 0}
+    sent = list(dict.fromkeys(sent_event_ids))
     by_id = {r.get("eventId"): r for r in results if r.get("eventId") in sent}
 
     with db.transaction() as tx:
         for event_id in sent:
             result = by_id.get(event_id)
             status = result.get("status") if result else None
+            key = status if status in summary else "missing"
+            summary[key] += 1
 
             if status in ("accepted", "duplicate"):
                 tx.execute(
@@ -54,7 +70,7 @@ def apply_results(
                     "SELECT attempts FROM outbox WHERE event_id=?", (event_id,)
                 ).fetchone()
                 attempts = (row["attempts"] if row else 0) + 1
-                delay = backoff_ms(attempts)
+                delay = jitter(backoff_ms(attempts))
                 if result and isinstance(result.get("retryAfterMs"), int):
                     delay = max(delay, result["retryAfterMs"])
                 tx.execute(
@@ -62,3 +78,4 @@ def apply_results(
                     "WHERE event_id=? AND status='pending'",
                     (attempts, now_ms + delay, str(status or "NO_RESULT"), event_id),
                 )
+    return summary

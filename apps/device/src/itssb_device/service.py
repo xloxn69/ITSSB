@@ -29,6 +29,7 @@ from .database import Database
 from .gps_reader import GpsReader, LatestFixHolder
 from .recorder import Recorder, RecorderThread
 from .status import StatusBoard
+from .uploader import UploaderThread
 
 log = logging.getLogger("itssb_device")
 
@@ -105,6 +106,10 @@ class Service:
                 self.stop_event,
             )
         )
+        if cfg.upload_enabled:
+            self._threads.append(UploaderThread(cfg, self.board, self.stop_event))
+        else:
+            log.warning("uploads disabled: ITSSB_DEVICE_API_ORIGIN or ITSSB_DEVICE_TOKEN missing")
         for t in self._threads:
             t.start()
         self._threads.append(self.api.start())

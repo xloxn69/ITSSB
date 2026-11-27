@@ -41,6 +41,18 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX outbox_pending ON outbox(status, next_attempt_at_ms);
     """,
+    # 2: online run-start requests; requestId is saved before sending (docs/04 §10)
+    """
+    CREATE TABLE run_start_requests (
+        request_id TEXT PRIMARY KEY,
+        payload TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (status IN ('pending','accepted','rejected')),
+        run_id TEXT,
+        last_error TEXT,
+        created_at_ms INTEGER NOT NULL
+    );
+    """,
 ]
 
 
@@ -112,6 +124,48 @@ class Database:
             "SELECT MAX(captured_at_ms) AS m FROM telemetry_events WHERE run_id=?", (run_id,)
         ).fetchone()
         return row["m"]
+
+    def save_start_request(self, request_id: str, payload: dict, created_at_ms: int) -> None:
+        """Persists a start request once; a retry with the same requestId is a no-op."""
+        with self.transaction() as tx:
+            tx.execute(
+                "INSERT OR IGNORE INTO run_start_requests(request_id, payload, created_at_ms) "
+                "VALUES(?, ?, ?)",
+                (request_id, json.dumps(payload, separators=(",", ":")), created_at_ms),
+            )
+
+    def pending_start_request(self) -> dict | None:
+        row = self.conn.execute(
+            "SELECT payload FROM run_start_requests WHERE status='pending' ORDER BY rowid LIMIT 1"
+        ).fetchone()
+        return json.loads(row["payload"]) if row else None
+
+    def resolve_start_request(
+        self, request_id: str, accepted_run_id: str | None, error: str | None = None
+    ) -> None:
+        """Accepted: record the server-issued run as active in the same transaction.
+        Rejected: keep the request with its reason. Never creates a run otherwise."""
+        with self.transaction() as tx:
+            if accepted_run_id:
+                tx.execute(
+                    "UPDATE run_start_requests SET status='accepted', run_id=?, last_error=NULL "
+                    "WHERE request_id=?",
+                    (accepted_run_id, request_id),
+                )
+                tx.execute(
+                    # A known scheduled run becomes active; a completed or
+                    # cancelled one is never reactivated by a late answer.
+                    "INSERT INTO local_runs(run_id, state) VALUES(?, 'active') "
+                    "ON CONFLICT(run_id) DO UPDATE SET state='active' "
+                    "WHERE local_runs.state='scheduled'",
+                    (accepted_run_id,),
+                )
+            else:
+                tx.execute(
+                    "UPDATE run_start_requests SET status='rejected', last_error=? "
+                    "WHERE request_id=?",
+                    (error, request_id),
+                )
 
     # ── Observations ──────────────────────────────────────────────────
 
