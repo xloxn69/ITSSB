@@ -1,9 +1,11 @@
 import { ClerkProvider, SignIn, useAuth, useClerk } from "@clerk/react";
 import { ConvexReactClient, useConvexAuth } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { TrackPage } from "../family/TrackPage";
 import { Shell } from "../Shell";
+import { convexStaffSource } from "../staff/convexStaffSource";
+import { StaffApp } from "../staff/StaffApp";
 import { TrackStore } from "../tracking/store";
 import type { LiveConfig } from "./config";
 import { convexSource } from "./convexSource";
@@ -56,9 +58,21 @@ function AuthGate({ client }: { client: ConvexReactClient }) {
         </button>
       }
     >
-      <SignedInTrack client={client} onSignIn={signOut} />
+      <SignedIn client={client} onSignIn={signOut} />
     </Shell>
   );
+}
+
+/** `#/staff/…` opens the staff console; the server still checks the staff role on every call. */
+function SignedIn({ client, onSignIn }: { client: ConvexReactClient; onSignIn: () => void }) {
+  const [staff, setStaff] = useState(() => location.hash.startsWith("#/staff"));
+  useEffect(() => {
+    const onChange = () => setStaff(location.hash.startsWith("#/staff"));
+    window.addEventListener("hashchange", onChange);
+    return () => window.removeEventListener("hashchange", onChange);
+  }, []);
+  const staffSource = useMemo(() => convexStaffSource(client), [client]);
+  return staff ? <StaffApp source={staffSource} /> : <SignedInTrack client={client} onSignIn={onSignIn} />;
 }
 
 function SignedInTrack({ client, onSignIn }: { client: ConvexReactClient; onSignIn: () => void }) {

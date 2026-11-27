@@ -57,6 +57,7 @@ p { margin: 0; }
 .route-line { fill: none; stroke: var(--color-text-secondary); stroke-width: 4; stroke-linecap: round;
   stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .stop-pin { fill: var(--color-surface); stroke: var(--color-text-primary); stroke-width: 3; vector-effect: non-scaling-stroke; }
+.stop-number { fill: var(--color-text-primary); font-size: 22px; font-weight: 700; }
 .bus-pin { fill: var(--color-brand); stroke: var(--color-on-brand); stroke-width: 2; vector-effect: non-scaling-stroke; }
 .bus-pin.dim { fill: var(--color-status-unknown); opacity: 0.6; }
 .facts { display: grid; grid-template-columns: auto 1fr; gap: var(--space-xs) var(--space-lg); margin: 0; }
@@ -65,6 +66,8 @@ p { margin: 0; }
 .switcher { display: flex; gap: var(--space-sm); flex-wrap: wrap; }
 .chip { min-height: 44px; padding: var(--space-sm) var(--space-lg); border-radius: var(--radius-sheet);
   border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text-primary); cursor: pointer; }
+a.chip { display: inline-flex; align-items: center; text-decoration: none; }
+.chip[aria-current="page"],
 .chip[aria-pressed="true"] { background: var(--color-text-primary); color: var(--color-surface); border-color: var(--color-text-primary); }
 .legend { display: flex; gap: var(--space-lg); flex-wrap: wrap; font-size: 0.875rem; color: var(--color-text-secondary); }
 .legend span { display: inline-flex; gap: var(--space-xs); align-items: center; }

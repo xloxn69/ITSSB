@@ -108,3 +108,15 @@ Verify that the same account receives equivalent authorized trip meaning in iOS 
 - [Data contracts](08_DATA_CONTRACTS_AND_API.md), [security](11_SECURITY_PRIVACY_AND_ACCESS.md), [testing](13_TESTING_AND_ACCEPTANCE.md).
 
 The page grouping and school workflow above are recommended product design choices, to be finalized with the responsible transportation staff.
+
+## 13. What is built now
+
+`apps/web` is React with Vite, built to static files. Hash routes are used, so no server routing is needed.
+
+- **Family tracking (`#/`).** Clerk sign-in, then the same states and words as the iPhone app: loading, live, waiting for an update, last known location (stale), waiting for the first position, GPS unavailable (no fix or no receiver), trip completed or cancelled, no trip, tracking not available, signed out, and error. The age advances every second without a new update. Nothing is called fresh until verified server time arrives (docs/08 §8.1), and it is measured again whenever the tab becomes visible. A student switcher appears for guardians with more than one linked student.
+- **Map.** No map provider is configured yet, so the approved path, assigned stop and bus position are drawn as a simple diagram, with a text summary beside it (§9).
+- **Staff (`#/staff/…`).** Routes (approved version, approver, stops), route review (waiting and decided drafts, path, ordered stops, checks, approve with confirmation, reject with a required reason), buses and devices (contact age that turns to "not reporting" past the stale cutoff, family-facing bus name, revoke with confirmation), and drivers. The server checks the staff role on every call (docs/08 §11).
+- **Not built yet:** enrollment, guardian linking, alerts, check-in, the service calendar, cancellations and replacements, diagnostics, and organization scoping.
+
+Fictional screens for every state are under `?fixture=` in development only. `bun run screenshots` in `apps/web` captures them.
+
