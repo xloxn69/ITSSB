@@ -251,9 +251,12 @@ export const applyRotation = internalMutation({
     }
     const id = ctx.db.normalizeId("devices", deviceId);
     const device = id ? await ctx.db.get(id) : null;
-    if (!device) return credentialRefusal("not_found", "That device doesn't exist.");
-    if (device.revoked) {
-      return credentialRefusal("revoked", "This device is revoked. Provision a new device instead.");
+    if (!device || device.revoked) {
+      // A refused attempt by staff is audited too, so it can be traced.
+      await audit(ctx, caller.user, "device.rotateCredential", "device", deviceId, "denied");
+      return device
+        ? credentialRefusal("revoked", "This device is revoked. Provision a new device instead.")
+        : credentialRefusal("not_found", "That device doesn't exist.");
     }
     await ctx.db.patch(device._id, { credentialHash });
     await audit(ctx, caller.user, "device.rotateCredential", "device", device._id, "allowed");
@@ -286,6 +289,9 @@ export const createDevice = internalMutation({
     }
     const name = label.trim();
     const bus = busLabel?.trim() || undefined;
+    if (!name || name.length > MAX_DEVICE_LABEL_LENGTH || (bus && bus.length > MAX_BUS_LABEL_LENGTH)) {
+      await audit(ctx, caller.user, "device.provision", "device", undefined, "denied");
+    }
     if (!name || name.length > MAX_DEVICE_LABEL_LENGTH) {
       return credentialRefusal("invalid_label", `Use 1 to ${MAX_DEVICE_LABEL_LENGTH} characters for the device name.`);
     }

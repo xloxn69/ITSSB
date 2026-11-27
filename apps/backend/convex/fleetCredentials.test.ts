@@ -81,6 +81,10 @@ describe("fleet.rotateDeviceCredential", () => {
     const stored = await t.run((ctx) => ctx.db.get(deviceId));
     expect(stored?.credentialHash).toBe(await sha256Hex(OLD_SECRET));
     expect(stored?.revoked).toBe(true);
+    // A refused attempt by staff is still traceable.
+    expect((await auditRows(t)).map((a) => [a.action, a.resourceId, a.result])).toEqual([
+      ["device.rotateCredential", deviceId, "denied"],
+    ]);
   });
 
   it("refuses an unknown or malformed device", async () => {
@@ -94,6 +98,10 @@ describe("fleet.rotateDeviceCredential", () => {
       status: "refused",
       code: "not_found",
     });
+    expect((await auditRows(t)).map((a) => [a.action, a.result])).toEqual([
+      ["device.rotateCredential", "denied"],
+      ["device.rotateCredential", "denied"],
+    ]);
   });
 
   for (const who of [DRIVER, FAMILY]) {
@@ -161,6 +169,11 @@ describe("fleet.provisionDevice", () => {
       });
     }
     expect(await t.run((ctx) => ctx.db.query("devices").collect())).toHaveLength(1);
+    expect((await auditRows(t)).map((a) => [a.action, a.result])).toEqual([
+      ["device.provision", "denied"],
+      ["device.provision", "denied"],
+      ["device.provision", "denied"],
+    ]);
   });
 
   it("non-staff cannot create a device", async () => {
