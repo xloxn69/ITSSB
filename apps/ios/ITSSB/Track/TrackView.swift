@@ -5,10 +5,17 @@ import SwiftUI
 /// unavailable, I27 no active trip, I28 session or access unavailable.
 struct TrackView: View {
     @State private var model: TrackViewModel
+    /// From a tapped notification. Selected only if it is one of this person's assignments.
+    let openAssignmentId: String?
+    /// Called once the requested assignment has been handed to the model.
+    var onOpened: () -> Void = {}
     let onSignIn: () -> Void
 
-    init(source: any LiveRunSource, onSignIn: @escaping () -> Void = {}) {
+    init(source: any LiveRunSource, openAssignmentId: String? = nil, onOpened: @escaping () -> Void = {},
+         onSignIn: @escaping () -> Void = {}) {
         _model = State(initialValue: TrackViewModel(source: source))
+        self.openAssignmentId = openAssignmentId
+        self.onOpened = onOpened
         self.onSignIn = onSignIn
     }
 
@@ -18,6 +25,12 @@ struct TrackView: View {
             .background(AppColors.background)
             .onAppear { model.start() }
             .onDisappear { model.stop() }
+            // Also runs on first appearance, so a tap that cold-launched the app is kept.
+            .task(id: openAssignmentId) {
+                guard let id = openAssignmentId else { return }
+                model.open(assignmentId: id)
+                onOpened()
+            }
     }
 
     @ViewBuilder
@@ -71,7 +84,9 @@ private struct TrackingScreen: View {
                 .safeAreaInset(edge: .top) { TripHeader(context: context, picker: picker) }
                 .safeAreaInset(edge: .bottom) {
                     TripStatusCard(copy: StatusCopy.make(presentation, run: run, clock: clock, now: timeline.date),
-                                   stopLabel: run.assignedStop.label)
+                                   stopLabel: run.assignedStop.label,
+                                   eta: EtaPresentation.make(run: run, clock: clock, now: timeline.date),
+                                   progress: EtaPresentation.stopProgress(run))
                 }
         }
     }
@@ -149,6 +164,8 @@ struct AssignmentPicker: View {
 struct TripStatusCard: View {
     let copy: StatusCopy
     let stopLabel: String
+    var eta: EtaPresentation?
+    var progress: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
@@ -170,6 +187,24 @@ struct TripStatusCard: View {
                 .font(AppFonts.callout)
                 .foregroundStyle(AppColors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
+            if let progress {
+                Text(progress)
+                    .font(AppFonts.callout)
+                    .foregroundStyle(AppColors.textPrimary)
+            }
+            if let eta {
+                VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                    Text("Estimated arrival at your stop")
+                        .font(AppFonts.caption)
+                        .foregroundStyle(AppColors.textSecondary)
+                    Text("\(eta.headline) · around \(eta.arrivalText)")
+                        .font(AppFonts.headline)
+                        .foregroundStyle(AppColors.textPrimary)
+                    Text("\(eta.madeText). Estimates can change.")
+                        .font(AppFonts.caption)
+                        .foregroundStyle(AppColors.textSecondary)
+                }
+            }
             Label("Your stop: \(stopLabel)", systemImage: "figure.wave")
                 .font(AppFonts.caption)
                 .foregroundStyle(AppColors.textSecondary)
@@ -220,6 +255,8 @@ private struct StateMessage: View {
 // MARK: Previews (one per state, fictional data)
 
 #Preview("Live") { TrackView(source: PreviewLiveRunSource(scenario: .live)) }
+#Preview("ETA") { TrackView(source: PreviewLiveRunSource(scenario: .eta)) }
+#Preview("At stop") { TrackView(source: PreviewLiveRunSource(scenario: .atStop)) }
 #Preview("Aging") { TrackView(source: PreviewLiveRunSource(scenario: .aging)) }
 #Preview("Stale") { TrackView(source: PreviewLiveRunSource(scenario: .stale)) }
 #Preview("Awaiting position") { TrackView(source: PreviewLiveRunSource(scenario: .awaitingPosition)) }

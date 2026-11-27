@@ -258,6 +258,15 @@ extension ConvexClientQuerying {
     }
 }
 
+extension ConvexClientQuerying: ConvexCommanding {
+    func mutation<T: Decodable, Value: Sendable>(
+        _ name: String, args: [String: ConvexEncodable?], as type: T.Type,
+        transform: @escaping @Sendable (T) throws -> Value
+    ) async throws -> Value {
+        try transform(try await client.mutation(name, with: args))
+    }
+}
+
 /// Holds a Combine subscription so a `@Sendable` termination handler can cancel it.
 /// `@unchecked Sendable`: `AnyCancellable.cancel()` is thread-safe.
 private final class CancellableBox: @unchecked Sendable {

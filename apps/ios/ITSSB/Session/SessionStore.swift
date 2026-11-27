@@ -104,6 +104,8 @@ final class SessionStore {
 
     private let auth: any AuthSession
     private let now: () -> Date
+    /// Runs while still signed in, before signing out (e.g. stop this phone's pushes).
+    @ObservationIgnored var beforeSignOut: (@MainActor () async -> Void)?
 
     init(auth: any AuthSession, now: @escaping () -> Date = { Date() }) {
         self.auth = auth
@@ -178,6 +180,7 @@ final class SessionStore {
     /// Hides protected screens at once, then cleans up. The form stays locked until cleanup
     /// finishes, so a new sign-in can't overlap a sign-out still in flight.
     func signOut() async {
+        await beforeSignOut?()
         step = .email
         message = nil
         resendAvailableAt = nil

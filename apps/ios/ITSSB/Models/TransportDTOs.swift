@@ -117,7 +117,7 @@ struct StopDTO: Decodable {
     let status: String?
 }
 
-/// Decoded so the envelope is complete; ETA display is a later milestone.
+/// The baseline arrival estimate (docs/08 §8); mapped by `DomainMapping.eta(from:)`.
 struct EtaDTO: Decodable {
     @ConvexFloat var arrivalAtMs: Double
     @ConvexFloat var generatedAtMs: Double

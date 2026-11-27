@@ -50,8 +50,20 @@ enum DomainMapping {
             },
             gpsStatus: gpsStatus,
             position: dto.lastPosition.flatMap { position(from: $0, serverNow: serverNow) },
-            assignedStop: try stop(from: dto.assignedStop, requireStatus: true)
+            assignedStop: try stop(from: dto.assignedStop, requireStatus: true),
+            eta: dto.eta.flatMap(eta(from:))
         )
+    }
+
+    /// Nil for an estimate that isn't believable; the rest of the run stays usable.
+    static func eta(from dto: EtaDTO) -> RunEta? {
+        guard let arrivalAt = try? timestamp(dto.arrivalAtMs, field: "eta.arrivalAtMs"),
+              let generatedAt = try? timestamp(dto.generatedAtMs, field: "eta.generatedAtMs"),
+              let validUntil = try? timestamp(dto.validUntilMs, field: "eta.validUntilMs"),
+              validUntil > generatedAt
+        else { return nil }
+        return RunEta(arrivalAt: arrivalAt, generatedAt: generatedAt, validUntil: validUntil,
+                      algorithmVersion: dto.algorithmVersion, sourceEventId: dto.sourceEventId)
     }
 
     /// Returns nil for anything that is not a believable observation, so a bad

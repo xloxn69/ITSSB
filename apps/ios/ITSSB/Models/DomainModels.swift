@@ -17,6 +17,8 @@ enum WireTime {
 enum FreshnessPolicy {
     static let agingAfter: TimeInterval = 30
     static let staleAfter: TimeInterval = 120
+    /// Mirrors `ETA_VALID_FOR_MS`: an estimate is valid until its position's capture time plus this.
+    static let etaValidFor: TimeInterval = 60
 }
 
 /// How much to trust the shown position. Always derived from the clock at render
@@ -132,6 +134,16 @@ struct AssignedStop: Equatable, Sendable {
     let status: StopStatus
 }
 
+/// A server arrival estimate (docs/08 §8). Shown only through `EtaPresentation`, which ages it.
+struct RunEta: Equatable, Sendable {
+    let arrivalAt: Date
+    let generatedAt: Date
+    let validUntil: Date
+    let algorithmVersion: String
+    /// The position it was computed from; must be the one on screen.
+    let sourceEventId: String
+}
+
 struct TrackedRun: Equatable, Sendable {
     let runId: String
     let state: RunState
@@ -143,6 +155,8 @@ struct TrackedRun: Equatable, Sendable {
     /// Never replaced by an invented coordinate.
     let position: LivePosition?
     let assignedStop: AssignedStop
+    /// Nil when absent or malformed; never repaired or guessed.
+    var eta: RunEta?
 }
 
 enum AccessUnavailableReason: String, Equatable, Sendable {

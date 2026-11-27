@@ -31,12 +31,29 @@ enum PreviewFixtures {
     /// its position's receipt, or a moment ago when a heartbeat reports GPS
     /// without a position.
     static func run(state: RunState = .active, position: LivePosition?, gpsStatus: GpsStatus? = .valid,
-                    contactAt: Date?? = nil) -> TrackedRun {
+                    contactAt: Date?? = nil, stopStatus: StopStatus = .unknown, eta: RunEta? = nil) -> TrackedRun {
         let fallback = position?.receivedAt ?? (gpsStatus == nil ? nil : Date().addingTimeInterval(-2))
         let contact = contactAt ?? fallback
         return TrackedRun(runId: "demo_run_001", state: state, liveRevision: 27, busLabel: "Bus 12",
-                   lastDeviceContactAt: contact, gpsStatus: gpsStatus,
-                   position: position, assignedStop: stop)
+                          lastDeviceContactAt: contact, gpsStatus: gpsStatus, position: position,
+                          assignedStop: AssignedStop(stopId: stop.stopId, label: stop.label,
+                                                     coordinate: stop.coordinate, status: stopStatus),
+                          eta: eta)
+    }
+
+    /// An estimate six minutes out, made from `position`, valid for the contract's window.
+    static func eta(for position: LivePosition, now: Date = Date()) -> RunEta {
+        RunEta(arrivalAt: position.capturedAt.addingTimeInterval(6 * 60),
+               generatedAt: now.addingTimeInterval(-2),
+               validUntil: position.capturedAt.addingTimeInterval(FreshnessPolicy.etaValidFor),
+               algorithmVersion: "baseline-v1", sourceEventId: position.eventId)
+    }
+
+    static func alert(now: Date = Date()) -> AlertItem {
+        AlertItem(alertId: "demo_alert_001", assignmentId: assignment.assignmentId, runId: "demo_run_001",
+                  stopLabel: "Oak & Pine", createdAt: now.addingTimeInterval(-70),
+                  predictedArrivalAt: now.addingTimeInterval(4 * 60),
+                  predictionGeneratedAt: now.addingTimeInterval(-70))
     }
 }
 
@@ -44,6 +61,10 @@ enum PreviewFixtures {
 enum PreviewScenario: String, CaseIterable, Sendable {
     case loading
     case live
+    case eta
+    case atStop
+    case passed
+    case alerts
     case aging
     case stale
     case awaitingPosition
@@ -82,6 +103,13 @@ struct PreviewLiveRunSource: LiveRunSource {
             case .loading, .accessUnavailable, .sessionExpired:
                 break
             case .live: ready(PreviewFixtures.run(position: PreviewFixtures.position(capturedSecondsAgo: 4)))
+            case .eta, .alerts:
+                let position = PreviewFixtures.position(capturedSecondsAgo: 4)
+                ready(PreviewFixtures.run(position: position, stopStatus: .upcoming,
+                                          eta: PreviewFixtures.eta(for: position)))
+            case .atStop, .passed:
+                ready(PreviewFixtures.run(position: PreviewFixtures.position(capturedSecondsAgo: 4),
+                                          stopStatus: scenario == .atStop ? .atStop : .passed))
             case .aging: ready(PreviewFixtures.run(position: PreviewFixtures.position(capturedSecondsAgo: 50)))
             case .stale: ready(PreviewFixtures.run(position: PreviewFixtures.position(capturedSecondsAgo: 300),
                                                    gpsStatus: nil))
@@ -111,4 +139,30 @@ struct PreviewLiveRunSource: LiveRunSource {
         body(continuation)
         return stream
     }
+}
+
+/// A `NotificationSource` for previews and screenshots. Saves are echoed, never sent anywhere.
+struct PreviewNotificationSource: NotificationSource {
+    var scenario: PreviewScenario = .live
+
+    func alerts() -> AsyncThrowingStream<[AlertItem]?, Error> {
+        let items = scenario == .alerts || scenario == .eta ? [PreviewFixtures.alert()] : []
+        return AsyncThrowingStream { continuation in continuation.yield(items) }
+    }
+
+    func preference(assignmentId: String) -> AsyncThrowingStream<NotificationPreference?, Error> {
+        let enabled = scenario == .alerts || scenario == .eta
+        return AsyncThrowingStream { continuation in
+            continuation.yield(NotificationPreference(assignmentId: assignmentId, approachingEnabled: enabled,
+                                                      approachingMinutes: 5, updatedAt: nil))
+        }
+    }
+
+    func savePreference(assignmentId: String, enabled: Bool, minutes: Int) async throws -> NotificationPreference {
+        NotificationPreference(assignmentId: assignmentId, approachingEnabled: enabled, approachingMinutes: minutes,
+                               updatedAt: Date())
+    }
+
+    func registerDevice(installationId: String, token: String?, environment: PushEnvironment,
+                        permission: PushPermission) async throws -> Bool { false }
 }
