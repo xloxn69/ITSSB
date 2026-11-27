@@ -490,6 +490,19 @@ The staff web calls these Convex functions. The Pi and the iOS app never do, so 
 | `fleet:setBusLabel` (mutation) | `{ deviceId, busLabel }` | `ok`, or `refused` (`not_found`, or `invalid_label` for 0 or over 40 characters after trimming). |
 | `fleet:revokeDevice` (mutation) | `{ deviceId }` | `ok` (idempotent), or `refused` (`not_found`). |
 | `fleet:listDrivers` (query) | `{}` | `ready` with `drivers` (`userId`, `displayName`). |
+| `fleet:provisionDevice` (action) | `{ label, busLabel? }` | `issued` with `deviceId` and `deviceSecret` (shown once; only its SHA-256 is stored), or `refused` (`invalid_label`: device name 1 to 80 characters, bus name at most 40). |
+| `fleet:rotateDeviceCredential` (action) | `{ deviceId }` | `issued` with `deviceId` and a new `deviceSecret`; the old secret stops working at once and the device keeps its identity and runs. Or `refused` (`not_found`, `revoked`: a revoked device is never revived). |
+| `fleet:diagnostics` (query) | `{}` | `ready` with `deployment` (`release`, `environment` from the `ITSSB_RELEASE`/`ITSSB_ENVIRONMENT` deployment variables or `null`, `contractSchemaVersion`), `retention` (`rawGpsDays`, `lastSweepAtMs`, `lastSweepDeleted`), and `devices` (`deviceId`, `label`, `busLabel`, `revoked`, `activeRunId`, `lastContactAtMs` from the latest heartbeat or position receipt, `softwareVersion`, `pendingCount`, `oldestPendingCapturedAtMs` from the heartbeat, `lastRun`). No positions, addresses or credentials. |
+| `fleet:listMaintenance` (query) | `{}` | `ready` with upcoming, uncancelled `windows` (`windowId`, `deviceId`, `deviceLabel`, `startsAtMs`, `endsAtMs`, `reason`, `scheduledByName`). |
+| `fleet:scheduleMaintenance` (mutation) | `{ deviceId, startsAtMs, endsAtMs, reason }` | `ok`, or `refused` (`device_unavailable`, `reason_required`, `invalid_window`: not in the past, ends after it starts, at most 12 h; `overlaps`; `device_busy`: starts now on a bus with an active run). |
+| `fleet:cancelMaintenance` (mutation) | `{ windowId }` | `ok`, or `refused` (`not_found`). |
+| `runOps:cancelRun` (mutation) | `{ runId, reason }` | `ok`: the run becomes `cancelled` with `endedAtMs`, `cancelledAtMs`, who, and the reason (1 to 200 characters); its positions are no longer accepted. Or `refused` (`reason_required`, `not_found`, `not_active`). |
+| `runOps:replaceDevice` (mutation) | `{ runId, replacementDeviceId, reason }` | `ok`: cancels the run and names the replacement bus; that bus's next normal start of the same route version on the same service date is linked (`replacesRunId` on it, `replacedByRunId` on the cancelled run). Or `refused` (`reason_required`, `not_found`, `not_active`, `device_unavailable`, `same_device`, `device_busy`). |
+| `calendar:listDays` (query) | `{}` | `ready` with `days` (`serviceDate`, `timezone`, `status: "no_service" \| "late_start"`, `lateStartMinutes`, `notice`, `setByName`, `setAtMs`), from 30 days ago on. |
+| `calendar:setDay` (mutation) | `{ serviceDate, timezone, status, lateStartMinutes?, notice }` | `ok` (one entry per date, replacing any earlier one), or `refused` (`invalid_date`, `invalid_timezone`, `past_date`, `notice_required`, `invalid_delay`: late start 1 to 240 whole minutes). |
+| `calendar:removeDay` (mutation) | `{ serviceDate }` | `ok`, or `refused` (`not_found`, `past_date`). |
+
+For a signed-in caller, every change writes an audit row: `allowed` when applied, `denied` when the caller is not staff. The credential actions also record their refusals as `denied`. The calendar notice and run cancellation are not yet shown in the family apps (`tracking:myRun` reports a cancelled run as no active run).
 
 **Checks.** `checks` entries have a `code`, a `severity` (`blocking` or `warning`) and a `message`.
 - Blocking, which prevents approval: `too_few_points` (under 2), `too_many_points` (over 2000, `MAX_ROUTE_PATH_POINTS`), `invalid_coordinate`, `no_stops`.

@@ -5,6 +5,7 @@ import {
   type QueryState,
   queryState,
   type StaffActionName,
+  type StaffArgs,
   type StaffMutationName,
   type StaffQueryName,
   type StaffSource,
@@ -95,9 +96,9 @@ export function useMutation(source: StaffSource) {
       setBusy(false);
     }
   }
-  const run = (name: StaffMutationName, args: Record<string, string>, done: string) =>
+  const run = (name: StaffMutationName, args: StaffArgs, done: string) =>
     settle(() => source.mutate(name, args), done);
-  const act = (name: StaffActionName, args: Record<string, string | number>, done: string) =>
+  const act = (name: StaffActionName, args: StaffArgs, done: string) =>
     settle(() => source.act(name, args), done);
   return { busy, outcome, last, run, act };
 }

@@ -75,11 +75,21 @@ export default defineSchema({
     endedByDriverUserId: v.optional(v.id("users")),
     /** Final `runSequence` boundary from the end request; bounds late history. */
     lastRunSequence: v.optional(v.union(v.number(), v.null())),
+    /** Staff cancellation (docs/12 §7): who, when, and why. `endedAtMs` is set too. */
+    cancelledAtMs: v.optional(v.number()),
+    cancelledByUserId: v.optional(v.id("users")),
+    cancelReason: v.optional(v.string()),
+    /** The bus staff sent to take over this cancelled run's route. */
+    replacementDeviceId: v.optional(v.id("devices")),
+    /** The replacement bus's run that took over, and on it, the run it replaced. */
+    replacedByRunId: v.optional(v.id("runs")),
+    replacesRunId: v.optional(v.id("runs")),
   })
     .index("by_device_state", ["deviceId", "state"])
     .index("by_route_version_state", ["routeVersionId", "state"])
     .index("by_device_start_request", ["deviceId", "startRequestId"])
-    .index("by_device_end_request", ["deviceId", "endRequestId"]),
+    .index("by_device_end_request", ["deviceId", "endRequestId"])
+    .index("by_replacement_device", ["replacementDeviceId"]),
 
   /**
    * A server-issued driver operating grant (docs/07 §6, docs/08 §6): proof
@@ -510,6 +520,36 @@ export default defineSchema({
   })
     .index("by_state_next", ["state", "nextAttemptAtMs"])
     .index("by_run_state", ["runId", "state"]),
+
+  /**
+   * Service calendar exceptions (docs/12 §3, §7): one row per date with no
+   * service or a late start, and the family-facing notice. Days without a
+   * row are normal operating days.
+   */
+  serviceDays: defineTable({
+    serviceDate: v.string(),
+    timezone: v.string(),
+    status: v.union(v.literal("no_service"), v.literal("late_start")),
+    lateStartMinutes: v.optional(v.number()),
+    notice: v.string(),
+    setByUserId: v.id("users"),
+    setAtMs: v.number(),
+  }).index("by_date", ["serviceDate"]),
+
+  /**
+   * A planned maintenance period for one device (docs/14 §5): when its
+   * software may be updated. Cancelled windows are kept for history.
+   */
+  maintenanceWindows: defineTable({
+    deviceId: v.id("devices"),
+    startsAtMs: v.number(),
+    endsAtMs: v.number(),
+    reason: v.string(),
+    scheduledByUserId: v.id("users"),
+    scheduledAtMs: v.number(),
+    cancelledAtMs: v.optional(v.number()),
+    cancelledByUserId: v.optional(v.id("users")),
+  }).index("by_device", ["deviceId", "startsAtMs"]),
 
   /** Append-only record of sensitive actions. Never update or delete rows. */
   auditLog: defineTable({

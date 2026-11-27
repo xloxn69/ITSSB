@@ -18,7 +18,9 @@ export type StaffQueryName =
   | "students:list"
   | "checkIns:recentRuns"
   | "checkIns:runAttendance"
-  | "audit:list";
+  | "audit:list"
+  | "fleet:listMaintenance"
+  | "calendar:listDays";
 
 export type StaffMutationName =
   | "routes:approveDraft"
@@ -32,7 +34,15 @@ export type StaffMutationName =
   | "guardianLinks:reject"
   | "guardianLinks:revoke"
   | "routes:removeAssignment"
-  | "checkIns:staffRecord";
+  | "checkIns:staffRecord"
+  | "fleet:scheduleMaintenance"
+  | "fleet:cancelMaintenance"
+  | "runOps:cancelRun"
+  | "runOps:replaceDevice"
+  | "calendar:setDay"
+  | "calendar:removeDay";
+
+export type StaffArgs = Record<string, string | number>;
 
 /** Actions create invitation codes, which need real randomness on the server. */
 export type StaffActionName =
@@ -41,8 +51,6 @@ export type StaffActionName =
   | "fleet:provisionDevice"
   | "fleet:rotateDeviceCredential";
 
-/** Convex actions: they return a one-time device secret (docs/14 §4). */
-
 export interface StaffSource {
   watch(
     name: StaffQueryName,
@@ -50,8 +58,8 @@ export interface StaffSource {
     onValue: (raw: unknown) => void,
     onError: (error: unknown) => void,
   ): Unsubscribe;
-  mutate(name: StaffMutationName, args: Record<string, string>): Promise<unknown>;
-  act(name: StaffActionName, args: Record<string, string | number>): Promise<unknown>;
+  mutate(name: StaffMutationName, args: StaffArgs): Promise<unknown>;
+  act(name: StaffActionName, args: StaffArgs): Promise<unknown>;
 }
 
 export type QueryState<T> =

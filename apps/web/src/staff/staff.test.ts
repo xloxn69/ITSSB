@@ -1,7 +1,14 @@
 import { POSITION_STALE_AFTER_MS } from "@itssb/contracts";
 import { describe, expect, it } from "vitest";
 import { staffFixtureSource } from "../dev/staffFixtures";
-import { approvalBlocker, contactStatus, sweepSummary } from "./format";
+import {
+  approvalBlocker,
+  contactStatus,
+  maintenanceWindow,
+  runActionsAvailable,
+  serviceDateLabel,
+  sweepSummary,
+} from "./format";
 import { credentialOutcome, mutationOutcome, queryState } from "./source";
 
 describe("queryState", () => {
@@ -142,5 +149,49 @@ describe("enrollment staff pages", () => {
     const source = staffFixtureSource("staff");
     const result = await source.mutate("enrollment:approve", { enrollmentRequestId: "demo_enrollment_request_001", stopId: "elsewhere" });
     expect(mutationOutcome(result, "Approved").kind).toBe("refused");
+  });
+});
+
+describe("maintenanceWindow", () => {
+  it("builds a bounded window and refuses unusable input", () => {
+    const w = maintenanceWindow("2026-11-28T09:00", 2);
+    expect(w && w.endsAtMs - w.startsAtMs).toBe(2 * 60 * 60_000);
+    expect(maintenanceWindow("2026-11-28", 2)).toBeNull();
+    expect(maintenanceWindow("2026-11-28T09:00", 0)).toBeNull();
+    expect(maintenanceWindow("2026-11-28T09:00", 13)).toBeNull();
+    expect(maintenanceWindow("2026-11-28T09:00", Number.NaN)).toBeNull();
+  });
+});
+
+describe("serviceDateLabel", () => {
+  it("shows the calendar day itself, whatever the browser's time zone", () => {
+    expect(serviceDateLabel("2026-11-28")).toMatch(/28/);
+    expect(serviceDateLabel("junk")).toBe("junk");
+  });
+});
+
+describe("fixture service operations", () => {
+  it("cancelling a run needs a reason and then ends it", async () => {
+    const source = staffFixtureSource("staff");
+    expect(mutationOutcome(await source.mutate("runOps:cancelRun", { runId: "demo_run_001", reason: " " }), "x").kind).toBe(
+      "refused",
+    );
+    expect(mutationOutcome(await source.mutate("runOps:cancelRun", { runId: "demo_run_001", reason: "Weather" }), "x").kind).toBe(
+      "done",
+    );
+    expect(mutationOutcome(await source.mutate("runOps:cancelRun", { runId: "demo_run_001", reason: "Again" }), "x").kind).toBe(
+      "refused",
+    );
+  });
+});
+
+describe("runActionsAvailable", () => {
+  const device = { deviceId: "d", label: "Pi", busLabel: null, lastContactAtMs: null };
+  const run = { runId: "r", routeLabel: null, startedAtMs: null };
+  it("offers cancel and replace for any active run, including on a revoked bus", () => {
+    expect(runActionsAvailable({ ...device, revoked: false, activeRun: run })).toBe(true);
+    // Revoking mid-run leaves the run active and the route occupied; staff must be able to clear it.
+    expect(runActionsAvailable({ ...device, revoked: true, activeRun: run })).toBe(true);
+    expect(runActionsAvailable({ ...device, revoked: false, activeRun: null })).toBe(false);
   });
 });

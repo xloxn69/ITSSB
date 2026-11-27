@@ -57,7 +57,7 @@ A duplicate microSD image must not create two active buses with the same credent
 
 ## 5. Releasing a Pi update
 
-Make software changes during an inactive maintenance period. Downloading a candidate in the background can be separate from activating it, but activation must not interrupt an active run.
+Make software changes during an inactive maintenance period. Staff schedule a maintenance window per device on the Buses & devices page (at most 12 hours, never starting now on a bus that is running). Downloading a candidate in the background can be separate from activating it, but activation must not interrupt an active run.
 
 A release procedure should:
 
