@@ -11,7 +11,7 @@ import { StaffApp } from "../staff/StaffApp";
 import { TrackStore } from "../tracking/store";
 import type { LiveConfig } from "./config";
 import { convexSource } from "./convexSource";
-import { SignInFlow, type SignInLike, type SignUpLike } from "./signInFlow";
+import { SignInFlow, type SignInLike, type SignUpLike, sessionGate } from "./signInFlow";
 import { SignInScreen } from "./SignInScreen";
 
 /**
@@ -36,7 +36,14 @@ function AuthGate({ client }: { client: ConvexReactClient }) {
   const { isLoading, isAuthenticated } = useConvexAuth();
   const { isSignedIn } = useAuth();
   const clerk = useClerk();
-  if (isLoading) {
+  const waitingMs = useWaitingMs(!isLoading && !isAuthenticated && isSignedIn === true);
+  const gate = sessionGate({
+    convexLoading: isLoading,
+    convexAuthenticated: isAuthenticated,
+    clerkSignedIn: isSignedIn === true,
+    waitingMs,
+  });
+  if (gate === "checking") {
     return (
       <Shell>
         <section className="card message" aria-busy>
@@ -46,7 +53,7 @@ function AuthGate({ client }: { client: ConvexReactClient }) {
     );
   }
   const signOut = () => void clerk.signOut();
-  if (!isAuthenticated && isSignedIn) {
+  if (gate === "refused") {
     // Clerk has a session but Convex refused its token (for example, the
     // `convex` JWT template or issuer is not set up). Say so; never show data.
     return (
@@ -67,7 +74,7 @@ function AuthGate({ client }: { client: ConvexReactClient }) {
       </Shell>
     );
   }
-  if (!isAuthenticated) {
+  if (gate === "signIn") {
     return (
       <Shell>
         <ClerkSignIn />
@@ -85,6 +92,24 @@ function AuthGate({ client }: { client: ConvexReactClient }) {
       <SignedIn client={client} onSignIn={signOut} />
     </Shell>
   );
+}
+
+/** Milliseconds `active` has been continuously true; 0 while it is false. */
+function useWaitingMs(active: boolean): number {
+  const [since, setSince] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) {
+      setSince(null);
+      return;
+    }
+    const start = Date.now();
+    setSince(start);
+    setNow(start);
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [active]);
+  return active && since !== null ? now - since : 0;
 }
 
 /**

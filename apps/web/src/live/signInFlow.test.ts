@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  CONVEX_ACCEPT_WAIT_MS,
   type ClerkResult,
   type EmailCodeClerk,
   problemFor,
   RESEND_COOLDOWN_MS,
   SignInFlow,
+  sessionGate,
   type SignInLike,
   type SignUpLike,
 } from "./signInFlow";
@@ -192,5 +194,21 @@ describe("Clerk error mapping (same table as iOS)", () => {
     expect(problemFor({ code: "network_error" })).toBe("network");
     expect(problemFor(new TypeError("Failed to fetch"))).toBe("network");
     expect(problemFor(apiError("something_new"))).toBe("failed");
+  });
+});
+
+describe("session gate after Clerk signs in", () => {
+  const base = { convexLoading: false, convexAuthenticated: false, clerkSignedIn: true };
+  it("keeps checking while Convex has not answered yet, instead of calling it refused", () => {
+    expect(sessionGate({ ...base, waitingMs: 0 })).toBe("checking");
+    expect(sessionGate({ ...base, waitingMs: CONVEX_ACCEPT_WAIT_MS - 1 })).toBe("checking");
+  });
+  it("says refused only after the wait, and signed in as soon as Convex accepts", () => {
+    expect(sessionGate({ ...base, waitingMs: CONVEX_ACCEPT_WAIT_MS })).toBe("refused");
+    expect(sessionGate({ ...base, convexAuthenticated: true, waitingMs: 0 })).toBe("signedIn");
+  });
+  it("shows sign-in when nobody is signed in, and checking while Convex loads", () => {
+    expect(sessionGate({ ...base, clerkSignedIn: false, waitingMs: 0 })).toBe("signIn");
+    expect(sessionGate({ ...base, convexLoading: true, waitingMs: 0 })).toBe("checking");
   });
 });

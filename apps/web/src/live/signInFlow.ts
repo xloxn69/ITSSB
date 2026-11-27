@@ -243,3 +243,27 @@ export class SignInFlow {
     for (const listener of this.listeners) listener();
   }
 }
+
+/**
+ * How long a Clerk session may wait for Convex to accept its token before the
+ * screen calls it refused. Convex reports "not authenticated" (not "loading")
+ * from the moment Clerk signs in until the server answers, so without this
+ * wait a slow connection would look like a rejection.
+ */
+export const CONVEX_ACCEPT_WAIT_MS = 15_000;
+
+export type SessionGate = "checking" | "signIn" | "refused" | "signedIn";
+
+/** What the signed-in shell shows, from Convex's and Clerk's views of the session. */
+export function sessionGate(input: {
+  convexLoading: boolean;
+  convexAuthenticated: boolean;
+  clerkSignedIn: boolean;
+  /** How long Clerk has been signed in while Convex was not authenticated. */
+  waitingMs: number;
+}): SessionGate {
+  if (input.convexLoading) return "checking";
+  if (input.convexAuthenticated) return "signedIn";
+  if (!input.clerkSignedIn) return "signIn";
+  return input.waitingMs < CONVEX_ACCEPT_WAIT_MS ? "checking" : "refused";
+}
