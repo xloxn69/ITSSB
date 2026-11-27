@@ -38,9 +38,8 @@ http.route({
   handler: httpAction(async (ctx, req) => {
     const secret = parseBearer(req.headers.get("Authorization"));
     if (!secret) return requestError(401, "UNAUTHENTICATED", "Device credential required.", false);
-    const deviceId = await ctx.runQuery(internal.devices.byCredentialHash, {
-      credentialHash: await sha256Hex(secret),
-    });
+    const credentialHash = await sha256Hex(secret);
+    const deviceId = await ctx.runQuery(internal.devices.byCredentialHash, { credentialHash });
     if (!deviceId) return requestError(401, "UNAUTHENTICATED", "Device credential rejected.", false);
 
     const text = await req.text();
@@ -70,11 +69,12 @@ http.route({
     try {
       results = await ctx.runMutation(internal.telemetry.ingestBatch, {
         deviceId,
+        credentialHash,
         events: envelope.events,
         nowMs,
       });
     } catch (error) {
-      // Revoked between the credential lookup and the commit.
+      // Revoked or rotated between the credential lookup and the commit.
       if (isDeviceNotAuthorized(error)) {
         return requestError(401, "UNAUTHENTICATED", "Device credential rejected.", false);
       }
@@ -92,9 +92,8 @@ http.route({
   handler: httpAction(async (ctx, req) => {
     const secret = parseBearer(req.headers.get("Authorization"));
     if (!secret) return requestError(401, "UNAUTHENTICATED", "Device credential required.", false);
-    const deviceId = await ctx.runQuery(internal.devices.byCredentialHash, {
-      credentialHash: await sha256Hex(secret),
-    });
+    const credentialHash = await sha256Hex(secret);
+    const deviceId = await ctx.runQuery(internal.devices.byCredentialHash, { credentialHash });
     if (!deviceId) return requestError(401, "UNAUTHENTICATED", "Device credential rejected.", false);
 
     const text = await req.text();
@@ -114,6 +113,7 @@ http.route({
     try {
       const outcome = await ctx.runMutation(internal.tripEvents.apply, {
         deviceId,
+        credentialHash,
         grantHash,
         request: body,
         nowMs: Date.now(),

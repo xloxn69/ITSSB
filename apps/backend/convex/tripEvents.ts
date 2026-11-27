@@ -12,6 +12,7 @@ import { ConvexError, v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx } from "./_generated/server";
 import { grantForDevice } from "./driverGrants";
+import { stillAuthorized } from "./lib/deviceAuth";
 import { isApprovedForNewRuns } from "./lib/routeVersions";
 
 /**
@@ -91,14 +92,18 @@ const REQUEST_CONFLICT = fail(409, "REQUEST_ID_CONFLICT", "This requestId was al
 export const apply = internalMutation({
   args: {
     deviceId: v.id("devices"),
+    /** Hash of the credential the request authenticated with; see stillAuthorized. */
+    credentialHash: v.optional(v.string()),
     grantHash: v.string(),
     // Parsed JSON from the HTTP body; validated below with the shared contract.
     request: v.any(),
     nowMs: v.number(),
   },
-  handler: async (ctx, { deviceId, grantHash, request, nowMs }): Promise<TripEventOutcome> => {
+  handler: async (ctx, { deviceId, credentialHash, grantHash, request, nowMs }): Promise<TripEventOutcome> => {
     const device = await ctx.db.get(deviceId);
-    if (!device || device.revoked) throw new ConvexError({ code: "DEVICE_NOT_AUTHORIZED" });
+    if (!device || !stillAuthorized(device, credentialHash)) {
+      throw new ConvexError({ code: "DEVICE_NOT_AUTHORIZED" });
+    }
     const checked = validateTripEventRequest(request);
     if (!checked.ok) return fail(400, checked.code, checked.message);
     const r = checked.request;

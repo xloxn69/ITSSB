@@ -43,3 +43,51 @@ describe("devices.rotateCredential", () => {
     expect(stored?.revoked).toBe(true);
   });
 });
+
+describe("a request in flight during rotation", () => {
+  // The HTTP action authenticates in one transaction and writes in another.
+  // These calls are the write step of a request that authenticated with the
+  // old secret just before the rotation committed.
+  it("cannot commit telemetry with the old credential", async () => {
+    const { t, deviceId, oldSecret } = await withDevice();
+    const oldHash = await sha256Hex(oldSecret);
+    expect(await t.query(internal.devices.byCredentialHash, { credentialHash: oldHash })).toBe(
+      deviceId,
+    );
+    const { deviceSecret } = await t.action(internal.devices.rotateCredential, { deviceId });
+
+    const event = { eventId: "5fe2a60d-7c11-45b9-995d-f50192adea42" };
+    await expect(
+      t.mutation(internal.telemetry.ingestBatch, {
+        deviceId,
+        credentialHash: oldHash,
+        events: [event],
+        nowMs: 0,
+      }),
+    ).rejects.toThrow(/DEVICE_NOT_AUTHORIZED/);
+    // The current credential still reaches per-event processing.
+    const results = await t.mutation(internal.telemetry.ingestBatch, {
+      deviceId,
+      credentialHash: await sha256Hex(deviceSecret),
+      events: [event],
+      nowMs: 0,
+    });
+    expect(results).toHaveLength(1);
+    expect(await t.run((ctx) => ctx.db.query("telemetryEvents").collect())).toEqual([]);
+  });
+
+  it("cannot start or end a run with the old credential", async () => {
+    const { t, deviceId, oldSecret } = await withDevice();
+    await t.action(internal.devices.rotateCredential, { deviceId });
+    await expect(
+      t.mutation(internal.tripEvents.apply, {
+        deviceId,
+        credentialHash: await sha256Hex(oldSecret),
+        grantHash: "0".repeat(64),
+        request: {},
+        nowMs: 0,
+      }),
+    ).rejects.toThrow(/DEVICE_NOT_AUTHORIZED/);
+    expect(await t.run((ctx) => ctx.db.query("runs").collect())).toEqual([]);
+  });
+});
