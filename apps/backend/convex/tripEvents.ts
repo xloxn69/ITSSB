@@ -14,6 +14,7 @@ import { internalMutation, type MutationCtx } from "./_generated/server";
 import { grantForDevice } from "./driverGrants";
 import { stillAuthorized } from "./lib/deviceAuth";
 import { isApprovedForNewRuns } from "./lib/routeVersions";
+import { stopJobsForRun } from "./notificationJobs";
 
 /**
  * Online run start and end (docs/07 §8, docs/08 §6), committed in one
@@ -250,6 +251,8 @@ async function endRun(
     endedByDriverUserId: grant.driverUserId,
     endGrantId: grant._id,
   });
+  // A completed run's alerts are obsolete; stop their delivery jobs now.
+  await stopJobsForRun(ctx, run._id, nowMs);
   await ctx.db.insert("auditLog", {
     actor: { kind: "device", deviceId: device._id },
     action: "runs.end",

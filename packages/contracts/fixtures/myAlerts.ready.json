@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "status": "ready",
+  "serverNowMs": 1795609085500,
+  "alerts": [
+    {
+      "alertId": "demo_alert_001",
+      "type": "approaching",
+      "assignmentId": "demo_assignment_001",
+      "runId": "demo_run_001",
+      "stopLabel": "Oak & Pine",
+      "createdAtMs": 1795609085450,
+      "predictedArrivalAtMs": 1795609325000,
+      "predictionGeneratedAtMs": 1795609085450
+    }
+  ]
+}

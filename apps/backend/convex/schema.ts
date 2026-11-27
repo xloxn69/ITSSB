@@ -417,6 +417,93 @@ export default defineSchema({
     .index("by_guardian_request", ["guardianTokenIdentifier", "requestId"])
     .index("by_guardian", ["guardianTokenIdentifier"])
     .index("by_status", ["status", "submittedAtMs"]),
+   * A person's alert preference for one assignment (docs/10 §8). Separate
+   * from the phone's notification permission, which `pushTokens` records.
+   */
+  notificationPreferences: defineTable({
+    userId: v.id("users"),
+    assignmentId: v.id("assignments"),
+    approachingEnabled: v.boolean(),
+    approachingMinutes: v.number(),
+    updatedAtMs: v.number(),
+    lastRequestId: v.string(),
+  }).index("by_user_assignment", ["userId", "assignmentId"]),
+
+  /**
+   * One app installation's APNs token for the signed-in account. A token
+   * belongs to at most one active account; registering it for another
+   * account deactivates the old association.
+   */
+  pushTokens: defineTable({
+    userId: v.id("users"),
+    installationId: v.string(),
+    token: v.union(v.string(), v.null()),
+    environment: v.union(v.literal("sandbox"), v.literal("production")),
+    permission: v.union(
+      v.literal("authorized"),
+      v.literal("provisional"),
+      v.literal("denied"),
+      v.literal("not_determined"),
+    ),
+    /** False once the token moved, was replaced, or APNs rejected it permanently. */
+    active: v.boolean(),
+    updatedAtMs: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_installation", ["installationId"])
+    .index("by_token", ["token"]),
+
+  /**
+   * One logical alert: recipient, run, assigned stop, and type
+   * (`logicalKey`). Created at most once, so a fluctuating estimate never
+   * repeats it. Also the in-app inbox entry.
+   */
+  alerts: defineTable({
+    logicalKey: v.string(),
+    type: v.literal("approaching"),
+    userId: v.id("users"),
+    assignmentId: v.id("assignments"),
+    runId: v.id("runs"),
+    stopId: v.id("stops"),
+    createdAtMs: v.number(),
+    predictedArrivalAtMs: v.number(),
+    predictionGeneratedAtMs: v.number(),
+    sourceEventId: v.string(),
+  })
+    .index("by_logical_key", ["logicalKey"])
+    .index("by_user_created", ["userId", "createdAtMs"]),
+
+  /**
+   * The delivery outbox (docs/10 §9): one job per alert and push token,
+   * written in the same transaction as the alert, before any send. A worker
+   * claims it under a lease; every claim rechecks the run, access,
+   * preference, and token.
+   */
+  notificationJobs: defineTable({
+    alertId: v.id("alerts"),
+    userId: v.id("users"),
+    runId: v.id("runs"),
+    pushTokenId: v.id("pushTokens"),
+    state: v.union(
+      v.literal("pending"),
+      v.literal("in_progress"),
+      v.literal("provider_accepted"),
+      v.literal("retryable_failure"),
+      v.literal("permanent_failure"),
+      v.literal("expired"),
+      v.literal("cancelled"),
+    ),
+    attempts: v.number(),
+    nextAttemptAtMs: v.number(),
+    /** After this the alert is useless; never send it. */
+    expiresAtMs: v.number(),
+    leaseId: v.optional(v.string()),
+    leaseExpiresAtMs: v.optional(v.number()),
+    endReason: v.optional(v.string()),
+    updatedAtMs: v.number(),
+  })
+    .index("by_state_next", ["state", "nextAttemptAtMs"])
+    .index("by_run_state", ["runId", "state"]),
 
   /** Append-only record of sensitive actions. Never update or delete rows. */
   auditLog: defineTable({

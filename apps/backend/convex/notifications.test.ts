@@ -1,4 +1,5 @@
 import { MAX_DELIVERY_ATTEMPTS } from "@itssb/contracts";
+import { myAlertsReady, myPreferenceDefault, registerDeviceRegistered } from "@itssb/contracts/fixtures";
 import { convexTest } from "convex-test";
 import { describe, expect, it } from "vitest";
 import { api, internal } from "./_generated/api";
@@ -140,6 +141,19 @@ async function register(s: Setup, who: string, token: string, installationId = c
   });
 }
 
+/** Same keys, recursively, as a canonical fixture (values and IDs differ). */
+function shape(value: unknown): unknown {
+  if (Array.isArray(value)) return value.length > 0 ? [shape(value[0])] : [];
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .toSorted(([a], [b]) => a.localeCompare(b))
+        .map(([k, v]) => [k, shape(v)]),
+    );
+  }
+  return value === null ? null : typeof value;
+}
+
 const alerts = (s: Setup) => s.t.run((ctx) => ctx.db.query("alerts").collect());
 const jobs = (s: Setup) => s.t.run((ctx) => ctx.db.query("notificationJobs").collect());
 
@@ -157,6 +171,7 @@ describe("notification preferences", () => {
       status: "ready",
       preference: { approachingEnabled: false, approachingMinutes: 5, updatedAtMs: null },
     });
+    expect(shape(before)).toEqual(shape(myPreferenceDefault));
     expect(await enable(s, STUDENT, 7)).toMatchObject({ status: "saved", preference: { approachingMinutes: 7 } });
     const after = await student.query(api.notifications.myPreference, { assignmentId: s.assignmentId });
     expect(after).toMatchObject({ preference: { approachingEnabled: true, approachingMinutes: 7 } });
@@ -250,6 +265,7 @@ describe("approaching alerts", () => {
     expect(await jobs(s)).toEqual([]);
     const inbox = await s.t.withIdentity({ tokenIdentifier: STUDENT }).query(api.notifications.myAlerts, {});
     expect(inbox).toMatchObject({ status: "ready", alerts: [{ type: "approaching", stopLabel: "Stop 3" }] });
+    expect(shape(inbox)).toEqual(shape(myAlertsReady));
     if (inbox.status !== "ready") return;
     expect(inbox.alerts[0]!.predictionGeneratedAtMs).toBeGreaterThan(0);
     const other = await s.t.withIdentity({ tokenIdentifier: GUARDIAN }).query(api.notifications.myAlerts, {});
@@ -257,20 +273,20 @@ describe("approaching alerts", () => {
   });
 });
 
-describe("delivery jobs", () => {
-  async function oneJob() {
-    const s = await setup();
-    await enable(s, STUDENT);
-    await register(s, STUDENT, TOKEN_A);
-    await approach(s);
-    const [job] = await jobs(s);
-    if (!job) throw new Error("no job");
-    return { s, jobId: job._id };
-  }
-  const claim = (s: Setup, jobId: Id<"notificationJobs">, nowMs: number, leaseId = crypto.randomUUID()) =>
-    s.t.mutation(internal.notificationJobs.claim, { jobId, leaseId, nowMs }).then((r) => ({ r, leaseId }));
-  const job = (s: Setup, jobId: Id<"notificationJobs">) => s.t.run((ctx) => ctx.db.get(jobId));
+async function oneJob() {
+  const s = await setup();
+  await enable(s, STUDENT);
+  await register(s, STUDENT, TOKEN_A);
+  await approach(s);
+  const [job] = await jobs(s);
+  if (!job) throw new Error("no job");
+  return { s, jobId: job._id };
+}
+const claim = (s: Setup, jobId: Id<"notificationJobs">, nowMs: number, leaseId = crypto.randomUUID()) =>
+  s.t.mutation(internal.notificationJobs.claim, { jobId, leaseId, nowMs }).then((r) => ({ r, leaseId }));
+const job = (s: Setup, jobId: Id<"notificationJobs">) => s.t.run((ctx) => ctx.db.get(jobId));
 
+describe("delivery jobs", () => {
   it("claims once per lease; the payload carries no student details", async () => {
     const { s, jobId } = await oneJob();
     const first = await claim(s, jobId, s.NOW);
@@ -292,9 +308,12 @@ describe("delivery jobs", () => {
     const { s, jobId } = await oneJob();
     let nowMs = s.NOW;
     const waits: number[] = [];
+    const states: string[] = [];
+    const attempts: unknown[] = [];
+    const dueEarly: unknown[] = [];
     for (let attempt = 1; attempt <= MAX_DELIVERY_ATTEMPTS; attempt++) {
       const c = await claim(s, jobId, nowMs);
-      expect(c.r).toMatchObject({ attempt });
+      attempts.push((c.r as { attempt?: number } | null)?.attempt);
       await s.t.mutation(internal.notificationJobs.record, {
         jobId,
         leaseId: c.leaseId,
@@ -302,15 +321,15 @@ describe("delivery jobs", () => {
         nowMs,
       });
       const row = (await job(s, jobId))!;
-      if (attempt < MAX_DELIVERY_ATTEMPTS) {
-        expect(row.state).toBe("retryable_failure");
-        expect((await claim(s, jobId, nowMs)).r).toBeNull(); // not due yet
-        waits.push(row.nextAttemptAtMs - nowMs);
-        nowMs = row.nextAttemptAtMs;
-      } else {
-        expect(row.state).toBe("permanent_failure");
-      }
+      states.push(row.state);
+      if (row.state !== "retryable_failure") break;
+      dueEarly.push((await claim(s, jobId, nowMs)).r); // not due yet
+      waits.push(row.nextAttemptAtMs - nowMs);
+      nowMs = row.nextAttemptAtMs;
     }
+    expect(attempts).toEqual([1, 2, 3, 4, 5]);
+    expect(states).toEqual([...Array(MAX_DELIVERY_ATTEMPTS - 1).fill("retryable_failure"), "permanent_failure"]);
+    expect(dueEarly).toEqual(Array(MAX_DELIVERY_ATTEMPTS - 1).fill(null));
     expect(waits).toEqual(waits.toSorted((a, b) => a - b));
     expect((await claim(s, jobId, nowMs + 3600_000)).r).toBeNull();
   });
@@ -356,7 +375,7 @@ describe("delivery jobs", () => {
       },
       nowMs: Date.now(),
     });
-    expect(outcome).toMatchObject({ status: 200 });
+    expect(outcome).toMatchObject({ ok: true });
     expect(await job(s, jobId)).toMatchObject({ state: "cancelled", endReason: "run_not_active" });
     expect((await claim(s, jobId, Date.now())).r).toBeNull();
   });
@@ -422,7 +441,9 @@ describe("device registration", () => {
   it("re-registering an installation replaces its token; denied permission disables push", async () => {
     const s = await setup();
     const installationId = crypto.randomUUID();
-    expect(await register(s, STUDENT, TOKEN_A, installationId)).toMatchObject({ status: "registered", pushEnabled: true });
+    const first = await register(s, STUDENT, TOKEN_A, installationId);
+    expect(first).toMatchObject({ status: "registered", pushEnabled: true });
+    expect(shape(first)).toEqual(shape(registerDeviceRegistered));
     await register(s, STUDENT, TOKEN_B, installationId);
     const rows = await s.t.run((ctx) => ctx.db.query("pushTokens").collect());
     expect(rows.filter((r) => r.active).map((r) => r.token)).toEqual([TOKEN_B]);
