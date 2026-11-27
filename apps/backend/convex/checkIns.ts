@@ -13,7 +13,7 @@ import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, type QueryCtx, query } from "./_generated/server";
 import { currentCheckIn, currentOf, historyFor, receiptFor, recordOnce, storeReceipt, toRecord } from "./lib/attendance";
-import { getTrackableAssignment, getUser } from "./lib/authz";
+import { getTrackableAssignment, getUser, missingUserReason } from "./lib/authz";
 import { isRequestId, tokenProblem } from "./lib/family";
 import { audit, denied, staffCaller } from "./lib/staff";
 import { resolveToken } from "./lib/tokens";
@@ -52,7 +52,7 @@ export const record = mutation({
   args: { requestId: v.string(), token: v.string(), runId: v.string() },
   handler: async (ctx, { requestId, token, runId }): Promise<RecordCheckInResult> => {
     const user = await getUser(ctx);
-    if (!user) return denied("unauthenticated");
+    if (!user) return denied(await missingUserReason(ctx));
     if (!isRequestId(requestId)) return rejected("invalid_request", "Scan the code again.");
 
     // A retry after a lost response returns the original outcome, even if
@@ -102,7 +102,7 @@ export const forAssignment = query({
   args: { assignmentId: v.string() },
   handler: async (ctx, { assignmentId }): Promise<AssignmentCheckInResult> => {
     const user = await getUser(ctx);
-    if (!user) return denied("unauthenticated");
+    if (!user) return denied(await missingUserReason(ctx));
     const access = await getTrackableAssignment(ctx, user, assignmentId);
     if (!access) return denied("not_permitted");
     const run = await ctx.db

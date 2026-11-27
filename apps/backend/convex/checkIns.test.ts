@@ -210,7 +210,7 @@ describe("checkIns:record (student QR claim)", () => {
 
   it("a pending or signed-out account cannot check in", async () => {
     const { t, runA } = await setup();
-    expect(await scan(t, PENDING, runA)).toMatchObject({ status: "access_unavailable", reason: "unauthenticated" });
+    expect(await scan(t, PENDING, runA)).toMatchObject({ status: "access_unavailable", reason: "not_permitted" });
     expect(await t.mutation(api.checkIns.record, { requestId: "anon-000001", token: CHALLENGE, runId: runA })).toMatchObject({
       status: "access_unavailable",
     });
