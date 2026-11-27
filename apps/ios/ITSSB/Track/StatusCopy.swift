@@ -18,7 +18,10 @@ struct StatusCopy: Equatable {
         let stop = run.assignedStop.label
         switch presentation {
         case .live(.fresh):
-            return StatusCopy(title: "\(run.busLabel) is on the way", detail: "Heading toward \(stop).",
+            // Location only: route progress is unknown until the backend tracks it (docs/08 §8),
+            // so never claim the bus is approaching or hasn't passed the stop.
+            return StatusCopy(title: "\(run.busLabel) is reporting its location",
+                              detail: "Shown on the map with your stop, \(stop).",
                               age: age, systemImage: "location.fill", tone: .fresh)
         case .live(.aging):
             return StatusCopy(title: "Waiting for an update",

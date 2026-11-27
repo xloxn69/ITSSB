@@ -17,7 +17,7 @@ final class StatusCopyTests: XCTestCase {
     func testFresh() {
         let fresh = copy(secondsAgo: 4)
         XCTAssertEqual(fresh.tone, .fresh)
-        XCTAssertEqual(fresh.title, "Bus 12 is on the way")
+        XCTAssertEqual(fresh.title, "Bus 12 is reporting its location")
         XCTAssertEqual(fresh.age, "Updated just now")
     }
 
@@ -35,7 +35,24 @@ final class StatusCopyTests: XCTestCase {
         XCTAssertTrue(stale.detail.contains("Reported at"), stale.detail)
         XCTAssertTrue(stale.detail.contains(StatusCopy.capturedTime(now.addingTimeInterval(-300), timeZone: utc)))
         XCTAssertEqual(stale.age, "Updated 5 min ago")
-        XCTAssertFalse(stale.title.localizedCaseInsensitiveContains("on the way"))
+        XCTAssertFalse(stale.title.localizedCaseInsensitiveContains("reporting"))
+    }
+
+    /// Fresh coordinates are not proof of progress: no approach claim for unknown or passed stops.
+    func testFreshCopyMakesNoProgressClaim() {
+        for status in [StopStatus.unknown, .passed] {
+            let stop = AssignedStop(stopId: "s", label: "Oak & Pine",
+                                    coordinate: PreviewFixtures.stop.coordinate, status: status)
+            let base = PreviewFixtures.run(position: PreviewFixtures.position(capturedSecondsAgo: 4, now: now))
+            let run = TrackedRun(runId: base.runId, state: .active, liveRevision: 1, busLabel: "Bus 12",
+                                 lastDeviceContactAt: nil, gpsStatus: .valid, position: base.position,
+                                 assignedStop: stop)
+            let copy = StatusCopy.make(.live(.fresh), run: run, clock: .deviceOnly, now: now, timeZone: utc)
+            for claim in ["on the way", "heading", "approach", "arriving"] {
+                XCTAssertFalse((copy.title + copy.detail).localizedCaseInsensitiveContains(claim),
+                               "\(status): \(copy.title) \(copy.detail)")
+            }
+        }
     }
 
     func testNoPositionHasNoAge() {
