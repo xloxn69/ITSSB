@@ -16,6 +16,13 @@ const ref = {
   myRun: makeFunctionReference<"query", { assignmentId: string }, unknown>("tracking:myRun"),
   myRoute: makeFunctionReference<"query", { assignmentId: string }, unknown>("tracking:myRoute"),
   serverTime: makeFunctionReference<"mutation", Record<string, never>, unknown>("tracking:serverTime"),
+  myAlerts: makeFunctionReference<"query", Record<string, never>, unknown>("notifications:myAlerts"),
+  myPreference: makeFunctionReference<"query", { assignmentId: string }, unknown>("notifications:myPreference"),
+  setPreferences: makeFunctionReference<
+    "mutation",
+    { requestId: string; assignmentId: string; approachingEnabled: boolean; approachingMinutes: number },
+    unknown
+  >("notifications:setPreferences"),
 };
 
 /** The part of `ConvexReactClient` this source uses, so tests can fake it. */
@@ -65,6 +72,9 @@ export function convexSource(client: LiveClient): TrackingSource {
     assignments: (onValue, onError) => watch(ref.myAssignments, {}, onValue, onError),
     run: (assignmentId, onValue, onError) => watch(ref.myRun, { assignmentId }, onValue, onError),
     route: (assignmentId, onValue, onError) => watch(ref.myRoute, { assignmentId }, onValue, onError),
+    alerts: (onValue, onError) => watch(ref.myAlerts, {}, onValue, onError),
+    preference: (assignmentId, onValue, onError) => watch(ref.myPreference, { assignmentId }, onValue, onError),
+    setPreference: (args) => client.mutation(ref.setPreferences, args),
     connection(onChange) {
       if (!client.subscribeToConnectionState || !client.connectionState) return () => {};
       // Before the first connection, queries are still loading; nothing to doubt yet.

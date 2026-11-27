@@ -18,11 +18,15 @@ import {
   type StopStatus,
 } from "@itssb/contracts";
 import type {
+  AlertsSnapshot,
   AssignedStop,
   AssignmentsSnapshot,
   Coordinate,
   LivePosition,
+  Preference,
+  PreferenceSnapshot,
   RouteSnapshot,
+  RunEta,
   RunSnapshot,
   TrackedRun,
 } from "./model";
@@ -123,6 +127,27 @@ export function position(raw: unknown, serverNowMs: number): LivePosition | null
   }
 }
 
+/** Null for a missing or unbelievable estimate; the rest of the run stays usable. */
+export function eta(raw: unknown): RunEta | null {
+  if (raw === null || raw === undefined) return null;
+  try {
+    const e = obj(raw, "eta");
+    const arrivalAtMs = timestamp(e.arrivalAtMs, "eta.arrivalAtMs");
+    const generatedAtMs = timestamp(e.generatedAtMs, "eta.generatedAtMs");
+    const validUntilMs = timestamp(e.validUntilMs, "eta.validUntilMs");
+    if (validUntilMs <= generatedAtMs) return null;
+    return {
+      arrivalAtMs,
+      generatedAtMs,
+      validUntilMs,
+      algorithmVersion: str(e.algorithmVersion, "eta.algorithmVersion"),
+      sourceEventId: str(e.sourceEventId, "eta.sourceEventId"),
+    };
+  } catch {
+    return null;
+  }
+}
+
 function stop(raw: unknown, requireStatus: boolean): AssignedStop {
   const s = obj(raw, "assignedStop");
   let status: StopStatus = "unknown";
@@ -151,6 +176,8 @@ function run(raw: unknown, serverNowMs: number): TrackedRun {
     gpsStatus,
     position: r.lastPosition === null ? null : position(r.lastPosition, serverNowMs),
     assignedStop: stop(r.assignedStop, true),
+    nextStopId: typeof r.nextStopId === "string" ? r.nextStopId : null,
+    eta: eta(r.eta),
   };
 }
 
@@ -228,6 +255,62 @@ export function assignmentsSnapshot(raw: unknown): AssignmentsSnapshot {
         }),
       };
     }
+    case "access_unavailable":
+      return { kind: "access_unavailable", reason: reason(env) };
+    default:
+      throw new MappingError("status");
+  }
+}
+
+export function alertsSnapshot(raw: unknown): AlertsSnapshot {
+  const env = obj(raw, "myAlerts");
+  checkVersion(env);
+  switch (env.status) {
+    case "ready": {
+      if (!Array.isArray(env.alerts)) throw new MappingError("alerts");
+      return {
+        kind: "ready",
+        alerts: env.alerts.map((a) => {
+          const item = obj(a, "alerts");
+          oneOf(item.type, ["approaching"] as const, "alerts.type");
+          return {
+            alertId: str(item.alertId, "alerts.alertId"),
+            assignmentId: str(item.assignmentId, "alerts.assignmentId"),
+            runId: str(item.runId, "alerts.runId"),
+            stopLabel: str(item.stopLabel, "alerts.stopLabel"),
+            createdAtMs: timestamp(item.createdAtMs, "alerts.createdAtMs"),
+            predictedArrivalAtMs: timestamp(item.predictedArrivalAtMs, "alerts.predictedArrivalAtMs"),
+            predictionGeneratedAtMs: timestamp(item.predictionGeneratedAtMs, "alerts.predictionGeneratedAtMs"),
+          };
+        }),
+      };
+    }
+    case "access_unavailable":
+      return { kind: "access_unavailable", reason: reason(env) };
+    default:
+      throw new MappingError("status");
+  }
+}
+
+function preference(raw: unknown): Preference {
+  const p = obj(raw, "preference");
+  if (typeof p.approachingEnabled !== "boolean") throw new MappingError("preference.approachingEnabled");
+  return {
+    assignmentId: str(p.assignmentId, "preference.assignmentId"),
+    approachingEnabled: p.approachingEnabled,
+    approachingMinutes: safeWhole(p.approachingMinutes, "preference.approachingMinutes"),
+    updatedAtMs: p.updatedAtMs === null ? null : timestamp(p.updatedAtMs, "preference.updatedAtMs"),
+  };
+}
+
+/** `notifications:myPreference` and the `saved` result of `notifications:setPreferences`. */
+export function preferenceSnapshot(raw: unknown): PreferenceSnapshot {
+  const env = obj(raw, "myPreference");
+  checkVersion(env);
+  switch (env.status) {
+    case "ready":
+    case "saved":
+      return { kind: "ready", preference: preference(env.preference) };
     case "access_unavailable":
       return { kind: "access_unavailable", reason: reason(env) };
     default:

@@ -8,7 +8,11 @@
  */
 import type { MyAssignmentsResult, MyRunResult } from "@itssb/contracts";
 import {
+  myAlertsEmpty,
+  myAlertsReady,
   myAssignmentsReady,
+  myPreferenceDefault,
+  myPreferenceReady,
   myRouteReady,
   myRunReady,
 } from "@itssb/contracts/fixtures";
@@ -16,6 +20,9 @@ import { SessionExpiredError, type TrackingSource } from "../tracking/store";
 
 export const FIXTURE_SCENARIOS = [
   "live",
+  "eta",
+  "at-stop",
+  "passed",
   "aging",
   "stale",
   "no-fix",
@@ -39,6 +46,9 @@ const readyAssignments = myAssignmentsReady as Extract<MyAssignmentsResult, { st
 
 const AGE_MS: Partial<Record<FixtureScenario, number>> = {
   live: 3_000,
+  eta: 3_000,
+  "at-stop": 3_000,
+  passed: 3_000,
   "two-students": 3_000,
   aging: 45_000,
   stale: 6 * 60_000,
@@ -61,6 +71,24 @@ function runFor(scenario: FixtureScenario, assignmentId: string): unknown {
   };
   const run = { ...readyRun.run, lastDeviceContactAtMs: captured + 400, lastPosition: position, eta: null };
   switch (scenario) {
+    case "eta": {
+      // The canonical estimate, shifted to now: 6 minutes out, made 2 s ago.
+      const e = readyRun.run.eta!;
+      Object.assign(run, {
+        eta: {
+          ...e,
+          arrivalAtMs: captured + 6 * 60_000,
+          generatedAtMs: now - 2_000,
+          validUntilMs: captured + 60_000,
+          sourceEventId: position?.eventId ?? e.sourceEventId,
+        },
+      });
+      break;
+    }
+    case "at-stop":
+    case "passed":
+      Object.assign(run, { assignedStop: { ...readyRun.run.assignedStop, status: scenario === "at-stop" ? "at_stop" : "passed" } });
+      break;
     case "no-fix":
       Object.assign(run, { gpsStatus: "no_fix", lastDeviceContactAtMs: now - 2_000 });
       break;
@@ -114,6 +142,30 @@ export function fixtureSource(scenario: FixtureScenario): TrackingSource {
       return () => clearTimeout(t);
     },
     serverTime: async () => Date.now(),
+    alerts(onValue) {
+      const base = scenario === "eta" ? myAlertsReady : myAlertsEmpty;
+      const now = Date.now();
+      const alerts =
+        base.status === "ready"
+          ? base.alerts.map((a) => ({ ...a, createdAtMs: now - 70_000, predictionGeneratedAtMs: now - 70_000, predictedArrivalAtMs: now + 4 * 60_000 }))
+          : [];
+      const t = setTimeout(() => onValue({ ...base, serverNowMs: now, alerts }), 0);
+      return () => clearTimeout(t);
+    },
+    preference(assignmentId, onValue) {
+      const base = scenario === "eta" ? myPreferenceReady : myPreferenceDefault;
+      const t = setTimeout(() => onValue({ ...base, serverNowMs: Date.now(), preference: { ...(base as { preference: object }).preference, assignmentId } }), 0);
+      return () => clearTimeout(t);
+    },
+    async setPreference(args) {
+      // Fixture mode never writes anywhere; it echoes the choice as saved.
+      return {
+        schemaVersion: 1,
+        status: "saved",
+        serverNowMs: Date.now(),
+        preference: { assignmentId: args.assignmentId, approachingEnabled: args.approachingEnabled, approachingMinutes: args.approachingMinutes, updatedAtMs: Date.now() },
+      };
+    },
     connection(onChange) {
       if (!scenario.startsWith("offline")) return () => {};
       const t = setTimeout(() => onChange(false), 50);

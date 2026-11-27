@@ -3,14 +3,17 @@ import { readInstant } from "../tracking/clock";
 import {
   capturedTime,
   dimsMarker,
+  etaView,
   livePresentation,
   showsMarker,
   statusCopy,
+  stopProgressText,
   whileDisconnected,
 } from "../tracking/presentation";
 import { connectionNotice, type TrackContext, type TrackStore } from "../tracking/store";
 import type { TrackedRun } from "../tracking/model";
 import type { ServerClock } from "../tracking/clock";
+import { AlertsPanel } from "./AlertsPanel";
 import { RouteDiagram } from "./RouteDiagram";
 
 /** Re-renders every second so the age advances without a new update (docs/06 §9). */
@@ -129,6 +132,9 @@ export function TrackPage({ store, onSignIn }: { store: TrackStore; onSignIn: ()
             );
         }
       })()}
+      {(state.kind === "tracking" || state.kind === "no_active_run") && (
+        <AlertsPanel source={store.source} assignmentId={state.context.assignment.assignmentId} />
+      )}
     </div>
   );
 }
@@ -160,6 +166,9 @@ function Tracking({
   const presentation = whileDisconnected(livePresentation(run, clock, now), connectionLost);
   const copy = statusCopy(presentation, run, clock, now);
   const marker = showsMarker(presentation) ? run.position : null;
+  // Only while the bus is live: never while disconnected, stale, or without a GPS fix.
+  const eta = !connectionLost && presentation.kind === "live" ? etaView(run, clock, now) : null;
+  const progress = stopProgressText(run);
   return (
     <>
       <ContextHeader context={context} />
@@ -178,8 +187,19 @@ function Tracking({
               <h2>{copy.title}</h2>
               <p>{copy.detail}</p>
               {copy.age && <p className="muted age">{copy.age}</p>}
+              {progress && <p>{progress}</p>}
             </div>
           </section>
+          {eta && (
+            <section className="card stack" style={{ gap: "var(--space-xs)" }} aria-live="polite">
+              <p className="muted small">Estimated arrival at your stop</p>
+              <h2>{eta.headline}</h2>
+              <p>
+                Around <span className="age">{eta.arrivalText}</span>
+              </p>
+              <p className="muted small age">{eta.madeText}. Estimates can change.</p>
+            </section>
+          )}
           <section className="card">
             <dl className="facts">
               <dt>Bus</dt>
