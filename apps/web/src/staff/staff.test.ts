@@ -105,6 +105,9 @@ describe("fixture credential actions", () => {
     expect(rotated.kind).toBe("issued");
     const refused = credentialOutcome(await source.act("fleet:rotateDeviceCredential", { deviceId: "demo_device_004" }));
     expect(refused.kind).toBe("refused");
+  });
+});
+
 describe("sweepSummary", () => {
   it("says what a retention sweep deleted, and nothing for an unreadable record", () => {
     expect(sweepSummary("telemetry:1440,live:2")).toBe("1440 positions and 2 last-known positions deleted");

@@ -1,9 +1,9 @@
 import {
   type CredentialIssuedResult,
-  type CredentialRefusalCode,
   type DeviceDiagnostics,
-  type DeviceSummary,
   type DiagnosticsResult,
+  type CredentialRefusalCode,
+  type DeviceSummary,
   type FleetMutationResult,
   type ListDevicesResult,
   type ListDriversResult,
@@ -314,6 +314,9 @@ export const createDevice = internalMutation({
     });
     await audit(ctx, caller.user, "device.provision", "device", deviceId, "allowed");
     return { status: "ok", deviceId };
+  },
+});
+
 /**
  * Staff diagnostics (docs/12 §11): which release the deployment runs, the
  * retention policy and its last sweep, and per device: contact age, run IDs,
