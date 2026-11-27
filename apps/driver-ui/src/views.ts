@@ -106,7 +106,7 @@ export function startupView(o: Observed): HTMLElement {
 }
 
 /** D05: driver dashboard with the four original actions. */
-export function dashboardView(o: Observed, nav: Nav): HTMLElement {
+export function dashboardView(o: Observed, nav: Nav, extra: (HTMLElement | null)[] = []): HTMLElement {
   return h(
     "main",
     { class: "page" },
@@ -128,7 +128,7 @@ export function dashboardView(o: Observed, nav: Nav): HTMLElement {
         );
       }),
     ),
-    h("div", { class: "row" }, h("button", { class: "btn", onclick: () => nav.go("D21") }, "Diagnostics")),
+    h("div", { class: "row" }, h("button", { class: "btn", onclick: () => nav.go("D21") }, "Diagnostics"), ...extra),
   );
 }
 

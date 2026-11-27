@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ACTIONS, type ActionId, actionAvailability, selectScreen } from "./screens.js";
+import { ACTIONS, type ActionId, actionAvailability, editBlocked, selectScreen } from "./screens.js";
 import type { CapabilitiesPart, DeviceSnapshot } from "./snapshot.js";
 import { observed, snapshot } from "./testing.js";
 
@@ -99,5 +99,53 @@ describe("startup", () => {
   it("goes to the dashboard once it answers", () => {
     expect(selectScreen(observed(snapshot()), null)).toBe("D05");
     expect(selectScreen(observed(snapshot()), "D21")).toBe("D21");
+  });
+});
+
+describe("route recording screens", () => {
+  const recording = {
+    draftId: "00000000-0000-4000-8000-000000000001",
+    name: "Demo Route North",
+    direction: "to_school",
+    status: "recording",
+    submission: "not_submitted",
+    startedAtMs: 1_795_608_000_000,
+    finishedAtMs: null,
+    pointCount: 10,
+    gapCount: 0,
+    lastPointCapturedAtMs: 1_795_608_009_000,
+    stopCount: 1,
+  } as const;
+
+  it("a recording that is moving forces the read-only recording view", () => {
+    const o = observed(ready({ recording, motion: { state: "moving", parked: false } }));
+    expect(selectScreen(o, null)).toBe("D08");
+    expect(selectScreen(o, "D05")).toBe("D08");
+    expect(selectScreen(o, "D09")).toBe("D08");
+    expect(editBlocked(o)).toBe("Stop safely and confirm the bus is parked.");
+  });
+
+  it("an active run outranks recording and never shows the recording view while moving", () => {
+    const o = observed(ready({ recording, run: activeRun, motion: { state: "moving", parked: false } }));
+    expect(selectScreen(o, "D08")).toBe("D13");
+  });
+
+  it("parked opens editing; a locked driver is sent to unlock", () => {
+    expect(selectScreen(observed(ready({ recording })), "D09")).toBe("D09");
+    expect(editBlocked(observed(ready({ recording })))).toBeNull();
+    const locked = observed(ready({ session: { unlocked: false } }));
+    expect(selectScreen(locked, "D06")).toBe("D04");
+    expect(selectScreen(locked, "D07")).toBe("D04");
+  });
+
+  it("a new recording cannot be opened while one is in progress or while not parked", () => {
+    expect(selectScreen(observed(ready({ recording })), "D07")).toBe("D08");
+    expect(selectScreen(observed(ready({ motion: { state: "stopped", parked: false } })), "D07")).toBe("D05");
+  });
+
+  it("Record Route reopens an in-progress recording even when not parked", () => {
+    const o = observed(ready({ recording, motion: { state: "unknown", parked: false } }));
+    expect(actionAvailability(o, "recordRoute").enabled).toBe(true);
+    expect(actionAvailability(o, "startRoute").enabled).toBe(false);
   });
 });

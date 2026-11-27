@@ -90,6 +90,42 @@ export interface CapabilitiesPart {
   showStudents?: Capability;
 }
 
+/** The route draft being recorded (device-side only until the server accepts drafts). */
+export interface DraftSummary {
+  draftId: string;
+  name: string;
+  direction: "to_school" | "from_school";
+  status: "recording" | "finished";
+  submission: "not_submitted";
+  startedAtMs: number;
+  finishedAtMs: number | null;
+  pointCount: number;
+  gapCount: number;
+  lastPointCapturedAtMs: number | null;
+  stopCount: number;
+}
+
+export interface DraftStop {
+  stopId: string;
+  position: number;
+  name: string;
+  latitude: number;
+  longitude: number;
+  capturedAtMs: number;
+}
+
+export interface PathPoint {
+  capturedAtMs: number;
+  latitude: number;
+  longitude: number;
+  gapBefore: boolean;
+}
+
+export interface DraftDetail extends DraftSummary {
+  stops: DraftStop[];
+  path: PathPoint[];
+}
+
 export interface DeviceSnapshot {
   schemaVersion: number;
   generatedAtMs: number;
@@ -106,6 +142,8 @@ export interface DeviceSnapshot {
   session?: SessionPart;
   /** Absent: every action is unavailable. */
   capabilities?: CapabilitiesPart;
+  /** The draft being recorded, shown only to an unlocked driver. */
+  recording?: DraftSummary | null;
 }
 
 /**
