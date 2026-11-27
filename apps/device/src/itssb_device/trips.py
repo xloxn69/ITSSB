@@ -10,10 +10,12 @@ The flow is fixed here; only the network call is pluggable:
 4. An unknown outcome (no answer) leaves the request pending; the next
    attempt resends the SAME requestId so the backend can return the same run.
 
-The backend does not implement `POST /device/v1/trip-events` yet, so the
-only starter shipped is `BackendNotReadyRunStarter`, which honestly reports
-that online start is unavailable and changes nothing. Swap in an HTTP
-implementation once the endpoint exists; the flow above stays the same.
+The backend implements `POST /device/v1/trip-events` (start and end, with
+a driver operating grant). The only starter shipped here is still
+`BackendNotReadyRunStarter`, which honestly reports that online start is
+unavailable and changes nothing; an HTTP `RunStarter` is the next device
+step, and the flow above stays the same. Wire shapes are checked against
+`packages/contracts/fixtures/tripEvent.*.json`.
 
 Offline start of a NEW run is out of scope (`allow_new_offline_run=false`).
 """
@@ -50,6 +52,28 @@ class StartRunRequest:
             "serviceDate": d["service_date"],
             "serviceTimezone": d["service_timezone"],
             "capturedAtMs": d["captured_at_ms"],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class EndRunRequest:
+    """`endRun` (docs/08 §6). `last_run_sequence` is None if no telemetry was recorded."""
+
+    request_id: str
+    run_id: str
+    captured_at_ms: int
+    last_run_sequence: int | None
+    driver_operating_grant: str
+
+    def to_wire(self) -> dict[str, object]:
+        return {
+            "schemaVersion": 1,
+            "requestId": self.request_id,
+            "type": "endRun",
+            "driverOperatingGrant": self.driver_operating_grant,
+            "runId": self.run_id,
+            "capturedAtMs": self.captured_at_ms,
+            "lastRunSequence": self.last_run_sequence,
         }
 
 

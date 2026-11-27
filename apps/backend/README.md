@@ -9,8 +9,10 @@ Shared database, authorization, and device ingestion. Spec:
 | File | Does |
 |---|---|
 | `convex/schema.ts` | Users, devices, runs, telemetry history, live state, audit log |
-| `convex/http.ts` | `POST /device/v1/telemetry` with bearer auth, size/version checks |
-| `convex/telemetry.ts` | Idempotent per-event ingestion; late data kept as history only |
+| `convex/http.ts` | `POST /device/v1/telemetry` and `POST /device/v1/trip-events` with bearer auth, size/version checks |
+| `convex/tripEvents.ts` | Idempotent online run start/end, driver grant and scope checks, one active run per device and route |
+| `convex/driverGrants.ts` | Issue/revoke driver operating grants (hash stored, scoped, expiring) |
+| `convex/telemetry.ts` | Idempotent per-event ingestion; late data kept as history only, including bounded history after a run ends |
 | `convex/runs.ts` | `runs.live` query (staff, the assigned student, or an approved guardian); returns null for unknown *and* forbidden runs |
 | `convex/tracking.ts` | Family queries `myAssignments`, `myRun`, `myRoute` (docs/08 §8), checked against the shared fixtures |
 | `convex/lib/authz.ts` | `getUser` / `requireUser` / `canViewRun`, the one place access rules live |
@@ -18,7 +20,7 @@ Shared database, authorization, and device ingestion. Spec:
 | `convex/auth.config.ts` | Clerk sign-in; issuer from `CLERK_JWT_ISSUER_DOMAIN` |
 | `convex/users.ts` | `linkIdentity`: attach a verified identity to an approved person |
 
-Still to build: online run start/end (`/device/v1/trip-events`), health,
+Still to build: driver sign-in on the Pi (`/device/v1/driver-session`), health,
 enrollment (creating assignments and guardian links), route progress, ETA, alerts.
 
 ## Develop

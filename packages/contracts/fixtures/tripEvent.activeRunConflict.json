@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "error": {
+    "code": "ACTIVE_RUN_CONFLICT",
+    "message": "This bus or route already has an active run.",
+    "retryable": false
+  }
+}

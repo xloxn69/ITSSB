@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "requestId": "64869872-aaf9-4e4f-99df-621722bbac06",
+  "type": "startRun",
+  "driverOperatingGrant": "EXAMPLE_ONLY_NOT_A_REAL_GRANT_0000000",
+  "routeVersionId": "demo_route_version_003",
+  "serviceDate": "2026-11-25",
+  "serviceTimezone": "America/New_York",
+  "capturedAtMs": 1795608000000
+}

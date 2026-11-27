@@ -9,12 +9,14 @@
  */
 
 import type * as devices from "../devices.js";
+import type * as driverGrants from "../driverGrants.js";
 import type * as http from "../http.js";
 import type * as lib_authz from "../lib/authz.js";
 import type * as lib_deviceAuth from "../lib/deviceAuth.js";
 import type * as runs from "../runs.js";
 import type * as telemetry from "../telemetry.js";
 import type * as tracking from "../tracking.js";
+import type * as tripEvents from "../tripEvents.js";
 import type * as users from "../users.js";
 
 import type {
@@ -25,12 +27,14 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   devices: typeof devices;
+  driverGrants: typeof driverGrants;
   http: typeof http;
   "lib/authz": typeof lib_authz;
   "lib/deviceAuth": typeof lib_deviceAuth;
   runs: typeof runs;
   telemetry: typeof telemetry;
   tracking: typeof tracking;
+  tripEvents: typeof tripEvents;
   users: typeof users;
 }>;
 
