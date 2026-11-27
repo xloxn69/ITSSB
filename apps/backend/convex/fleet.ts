@@ -316,9 +316,8 @@ export const createDevice = internalMutation({
     return { status: "ok", deviceId };
 /**
  * Staff diagnostics (docs/12 §11): which release the deployment runs, the
- * retention policy and its last sweep, and per-device contact and run IDs.
- * The Pi does not report its software version or queue depth to the backend
- * yet, so neither is shown; the device's own health page has them.
+ * retention policy and its last sweep, and per device: contact age, run IDs,
+ * and the software version and upload queue from its latest heartbeat.
  */
 export const diagnostics = query({
   args: {},
@@ -345,6 +344,9 @@ export const diagnostics = query({
           revoked: v.boolean(),
           activeRunId: nullable(v.string()),
           lastContactAtMs: nullable(v.number()),
+          softwareVersion: nullable(v.string()),
+          pendingCount: nullable(v.number()),
+          oldestPendingCapturedAtMs: nullable(v.number()),
           lastRun: nullable(
             v.object({
               runId: v.string(),
@@ -379,20 +381,30 @@ export const diagnostics = query({
             .withIndex("by_run", (q) => q.eq("runId", lastRun._id))
             .unique()
         : null;
+      // Contact is any receipt from the device. The live position alone is not
+      // enough: a backlog upload is stored without moving it.
+      const health = await ctx.db
+        .query("deviceHealth")
+        .withIndex("by_device", (q) => q.eq("deviceId", device._id))
+        .unique();
+      const contacts = [health?.receivedAtMs, live?.receivedAtMs].filter((x): x is number => x !== undefined);
       devices.push({
         deviceId: device._id,
         label: device.label,
         busLabel: device.busLabel ?? null,
         revoked: device.revoked,
         activeRunId: active?._id ?? null,
-        lastContactAtMs: live?.receivedAtMs ?? null,
+        lastContactAtMs: contacts.length ? Math.max(...contacts) : null,
+        softwareVersion: health?.appVersion ?? null,
+        pendingCount: health?.pendingCount ?? null,
+        oldestPendingCapturedAtMs: health?.oldestPendingCapturedAtMs ?? null,
         lastRun: lastRun ? { runId: lastRun._id, state: lastRun.state, endedAtMs: lastRun.endedAtMs ?? null } : null,
       });
     }
     devices.sort((a, b) => a.label.localeCompare(b.label));
     const sweep = await ctx.db
       .query("auditLog")
-      .withIndex("by_resource", (q) => q.eq("resourceType", "retention"))
+      .withIndex("by_resource", (q) => q.eq("resourceType", "retention").eq("resourceId", "rawGps"))
       .order("desc")
       .first();
     return {
@@ -407,7 +419,7 @@ export const diagnostics = query({
       retention: {
         rawGpsDays: RAW_GPS_RETENTION_DAYS,
         lastSweepAtMs: sweep?.atMs ?? null,
-        lastSweepDeleted: sweep?.resourceId ?? null,
+        lastSweepDeleted: sweep?.reason ?? null,
       },
       devices,
     };

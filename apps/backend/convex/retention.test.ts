@@ -155,7 +155,8 @@ describe("retention.purgeRawGps", () => {
     expect(audit[1]).toMatchObject({
       actor: { kind: "system" },
       resourceType: "retention",
-      resourceId: "telemetry:2,live:1",
+      resourceId: "rawGps",
+      reason: "telemetry:2,live:1",
       result: "allowed",
       atMs: NOW,
     });
@@ -181,5 +182,34 @@ describe("retention.purgeRawGps", () => {
     });
     await t.mutation(internal.retention.purgeRawGps, { nowMs: NOW });
     expect((await counts(t, legacy)).telemetry).toBe(2);
+  });
+
+  it("resumes after the scan limit instead of restarting, so every expired run is cleaned", async () => {
+    const { t, deviceId } = await setup();
+    const runs: Id<"runs">[] = [];
+    for (let i = 0; i < 7; i++) runs.push(await run(t, deviceId, "completed", NOW - RAW_GPS_RETENTION_MS - DAY, 1));
+    let cursor: number | undefined;
+    let calls = 0;
+    for (; calls < 10; calls++) {
+      const r = await t.mutation(internal.retention.purgeRawGps, { nowMs: NOW, scanLimit: 3, cursor });
+      cursor = r.cursor ?? undefined;
+      if (r.done) break;
+    }
+    expect(calls).toBeLessThan(5);
+    for (const id of runs) expect((await counts(t, id)).telemetry).toBe(0);
+  });
+
+  it("a run whose history needs several batches is finished before moving on", async () => {
+    const { t, deviceId } = await setup();
+    const big = await run(t, deviceId, "completed", NOW - RAW_GPS_RETENTION_MS - DAY, 5);
+    const next = await run(t, deviceId, "completed", NOW - RAW_GPS_RETENTION_MS - DAY, 1);
+    let cursor: number | undefined;
+    for (let i = 0; i < 10; i++) {
+      const r = await t.mutation(internal.retention.purgeRawGps, { nowMs: NOW, batchSize: 2, cursor });
+      cursor = r.cursor ?? undefined;
+      if (r.done) break;
+    }
+    expect(await counts(t, big)).toMatchObject({ telemetry: 0, live: 0 });
+    expect(await counts(t, next)).toMatchObject({ telemetry: 0, live: 0 });
   });
 });

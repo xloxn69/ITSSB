@@ -651,6 +651,16 @@ function DiagnosticsPage({ source }: { source: StaffSource }) {
                       <dl className="facts small">
                         <dt>Device ID</dt>
                         <dd className="mono">{d.deviceId}</dd>
+                        <dt>Software</dt>
+                        <dd>{d.softwareVersion ? `v${d.softwareVersion}` : "Not reported"}</dd>
+                        <dt>Waiting to upload</dt>
+                        <dd>
+                          {d.pendingCount === null
+                            ? "Not reported"
+                            : d.pendingCount === 0
+                              ? "Nothing"
+                              : `${d.pendingCount}, oldest captured ${dateTime(d.oldestPendingCapturedAtMs)}`}
+                        </dd>
                         <dt>Active run</dt>
                         <dd className="mono">{d.activeRunId ?? "None"}</dd>
                         <dt>Most recent run</dt>
@@ -672,8 +682,7 @@ function DiagnosticsPage({ source }: { source: StaffSource }) {
               </div>
             )}
             <p className="muted small">
-              Device software version and upload queue are not reported to the server yet. Read them on the bus from
-              the device&apos;s status screen.
+              Software and upload queue come from each device&apos;s latest heartbeat; read them with its contact age.
             </p>
           </div>
         )}

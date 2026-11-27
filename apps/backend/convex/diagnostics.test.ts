@@ -35,9 +35,34 @@ async function setup() {
       actor: { kind: "system" },
       action: "retention.purgeRawGps",
       resourceType: "retention",
-      resourceId: "telemetry:12,live:1",
+      resourceId: "rawGps",
+      reason: "telemetry:12,live:1",
       result: "allowed",
       atMs: 9_000,
+    });
+    // A later, smaller batch: the newest one is the last cleanup.
+    await ctx.db.insert("auditLog", {
+      actor: { kind: "system" },
+      action: "retention.purgeRawGps",
+      resourceType: "retention",
+      resourceId: "rawGps",
+      reason: "telemetry:1,live:0",
+      result: "allowed",
+      atMs: 10_000,
+    });
+    // The heartbeat arrived after the last position (a backlog upload
+    // doesn't move the live position): contact is the heartbeat.
+    await ctx.db.insert("deviceHealth", {
+      deviceId,
+      bootId: "boot-1",
+      capturedAtMs: 7_900,
+      receivedAtMs: 8_000,
+      appVersion: "0.1.0",
+      reportedRunId: null,
+      gpsStatus: "valid",
+      lastValidFixAtMs: 7_800,
+      pendingCount: 42,
+      oldestPendingCapturedAtMs: 1_500,
     });
     return { deviceId, spareId, doneRun, activeRun };
   });
@@ -55,16 +80,26 @@ describe("fleet.diagnostics", () => {
     expect(result).toMatchObject({
       status: "ready",
       deployment: { release: "2026.11.27-abc1234", environment: "development", contractSchemaVersion: 1 },
-      retention: { rawGpsDays: 30, lastSweepAtMs: 9_000, lastSweepDeleted: "telemetry:12,live:1" },
+      retention: { rawGpsDays: 30, lastSweepAtMs: 10_000, lastSweepDeleted: "telemetry:1,live:0" },
       devices: [
         {
           deviceId,
           label: "Bench Pi",
           activeRunId: activeRun,
-          lastContactAtMs: 5_000,
+          lastContactAtMs: 8_000,
+          softwareVersion: "0.1.0",
+          pendingCount: 42,
+          oldestPendingCapturedAtMs: 1_500,
           lastRun: { runId: activeRun, state: "active", endedAtMs: null },
         },
-        { deviceId: spareId, activeRunId: null, lastContactAtMs: null, lastRun: null },
+        {
+          deviceId: spareId,
+          activeRunId: null,
+          lastContactAtMs: null,
+          lastRun: null,
+          softwareVersion: null,
+          pendingCount: null,
+        },
       ],
     });
     const text = JSON.stringify(result);

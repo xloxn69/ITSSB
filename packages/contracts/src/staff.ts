@@ -213,15 +213,19 @@ export type CredentialIssuedResult =
   | AccessUnavailable;
 // MARK: fleet:diagnostics
 
-/** Limited support view (docs/12 §11): IDs, ages and versions, never payloads, addresses or tokens. */
+/** Limited support view (docs/12 §11): IDs, ages, versions and queue depth, never payloads, addresses or tokens. */
 export interface DeviceDiagnostics {
   deviceId: string;
   label: string;
   busLabel: string | null;
   revoked: boolean;
   activeRunId: string | null;
-  /** Latest telemetry receipt (server time) for this device's most recent run; null when none. */
+  /** Latest server receipt of a health heartbeat or a live position; null when none. */
   lastContactAtMs: number | null;
+  /** From the device's latest heartbeat; null when it never sent one. */
+  softwareVersion: string | null;
+  pendingCount: number | null;
+  oldestPendingCapturedAtMs: number | null;
   lastRun: { runId: string; state: "scheduled" | "active" | "completed" | "cancelled"; endedAtMs: number | null } | null;
 }
 

@@ -201,6 +201,9 @@ export function staffFixtureSource(variant: StaffVariant): StaffSource {
             revoked: d.revoked,
             activeRunId: d.activeRun?.runId ?? null,
             lastContactAtMs: d.lastContactAtMs,
+            softwareVersion: d.lastContactAtMs === null ? null : "0.1.0",
+            pendingCount: d.lastContactAtMs === null ? null : i === 1 ? 37 : 0,
+            oldestPendingCapturedAtMs: i === 1 ? Date.now() - 7 * 60_000 : null,
             lastRun: d.activeRun
               ? { runId: d.activeRun.runId, state: "active", endedAtMs: null }
               : i === 2
