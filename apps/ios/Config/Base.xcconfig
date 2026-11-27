@@ -10,4 +10,7 @@ ITSSB_DEVELOPMENT_TEAM =
 // fast instead of silently talking to someone else's backend.
 CONVEX_URL = http:/$()/127.0.0.1:1
 
+// Empty means sign-in is not configured: the app says so instead of signing in.
+CLERK_PUBLISHABLE_KEY =
+
 #include? "Secrets.xcconfig"

@@ -2,25 +2,71 @@
 import Foundation
 import Observation
 
-/// Sign-in as far as docs/06 §4 defines it, without choosing a provider.
+/// Sign-in as docs/06 §4 defines it: email plus a one-time code, or Sign in
+/// with Apple, through the identity provider (Clerk, docs/17 §8).
 ///
-/// The identity provider (Auth0, Clerk, ...) is an open owner decision
-/// (docs/17 §5). Until one is configured, the app uses
-/// `UnconfiguredAuthProvider` and says plainly that sign-in isn't available.
-/// It never pretends to be signed in and never holds a backend admin key.
-protocol AuthSession: Sendable {
+/// Signing in proves control of an identity; it grants nothing. The backend
+/// decides access, so a signed-in person may still see "Tracking not
+/// available" until staff link their account. The app never holds a backend
+/// admin key or the provider's secret key.
+@MainActor
+protocol AuthSession: AnyObject {
     /// False when this build has no identity provider configured.
     var isConfigured: Bool { get }
-    /// Restores a cached session without UI. Returns true when signed in.
-    func restore() async -> Bool
-    /// Runs the provider's sign-in flow.
-    func signIn() async throws
+    /// A label for the signed-in account (an email address), when known.
+    var accountLabel: String? { get }
+    /// Restores a cached session without UI. Returns true when signed in;
+    /// throws when the sign-in service can't be reached.
+    func restore() async throws -> Bool
+    /// Sends a one-time code to `email` (creating the identity on first use).
+    func sendEmailCode(to email: String) async throws
+    func resendEmailCode() async throws
+    /// Verifies the code; on success the tracking backend is authenticated too.
+    func verifyEmailCode(_ code: String) async throws
+    func signInWithApple() async throws
     func signOut() async
+}
+
+/// Sign-in failures, each with its own honest message.
+enum AuthError: Error, Equatable {
+    case notConfigured
+    case invalidEmail
+    case invalidCode
+    case codeExpired
+    case tooManyAttempts
+    case network
+    /// The provider signed the person in, but the tracking backend refused the session
+    /// (for example the `convex` JWT template or the issuer isn't set up yet).
+    case trackingRejected
+    /// The provider needs more than this app collects (for example a second factor).
+    case needsMoreInfo
+    case cancelled
+    case failed
+
+    /// Inline message, or nil when nothing should be shown (the person cancelled).
+    var message: String? {
+        switch self {
+        case .notConfigured: "Sign-in isn't set up in this build."
+        case .invalidEmail: "Enter a valid email address."
+        case .invalidCode: "That code isn't right. Check the email and try again."
+        case .codeExpired: "That code has expired. Send a new one."
+        case .tooManyAttempts: "Too many tries. Wait a minute, then try again."
+        case .network: "Couldn't reach the sign-in service. Check your connection and try again."
+        case .trackingRejected:
+            "You signed in, but the tracking service didn't accept the session, so you've been signed out. "
+                + "Your school's setup may not be finished."
+        case .needsMoreInfo: "This account needs more setup before it can sign in here. Contact your school."
+        case .cancelled: nil
+        case .failed: "Sign-in didn't finish. Try again."
+        }
+    }
 }
 
 enum SessionState: Equatable {
     /// Restoring a cached session. Show a real loading state (docs/06 §4).
     case restoring
+    /// The sign-in service couldn't be reached while restoring; offer a retry.
+    case restoreFailed
     case signedIn
     case signedOut(SignedOutReason)
 }
@@ -31,19 +77,37 @@ enum SignedOutReason: Equatable {
     case signInUnavailable
 }
 
-/// Owns identity state for the process (docs/06 §6). Tracking views appear
-/// only while `.signedIn`, so signing out tears down their subscriptions and
-/// drops protected data with them.
+/// Where the sign-in form is (docs/06 I02, I03).
+enum SignInStep: Equatable {
+    case email
+    case code(email: String)
+}
+
+/// Owns identity state and the sign-in form for the process (docs/06 §6).
+/// Tracking views appear only while `.signedIn`, so signing out tears down
+/// their subscriptions and drops protected data with them.
 @MainActor
 @Observable
 final class SessionStore {
     private(set) var state: SessionState = .restoring
-    private(set) var signInError: String?
-    private let auth: any AuthSession
+    private(set) var step: SignInStep = .email
+    private(set) var isWorking = false
+    /// Inline error for the current step.
+    private(set) var message: String?
+    /// When "Send a new code" becomes available again (docs/06 I03: resend when allowed).
+    private(set) var resendAvailableAt: Date?
 
-    init(auth: any AuthSession) {
+    static let resendCooldown: TimeInterval = 30
+
+    private let auth: any AuthSession
+    private let now: () -> Date
+
+    init(auth: any AuthSession, now: @escaping () -> Date = { Date() }) {
         self.auth = auth
+        self.now = now
     }
+
+    var accountLabel: String? { auth.accountLabel }
 
     func restore() async {
         guard auth.isConfigured else {
@@ -51,73 +115,140 @@ final class SessionStore {
             return
         }
         state = .restoring
-        state = await auth.restore() ? .signedIn : .signedOut(.notSignedIn)
+        do {
+            state = try await auth.restore() ? .signedIn : .signedOut(.notSignedIn)
+        } catch AuthError.trackingRejected {
+            await auth.signOut()
+            show(.trackingRejected)
+            state = .signedOut(.notSignedIn)
+        } catch {
+            state = .restoreFailed
+        }
     }
 
-    func signIn() async {
-        guard auth.isConfigured else {
-            state = .signedOut(.signInUnavailable)
-            return
+    func submitEmail(_ raw: String) async {
+        let email = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard Self.isPlausibleEmail(email) else { return show(.invalidEmail) }
+        await perform {
+            try await auth.sendEmailCode(to: email)
+            step = .code(email: email)
+            resendAvailableAt = now().addingTimeInterval(Self.resendCooldown)
         }
-        signInError = nil
-        do {
-            try await auth.signIn()
-            state = .signedIn
-        } catch {
-            signInError = "Sign-in didn't finish. Try again."
-            state = .signedOut(.notSignedIn)
+    }
+
+    func submitCode(_ raw: String) async {
+        let code = raw.filter { !$0.isWhitespace }
+        guard !code.isEmpty, code.allSatisfy(\.isNumber) else { return show(.invalidCode) }
+        await perform {
+            try await auth.verifyEmailCode(code)
+            finishSignIn()
+        }
+    }
+
+    func resendCode() async {
+        guard canResend(at: now()) else { return }
+        await perform {
+            try await auth.resendEmailCode()
+            resendAvailableAt = now().addingTimeInterval(Self.resendCooldown)
+        }
+    }
+
+    func canResend(at date: Date) -> Bool {
+        guard case .code = step else { return false }
+        return resendAvailableAt.map { date >= $0 } ?? true
+    }
+
+    /// Back to the email step (docs/06 I03: change email).
+    func changeEmail() {
+        step = .email
+        message = nil
+        resendAvailableAt = nil
+    }
+
+    func signInWithApple() async {
+        await perform {
+            try await auth.signInWithApple()
+            finishSignIn()
         }
     }
 
     func signOut() async {
         await auth.signOut()
-        state = .signedOut(.notSignedIn)
+        step = .email
+        message = nil
+        resendAvailableAt = nil
+        state = auth.isConfigured ? .signedOut(.notSignedIn) : .signedOut(.signInUnavailable)
     }
+
+    // MARK: Private
+
+    private func finishSignIn() {
+        step = .email
+        message = nil
+        resendAvailableAt = nil
+        state = .signedIn
+    }
+
+    private func perform(_ body: () async throws -> Void) async {
+        guard !isWorking else { return }
+        isWorking = true
+        message = nil
+        defer { isWorking = false }
+        do {
+            try await body()
+        } catch let error as AuthError {
+            if error == .trackingRejected { changeEmail() }
+            show(error)
+        } catch {
+            show(.failed)
+        }
+    }
+
+    private func show(_ error: AuthError) {
+        message = error.message
+    }
+
+    static func isPlausibleEmail(_ email: String) -> Bool {
+        email.range(of: #"^[^@\s]+@[^@\s]+\.[^@\s]+$"#, options: .regularExpression) != nil
+    }
+
+    #if DEBUG
+    /// Puts the form in a given state, for previews and scenario screenshots only.
+    func preset(state: SessionState, step: SignInStep = .email, message: AuthError? = nil,
+                isWorking: Bool = false, resendIn: TimeInterval? = nil) {
+        self.state = state
+        self.step = step
+        self.message = message?.message
+        self.isWorking = isWorking
+        self.resendAvailableAt = resendIn.map { now().addingTimeInterval($0) }
+    }
+    #endif
 }
 
-/// `AuthSession` over a `ConvexClientWithAuth`, which passes the provider's ID
-/// token to Convex so each function can resolve the caller (docs/11 §1).
-///
-/// `@unchecked Sendable`: the wrapped client serializes its own auth state
-/// (see ConvexMobile's `AuthSession`); this type stores nothing mutable.
-final class ConvexAuthSession<Result>: AuthSession, @unchecked Sendable {
-    let isConfigured: Bool
-    private let client: ConvexClientWithAuth<Result>
+/// Controls the Convex client's authentication. `ConvexClientWithAuth` in the
+/// app; a fake in tests.
+@MainActor
+protocol ConvexAuthControlling: AnyObject {
+    /// Authenticates with a fresh provider token. Returns false if Convex refused.
+    func login() async -> Bool
+    func logout() async
+}
 
-    init(client: ConvexClientWithAuth<Result>, isConfigured: Bool) {
+/// `ConvexAuthControlling` over the process-wide `ConvexClientWithAuth`.
+@MainActor
+final class ConvexClientAuth: ConvexAuthControlling {
+    private let client: ConvexClientWithAuth<String>
+
+    init(client: ConvexClientWithAuth<String>) {
         self.client = client
-        self.isConfigured = isConfigured
     }
 
-    func restore() async -> Bool {
-        if case .success = await client.loginFromCache() { return true }
+    func login() async -> Bool {
+        if case .success = await client.login() { return true }
         return false
     }
 
-    func signIn() async throws {
-        if case let .failure(error) = await client.login() { throw error }
-    }
-
-    func signOut() async {
+    func logout() async {
         await client.logout()
     }
-}
-
-/// Placeholder until the owner chooses an identity provider. Every sign-in
-/// attempt fails, so the client stays unauthenticated and the backend
-/// returns `access_unavailable` for every tracking query.
-struct UnconfiguredAuthProvider: AuthProvider {
-    struct NotConfigured: Error {}
-
-    func login(onIdToken: @Sendable @escaping (String?) -> Void) async throws -> String {
-        throw NotConfigured()
-    }
-
-    func loginFromCache(onIdToken: @Sendable @escaping (String?) -> Void) async throws -> String {
-        throw NotConfigured()
-    }
-
-    func logout() async throws {}
-
-    func extractIdToken(from authResult: String) -> String { authResult }
 }

@@ -7,7 +7,8 @@ struct ITSSBApp: App {
 
     var body: some Scene {
         WindowGroup {
-            AppRootView(session: environment.session, source: environment.source)
+            AppRootView(session: environment.session, source: environment.source,
+                        initialTab: environment.initialTab)
         }
     }
 }

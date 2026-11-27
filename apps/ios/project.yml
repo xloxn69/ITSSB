@@ -17,6 +17,11 @@ packages:
   ConvexMobile:
     url: https://github.com/get-convex/convex-swift
     exactVersion: 0.8.2
+  # Clerk sign-in (docs/17 §8). Only the ClerkKit product, no prebuilt UI. Pinned exactly:
+  # 1.5.9+ needs a newer Swift compiler than Xcode 26.0 ships (`weak let`); 1.5.8 builds on both.
+  Clerk:
+    url: https://github.com/clerk/clerk-ios
+    exactVersion: 1.5.8
 
 settings:
   base:
@@ -32,6 +37,12 @@ targets:
     dependencies:
       - package: ITSSBDesignSystem
       - package: ConvexMobile
+      - package: Clerk
+        product: ClerkKit
+    entitlements:
+      path: ITSSB/ITSSB.entitlements
+      properties:
+        com.apple.developer.applesignin: [Default]
     info:
       path: ITSSB/Info.plist
       properties:
@@ -40,6 +51,7 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         # Wire config into the app without hardcoding (see Config/*.xcconfig).
         ConvexURL: $(CONVEX_URL)
+        ClerkPublishableKey: $(CLERK_PUBLISHABLE_KEY)
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(ITSSB_BUNDLE_ID)
