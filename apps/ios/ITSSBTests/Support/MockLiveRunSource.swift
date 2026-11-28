@@ -8,11 +8,32 @@ final class MockLiveRunSource: LiveRunSource, @unchecked Sendable {
     private var runStreams: [(String, AsyncThrowingStream<RunSnapshot, Error>.Continuation)] = []
     private var routeStreams: [(String, AsyncThrowingStream<RouteSnapshot, Error>.Continuation)] = []
     private(set) var cancelledRuns: [String] = []
+    private(set) var cancelledRoutes: [String] = []
+    /// When set, `reverifyServerTime()` waits until `releaseReverify()`.
+    var holdsReverify = false
+    private var reverifyWaiters: [CheckedContinuation<Void, Never>] = []
     private var connectionStreams: [AsyncStream<Bool>.Continuation] = []
     private var reverifies = 0
 
     func reverifyServerTime() async {
-        lock.withLock { reverifies += 1 }
+        let hold = lock.withLock { () -> Bool in
+            reverifies += 1
+            return holdsReverify
+        }
+        guard hold else { return }
+        await withCheckedContinuation { continuation in
+            lock.withLock { reverifyWaiters.append(continuation) }
+        }
+    }
+
+    var heldReverifies: Int { lock.withLock { reverifyWaiters.count } }
+
+    func releaseReverify() {
+        let waiters = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+            defer { reverifyWaiters = [] }
+            return reverifyWaiters
+        }
+        waiters.forEach { $0.resume() }
     }
 
     var reverifyCount: Int { lock.withLock { reverifies } }
@@ -47,6 +68,9 @@ final class MockLiveRunSource: LiveRunSource, @unchecked Sendable {
 
     func route(assignmentId: String) -> AsyncThrowingStream<RouteSnapshot, Error> {
         let (stream, continuation) = AsyncThrowingStream<RouteSnapshot, Error>.makeStream()
+        continuation.onTermination = { [weak self] _ in
+            self?.lock.withLock { self?.cancelledRoutes.append(assignmentId) }
+        }
         lock.withLock { routeStreams.append((assignmentId, continuation)) }
         return stream
     }

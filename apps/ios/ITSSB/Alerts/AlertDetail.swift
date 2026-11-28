@@ -17,10 +17,15 @@ enum AlertCurrency: Equatable {
     case latest
     /// The same trip is running but has no estimate right now.
     case tripRunningNoEstimate
+    /// The phone lost its connection: the last answer may be out of date.
+    case unconfirmed
 
     /// `snapshot` is the latest `tracking:myRun` for the alert's assignment, nil while loading.
-    static func make(alert: AlertItem, snapshot: RunSnapshot?, failed: Bool) -> AlertCurrency {
+    static func make(alert: AlertItem, snapshot: RunSnapshot?, failed: Bool,
+                     connectionLost: Bool = false) -> AlertCurrency {
         if failed { return .unknown }
+        // A silent subscription can't show the trip has since ended (docs/06 I25).
+        if connectionLost { return .unconfirmed }
         switch snapshot {
         case nil:
             return .checking
@@ -48,19 +53,36 @@ final class AlertDetailViewModel {
     let alert: AlertItem
     private(set) var snapshot: RunSnapshot?
     private(set) var failed = false
+    /// The phone's link dropped after it had one.
+    private(set) var connectionLost = false
 
     @ObservationIgnored private let tracking: any LiveRunSource
     @ObservationIgnored private var task: Task<Void, Never>?
+    @ObservationIgnored private var connectionTask: Task<Void, Never>?
 
     init(alert: AlertItem, tracking: any LiveRunSource) {
         self.alert = alert
         self.tracking = tracking
     }
 
-    var currency: AlertCurrency { AlertCurrency.make(alert: alert, snapshot: snapshot, failed: failed) }
+    var currency: AlertCurrency {
+        AlertCurrency.make(alert: alert, snapshot: snapshot, failed: failed, connectionLost: connectionLost)
+    }
 
     func start() {
         stop()
+        // A restart waits for a fresh answer; the old one may describe an earlier moment.
+        snapshot = nil
+        failed = false
+        connectionLost = false
+        connectionTask = Task { [weak self, tracking] in
+            var everConnected = false
+            for await connected in tracking.connection() {
+                guard let self, !Task.isCancelled else { return }
+                everConnected = everConnected || connected
+                self.connectionLost = everConnected && !connected
+            }
+        }
         let assignmentId = alert.assignmentId
         task = Task { [weak self, tracking] in
             do {
@@ -79,6 +101,8 @@ final class AlertDetailViewModel {
     func stop() {
         task?.cancel()
         task = nil
+        connectionTask?.cancel()
+        connectionTask = nil
     }
 }
 
@@ -151,6 +175,7 @@ private struct CurrencyNotice: View {
         case .superseded: "There's a newer estimate"
         case .latest: "This is the trip's latest estimate"
         case .tripRunningNoEstimate: "No current estimate"
+        case .unconfirmed: "Can't confirm right now"
         }
     }
 
@@ -164,6 +189,7 @@ private struct CurrencyNotice: View {
                 + "\(StatusCopy.capturedTime(newer, timeZone: .current))."
         case .latest: "The trip is still running. Track shows how old the estimate is now."
         case .tripRunningNoEstimate: "The trip is still running, but there's no estimate right now. See Track."
+        case .unconfirmed: "Your phone lost its connection, so this trip's status can't be checked. Reconnecting…"
         }
     }
 
@@ -171,6 +197,7 @@ private struct CurrencyNotice: View {
         switch currency {
         case .checking: "hourglass"
         case .unknown: "questionmark.circle"
+        case .unconfirmed: "wifi.slash"
         case .tripEnded: "flag.checkered"
         case .superseded, .tripRunningNoEstimate: "clock.arrow.circlepath"
         case .latest: "checkmark.circle"
@@ -181,7 +208,7 @@ private struct CurrencyNotice: View {
         switch currency {
         case .latest: AppColors.statusFresh
         case .superseded, .tripRunningNoEstimate: AppColors.statusAging
-        case .checking, .unknown, .tripEnded: AppColors.statusUnknown
+        case .checking, .unknown, .tripEnded, .unconfirmed: AppColors.statusUnknown
         }
     }
 }

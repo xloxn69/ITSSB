@@ -16,8 +16,9 @@ struct MyRouteView: View {
             .navigationTitle("My route")
             .navigationBarTitleDisplayMode(.inline)
             .background(AppColors.background)
-            .onAppear { model.start() }
-            .onDisappear { model.stop() }
+            // Not stopped on disappear: Stop details is pushed on top and must keep
+            // following access. The subscriptions end when this screen is popped.
+            .onAppear { model.startIfNeeded() }
     }
 
     @ViewBuilder private var content: some View {
@@ -63,7 +64,7 @@ struct MyRouteView: View {
                 LabeledContent("Student", value: assignment.studentDisplayName)
                 LabeledContent("Route", value: route.routeLabel)
                 NavigationLink {
-                    StopDetailsView(stop: route.assignedStop, routeLabel: route.routeLabel)
+                    StopDetailsView(model: model, stopId: route.assignedStop.stopId)
                 } label: {
                     LabeledContent("Stop", value: route.assignedStop.label)
                 }
@@ -85,7 +86,7 @@ struct MyRouteView: View {
         }
         .font(AppFonts.body)
         .navigationDestination(isPresented: $showsStop) {
-            StopDetailsView(stop: route.assignedStop, routeLabel: route.routeLabel)
+            StopDetailsView(model: model, stopId: route.assignedStop.stopId)
         }
     }
 
@@ -100,8 +101,23 @@ struct MyRouteView: View {
 }
 
 /// I14 Stop details: the stop and a walking-directions handoff to Apple Maps.
-/// ITSSB doesn't plan the walk or promise its timing.
+/// ITSSB doesn't plan the walk or promise its timing. It reads the stop from
+/// the live route model, so losing access clears it at once.
 struct StopDetailsView: View {
+    let model: MyRouteViewModel
+    let stopId: String
+
+    var body: some View {
+        if let current = model.currentStop(id: stopId) {
+            StopDetailsContent(stop: current.stop, routeLabel: current.routeLabel)
+        } else {
+            ContentUnavailableView("Stop not available", systemImage: "lock.fill",
+                                   description: Text("This account can no longer see this route."))
+        }
+    }
+}
+
+private struct StopDetailsContent: View {
     let stop: AssignedStop
     let routeLabel: String
 
@@ -154,4 +170,6 @@ enum WalkingDirections {
 }
 
 #Preview { NavigationStack { MyRouteView(source: PreviewLiveRunSource(scenario: .live)) } }
-#Preview("Stop") { NavigationStack { StopDetailsView(stop: PreviewFixtures.stop, routeLabel: "Route 17 Morning") } }
+#Preview("Stop") {
+    NavigationStack { StopDetailsContent(stop: PreviewFixtures.stop, routeLabel: "Route 17 Morning") }
+}

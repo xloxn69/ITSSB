@@ -161,6 +161,60 @@ final class MissingStatesTests: XCTestCase {
         model.stop()
     }
 
+    /// Review P1: Stop details reads the live route model, so access loss clears the stop.
+    func testStopDetailsLoseTheStopWhenAccessEnds() async {
+        let source = MockLiveRunSource()
+        let model = MyRouteViewModel(source: source)
+        model.startIfNeeded()
+        _ = await eventually { source.assignmentsContinuation != nil }
+        source.assignmentsContinuation?.yield(.ready([PreviewFixtures.assignment]))
+        let id = PreviewFixtures.assignment.assignmentId
+        _ = await eventually { source.routeContinuation(id) != nil }
+        source.routeContinuation(id)?.yield(.ready(PreviewFixtures.route))
+        let shown = await eventually { model.currentStop(id: PreviewFixtures.stop.stopId) != nil }
+        XCTAssertTrue(shown)
+        model.startIfNeeded()
+        XCTAssertEqual(source.assignmentSubscriptionCount, 1, "returning from details keeps the same subscriptions")
+        source.routeContinuation(id)?.yield(.accessUnavailable(.notPermitted))
+        let cleared = await eventually { model.currentStop(id: PreviewFixtures.stop.stopId) == nil }
+        XCTAssertTrue(cleared, "the stop and its directions disappear with access")
+    }
+
+    /// The route subscriptions end when the whole My route flow is gone.
+    func testReleasingMyRouteEndsItsSubscriptions() async {
+        let source = MockLiveRunSource()
+        var model: MyRouteViewModel? = MyRouteViewModel(source: source)
+        model?.startIfNeeded()
+        _ = await eventually { source.assignmentsContinuation != nil }
+        source.assignmentsContinuation?.yield(.ready([PreviewFixtures.assignment]))
+        let id = PreviewFixtures.assignment.assignmentId
+        _ = await eventually { source.routeContinuation(id) != nil }
+        model = nil
+        let ended = await eventually { source.cancelledRoutes.contains(id) }
+        XCTAssertTrue(ended)
+    }
+
+    /// Review P2: a restarted detail waits for a new answer, and a lost connection is unconfirmed.
+    func testAlertDetailIsNeverStaleAfterRestartOrDisconnect() async {
+        let source = MockLiveRunSource()
+        let model = AlertDetailViewModel(alert: alert, tracking: source)
+        model.start()
+        _ = await eventually { source.runContinuation("a_1") != nil && source.connectionSubscriptionCount == 1 }
+        source.setConnected(true)
+        source.runContinuation("a_1")?.yield(ready(etaMadeAt: 1_000))
+        let latest = await eventually { model.currency == .latest }
+        XCTAssertTrue(latest)
+
+        source.setConnected(false)
+        let unconfirmed = await eventually { model.currency == .unconfirmed }
+        XCTAssertTrue(unconfirmed, "a silent subscription can't vouch for the trip")
+
+        model.stop()
+        model.start()
+        XCTAssertEqual(model.currency, .checking, "a restart doesn't reuse the old answer")
+        model.stop()
+    }
+
     func testWalkingDirectionsAskMapsForWalking() {
         XCTAssertEqual(WalkingDirections.launchOptions[MKLaunchOptionsDirectionsModeKey],
                        MKLaunchOptionsDirectionsModeWalking)

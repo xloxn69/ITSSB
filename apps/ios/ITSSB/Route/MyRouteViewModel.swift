@@ -19,13 +19,33 @@ final class MyRouteViewModel {
     private(set) var selectedAssignmentId: String?
 
     @ObservationIgnored private let source: any LiveRunSource
-    @ObservationIgnored private var assignmentsTask: Task<Void, Never>?
-    @ObservationIgnored private var routeTask: Task<Void, Never>?
+    /// Cancels both subscriptions when the model goes away, so a pushed Stop
+    /// details screen keeps them alive and nothing outlives the whole flow.
+    @ObservationIgnored private let tasks = SubscriptionTasks()
+    @ObservationIgnored private var assignmentsTask: Task<Void, Never>? {
+        get { tasks.assignments }
+        set { tasks.assignments = newValue }
+    }
+    @ObservationIgnored private var routeTask: Task<Void, Never>? {
+        get { tasks.route }
+        set { tasks.route = newValue }
+    }
     /// Bumped on every selection change; older route answers are dropped.
     @ObservationIgnored private var generation = 0
 
     init(source: any LiveRunSource) {
         self.source = source
+    }
+
+    /// Starts once; later appearances (returning from Stop details) keep the live subscriptions.
+    func startIfNeeded() {
+        if assignmentsTask == nil { start() }
+    }
+
+    /// The assigned stop while access is current; nil as soon as it isn't (I14 follows this).
+    func currentStop(id stopId: String) -> (stop: AssignedStop, routeLabel: String)? {
+        guard case let .ready(_, route) = state, route.assignedStop.stopId == stopId else { return nil }
+        return (route.assignedStop, route.routeLabel)
     }
 
     func start() {
@@ -120,5 +140,16 @@ final class MyRouteViewModel {
 
     private func isCurrent(_ candidate: Int) -> Bool {
         candidate == generation && !Task.isCancelled
+    }
+}
+
+/// Holds the subscription tasks and cancels them when released.
+private final class SubscriptionTasks: @unchecked Sendable {
+    var assignments: Task<Void, Never>?
+    var route: Task<Void, Never>?
+
+    deinit {
+        assignments?.cancel()
+        route?.cancel()
     }
 }

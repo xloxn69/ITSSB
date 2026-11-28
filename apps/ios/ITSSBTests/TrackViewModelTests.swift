@@ -336,6 +336,39 @@ extension TrackViewModelTests {
         XCTAssertTrue(kept, "the selected student survives the refresh")
     }
 
+    /// Review P2: a notification tap during the refresh's wait wins over the saved selection.
+    func testResumeKeepsASelectionMadeWhileItWaited() async {
+        let source = MockLiveRunSource()
+        source.holdsReverify = true
+        let model = await started(source)
+        source.assignmentsContinuation?.yield(.ready([alex, jordan]))
+        _ = await eventually { model.selectedAssignmentId == "a_alex" }
+
+        let resume = Task { await model.resumeFromBackground() }
+        _ = await eventually { source.heldReverifies == 1 }
+        model.open(assignmentId: "a_jordan")
+        XCTAssertEqual(model.selectedAssignmentId, "a_jordan")
+        source.releaseReverify()
+        await resume.value
+
+        source.assignmentsContinuation?.yield(.ready([alex, jordan]))
+        let kept = await eventually { model.selectedAssignmentId == "a_jordan" }
+        XCTAssertTrue(kept, "the refresh doesn't switch back to the earlier student")
+    }
+
+    func testAnObsoleteRefreshDoesNotRestart() async {
+        let source = MockLiveRunSource()
+        source.holdsReverify = true
+        let model = await started(source)
+        let resume = Task { await model.resumeFromBackground() }
+        _ = await eventually { source.heldReverifies == 1 }
+        model.retry()
+        XCTAssertEqual(source.assignmentSubscriptionCount, 2)
+        source.releaseReverify()
+        await resume.value
+        XCTAssertEqual(source.assignmentSubscriptionCount, 2, "the refresh started before the retry is dropped")
+    }
+
     func testResumeWhileStoppedDoesNothing() async {
         let source = MockLiveRunSource()
         let model = await started(source)
