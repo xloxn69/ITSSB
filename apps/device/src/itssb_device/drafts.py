@@ -12,9 +12,10 @@ A recording is real observations plus explicitly marked stops:
 - Every create action carries a `requestId`; a double tap or retry returns
   the same draft or stop instead of making a second one.
 
-A finished draft is "Saved on this device". Submitting it for review needs the
-backend's route-drafts operation (docs/08 §7), which does not exist yet; this
-module never claims a draft was submitted or approved.
+A finished draft is "Saved on this device" until the driver submits it for
+staff review (draft_submit.py, docs/08 §7.1). Its `submission` state comes
+from the server's answers only; once Submit is pressed its stops are frozen,
+so every retry carries the same recording.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from .database import Database
+from .draft_submit import frozen, submission_view
 from .gps_reader import LatestFixHolder
 from .models import Fix
 from .route_geometry import bearing_deg, distance_m, heading_change_deg, simplify
@@ -125,15 +127,14 @@ class Drafts:
             "name": d["name"],
             "direction": d["direction"],
             "status": d["status"],
-            # Honest sync state: nothing leaves this device until the backend
-            # supports route drafts.
-            "submission": "not_submitted",
             "startedAtMs": d["started_at_ms"],
             "finishedAtMs": d["finished_at_ms"],
             "pointCount": pts["n"],
             "gapCount": pts["gaps"] or 0,
             "lastPointCapturedAtMs": pts["last"],
             "stopCount": stops["n"],
+            # Only the server's answers move this past "pending".
+            **submission_view(self.conn, draft_id),
         }
 
     def list(self, limit: int = 20) -> list[dict[str, Any]]:
@@ -380,6 +381,12 @@ class Drafts:
         d = tx.execute("SELECT status FROM route_drafts WHERE draft_id=?", (draft_id,)).fetchone()
         if d is None:
             raise DraftError("NOT_FOUND", "No such draft on this device.")
+        if frozen(tx, draft_id):
+            raise DraftError(
+                "SUBMITTED",
+                "This draft was submitted for review and can't be changed. "
+                "Record the route again to change it.",
+            )
 
     def mark_stop(
         self, draft_id: str, request_id: object, name: object, fix: Fix, driver_id: str

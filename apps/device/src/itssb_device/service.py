@@ -27,6 +27,7 @@ from pathlib import Path
 from .api import LocalApiServer
 from .config import Config
 from .database import Database
+from .draft_submit import DraftDesk, DraftSyncThread
 from .drafts import DraftSamplerThread
 from .driver_api import DriverApi
 from .gps_reader import GpsReader
@@ -109,7 +110,9 @@ class Service:
 
         trip_events = None
         students = None
+        draft_desk = None
         roster_wake = threading.Event()
+        draft_wake = threading.Event()
         if cfg.upload_enabled:
             assert cfg.device_api_origin and cfg.device_token  # noqa: S101 - upload_enabled
             trip_events = HttpTripEvents(
@@ -127,6 +130,16 @@ class Service:
                 ),
                 wake=roster_wake,
             )
+            # Same short timeout: the review-status check answers the screen.
+            draft_desk = DraftDesk(
+                DeviceGrantClient(
+                    HttpTransport(
+                        cfg.device_api_origin, min(cfg.http_timeout_s, STUDENTS_TIMEOUT_S)
+                    ),
+                    cfg.device_token,
+                ),
+                wake=draft_wake,
+            )
         drivers = load_drivers(cfg.drivers_file)
         log.info("driver unlock: %d driver(s) provisioned", len(drivers))
         driver_api = DriverApi(
@@ -140,6 +153,7 @@ class Service:
             trip_events=trip_events,
             service_timezone=cfg.service_timezone,
             students=students,
+            draft_desk=draft_desk,
         )
         if not driver_api.serves_ui:
             log.warning("driver UI not found at %s; serving the status page", cfg.driver_ui_dir)
@@ -176,6 +190,17 @@ class Service:
                     ),
                     self.stop_event,
                     wake=roster_wake,
+                )
+            )
+            # Full timeout: a whole recording can be a few hundred KB.
+            self._threads.append(
+                DraftSyncThread(
+                    cfg.database_path,
+                    DeviceGrantClient(
+                        HttpTransport(cfg.device_api_origin, cfg.http_timeout_s), cfg.device_token
+                    ),
+                    self.stop_event,
+                    wake=draft_wake,
                 )
             )
         if cfg.upload_enabled:
