@@ -31,7 +31,7 @@ struct TrackView: View {
 
     var body: some View {
         Group {
-            if showsDashboard, model.assignments.count > 1 {
+            if showsDashboard, model.dashboardAvailable {
                 GuardianDashboardView(source: source, assignments: model.assignments) { id in
                     model.select(assignmentId: id)
                     showsDashboard = false

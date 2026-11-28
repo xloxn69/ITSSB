@@ -17,6 +17,7 @@ import { connectionNotice, reverifyOnForeground, type TrackContext, type TrackSt
 import type { ServiceNotice, TrackedRun } from "../tracking/model";
 import type { ServerClock } from "../tracking/clock";
 import { reportedDelayLine } from "../tracking/delay";
+import { tripNow } from "../tracking/alertDetail";
 import { AlertsPanel } from "./AlertsPanel";
 import { RouteDiagram } from "./RouteDiagram";
 import { RouteDetails } from "./RouteDetails";
@@ -134,11 +135,7 @@ export function TrackPage({ store, onSignIn }: { store: TrackStore; onSignIn: ()
           <AlertsPanel
             source={store.source}
             assignmentId={state.context.assignment.assignmentId}
-            trip={
-              state.kind === "tracking"
-                ? { kind: "run", assignmentId: state.context.assignment.assignmentId, run: state.run }
-                : { kind: "no_active_run", assignmentId: state.context.assignment.assignmentId }
-            }
+            trip={tripNow(state, store.connectionLost)}
           />
           <RouteDetails context={state.context} />
         </>

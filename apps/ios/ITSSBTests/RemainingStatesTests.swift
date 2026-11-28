@@ -199,6 +199,50 @@ final class RemainingStatesTests: XCTestCase {
         model.stop()
     }
 
+    /// Review P1: an expired session never leaves the dashboard's names and routes on screen.
+    func testSessionExpiryHidesTheDashboardAndClearsStudents() async {
+        let source = MockLiveRunSource()
+        let model = TrackViewModel(source: source)
+        model.start()
+        _ = await eventually { source.assignmentsContinuation != nil }
+        let alex = AssignmentSummary(assignmentId: "a_alex", relationship: .guardian,
+                                     studentDisplayName: "Alex Example", routeLabel: "Route 17", stopLabel: "Oak")
+        let jordan = AssignmentSummary(assignmentId: "a_jordan", relationship: .guardian,
+                                       studentDisplayName: "Jordan Example", routeLabel: "Route 4", stopLabel: "Elm")
+        source.assignmentsContinuation?.yield(.ready([alex, jordan]))
+        let listed = await eventually { model.dashboardAvailable }
+        XCTAssertTrue(listed)
+
+        source.runContinuation("a_alex")?.yield(.accessUnavailable(.unauthenticated))
+        let expired = await eventually { model.state == .sessionExpired }
+        XCTAssertTrue(expired)
+        XCTAssertFalse(model.dashboardAvailable, "sign-in recovery shows instead of the dashboard")
+        XCTAssertTrue(model.assignments.isEmpty, "no student names stay in memory for another view")
+        model.stop()
+    }
+
+    /// Review P2: offline, a row can't claim "no trip" or "running".
+    func testDashboardIsUnconfirmedWhileDisconnected() async {
+        let noTrip = RunSnapshot.noActiveRun(assignmentId: "a", routeVersionId: "rv", clock: .deviceOnly,
+                                             notices: .none)
+        let row = DashboardRow.make(snapshot: noTrip, failed: false, now: Date(), connectionLost: true)
+        XCTAssertEqual(row.status, "Can't confirm right now")
+        XCTAssertEqual(row.tone, .unknown)
+
+        let source = MockLiveRunSource()
+        let model = GuardianDashboardModel(source: source)
+        model.update(assignmentIds: ["a_alex", "a_jordan"])
+        _ = await eventually { source.connectionSubscriptionCount == 1 }
+        source.setConnected(true)
+        source.setConnected(false)
+        let lost = await eventually { model.connectionLost }
+        XCTAssertTrue(lost)
+        source.setConnected(true)
+        let back = await eventually { !model.connectionLost }
+        XCTAssertTrue(back)
+        model.stop()
+    }
+
     // MARK: I12/I16 check-in from the trip
 
     func testOnlyAStudentOnARunningTripIsOfferedCheckIn() {

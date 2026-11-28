@@ -4,11 +4,14 @@
  * the live run confirms it. Mirrors the iOS `AlertCurrency`.
  */
 import type { AlertItem, TrackedRun } from "./model";
+import type { TrackState } from "./store";
 
 /** What the page knows about the alert's assignment right now. */
 export type TripNow =
   | { kind: "checking" }
   | { kind: "unknown" }
+  /** The connection dropped: the last answer may be out of date (I25). */
+  | { kind: "disconnected" }
   | { kind: "no_active_run"; assignmentId: string }
   | { kind: "run"; assignmentId: string; run: TrackedRun };
 
@@ -18,13 +21,16 @@ export type AlertCurrency =
   | { kind: "trip_ended" }
   | { kind: "superseded"; newerEstimateAtMs: number }
   | { kind: "latest" }
-  | { kind: "running_no_estimate" };
+  | { kind: "running_no_estimate" }
+  | { kind: "unconfirmed" };
 
 export function alertCurrency(alert: AlertItem, trip: TripNow): AlertCurrency {
   switch (trip.kind) {
     case "checking":
     case "unknown":
       return { kind: trip.kind };
+    case "disconnected":
+      return { kind: "unconfirmed" };
     case "no_active_run":
       return trip.assignmentId === alert.assignmentId ? { kind: "trip_ended" } : { kind: "unknown" };
     case "run": {
@@ -53,5 +59,15 @@ export function alertCurrencyText(c: AlertCurrency, time: (ms: number) => string
       return { title: "This is the trip's latest estimate", detail: "The trip is still running. The trip above shows how old the estimate is now." };
     case "running_no_estimate":
       return { title: "No current estimate", detail: "The trip is still running, but there's no estimate right now." };
+    case "unconfirmed":
+      return { title: "Can't confirm right now", detail: "The connection was lost, so this trip's status can't be checked. Reconnecting…" };
   }
+}
+
+/** What the alert details may say about the trip: never cached state while the connection is lost. */
+export function tripNow(state: TrackState, connectionLost: boolean): TripNow {
+  if (connectionLost) return { kind: "disconnected" };
+  if (state.kind === "tracking") return { kind: "run", assignmentId: state.context.assignment.assignmentId, run: state.run };
+  if (state.kind === "no_active_run") return { kind: "no_active_run", assignmentId: state.context.assignment.assignmentId };
+  return { kind: "unknown" };
 }

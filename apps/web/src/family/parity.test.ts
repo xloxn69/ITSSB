@@ -1,6 +1,7 @@
 import { enrollmentRequestRefused } from "@itssb/contracts/fixtures";
 import { describe, expect, it } from "vitest";
-import { alertCurrency } from "../tracking/alertDetail";
+import { alertCurrency, tripNow } from "../tracking/alertDetail";
+import type { TrackState } from "../tracking/store";
 import type { AlertItem, TrackedRun } from "../tracking/model";
 import { clearsOnEdit, commandView, enrollmentRequestArgs } from "./enrollmentModel";
 import { walkingDirectionsUrl } from "./routeLinks";
@@ -68,6 +69,20 @@ describe("alert details (I21 on the web)", () => {
     expect(alertCurrency(alert, { kind: "run", assignmentId: "a_1", run: newer })).toEqual({ kind: "superseded", newerEstimateAtMs: 1_030_000 });
     expect(alertCurrency(alert, { kind: "run", assignmentId: "a_1", run: run() }).kind).toBe("latest");
     expect(alertCurrency(alert, { kind: "run", assignmentId: "a_1", run: run({ eta: null }) }).kind).toBe("running_no_estimate");
+  });
+});
+
+describe("alert details while disconnected (review)", () => {
+  it("never passes cached trip state into the alert's currency", () => {
+    const tracking = {
+      kind: "tracking",
+      context: { assignment: { assignmentId: "a_1" } },
+      run: run(),
+    } as unknown as TrackState;
+    expect(alertCurrency(alert, tripNow(tracking, false)).kind).toBe("latest");
+    expect(alertCurrency(alert, tripNow(tracking, true)).kind).toBe("unconfirmed");
+    const noRun = { kind: "no_active_run", context: { assignment: { assignmentId: "a_1" } } } as unknown as TrackState;
+    expect(alertCurrency(alert, tripNow(noRun, true)).kind).toBe("unconfirmed");
   });
 });
 

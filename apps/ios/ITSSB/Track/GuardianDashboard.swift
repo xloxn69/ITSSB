@@ -11,8 +11,22 @@ struct DashboardRow: Equatable {
     let detail: String?
     let tone: Tone
 
-    static func make(snapshot: RunSnapshot?, failed: Bool, now: Date) -> DashboardRow {
+    static func make(snapshot: RunSnapshot?, failed: Bool, now: Date, connectionLost: Bool = false) -> DashboardRow {
         if failed { return DashboardRow(status: "Couldn't load this trip", detail: nil, tone: .unknown) }
+        if connectionLost { return offline(snapshot, now: now) }
+        return online(snapshot, now: now)
+    }
+
+    /// Subscriptions go quiet offline: "no trip" or "running" may no longer be true (I25).
+    private static func offline(_ snapshot: RunSnapshot?, now: Date) -> DashboardRow {
+        let age: String? = if case let .ready(_, _, run, clock, _) = snapshot, let position = run.position {
+            AgeFormatter.updatedText(age: position.age(at: now, clock: clock))
+        } else { nil }
+        return DashboardRow(status: "Can't confirm right now",
+                            detail: age.map { "Reconnecting… \($0)" } ?? "Reconnecting…", tone: .unknown)
+    }
+
+    private static func online(_ snapshot: RunSnapshot?, now: Date) -> DashboardRow {
         switch snapshot {
         case nil:
             return DashboardRow(status: "Checking…", detail: nil, tone: .unknown)
@@ -40,6 +54,9 @@ struct DashboardRow: Equatable {
 final class GuardianDashboardModel {
     private(set) var snapshots: [String: RunSnapshot] = [:]
     private(set) var failed: Set<String> = []
+    /// The phone's link dropped after it had one.
+    private(set) var connectionLost = false
+    @ObservationIgnored private var connectionTask: Task<Void, Never>?
 
     @ObservationIgnored private let source: any LiveRunSource
     @ObservationIgnored private var tasks: [String: Task<Void, Never>] = [:]
@@ -50,6 +67,7 @@ final class GuardianDashboardModel {
 
     /// Starts watching new assignments and stops (and forgets) removed ones.
     func update(assignmentIds: [String]) {
+        if connectionTask == nil, !assignmentIds.isEmpty { watchConnection() }
         let wanted = Set(assignmentIds)
         for (id, task) in tasks where !wanted.contains(id) {
             task.cancel()
@@ -75,8 +93,22 @@ final class GuardianDashboardModel {
         }
     }
 
+    private func watchConnection() {
+        connectionTask = Task { [weak self, source] in
+            var everConnected = false
+            for await connected in source.connection() {
+                guard let self, !Task.isCancelled else { return }
+                everConnected = everConnected || connected
+                self.connectionLost = everConnected && !connected
+            }
+        }
+    }
+
     func stop() {
         update(assignmentIds: [])
+        connectionTask?.cancel()
+        connectionTask = nil
+        connectionLost = false
     }
 }
 
@@ -97,7 +129,7 @@ struct GuardianDashboardView: View {
             List(assignments) { assignment in
                 let row = DashboardRow.make(snapshot: model.snapshots[assignment.assignmentId],
                                             failed: model.failed.contains(assignment.assignmentId),
-                                            now: timeline.date)
+                                            now: timeline.date, connectionLost: model.connectionLost)
                 Button { onSelect(assignment.assignmentId) } label: {
                     StudentRow(assignment: assignment, row: row)
                 }
