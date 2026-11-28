@@ -5,7 +5,7 @@ import endRequest from "../fixtures/tripEvent.endRun.request.json" with { type: 
 import startAccepted from "../fixtures/tripEvent.startRun.accepted.json" with { type: "json" };
 import startRequest from "../fixtures/tripEvent.startRun.request.json" with { type: "json" };
 import { tripEventFixtureFiles } from "./tripEventFixtures.js";
-import { endOfLocalDayMs, localDate, validateTripEventRequest } from "./tripEvents.js";
+import { endOfLocalDayMs, isValidTimeZone, localDate, validateTripEventRequest } from "./tripEvents.js";
 
 const json: Record<keyof typeof tripEventFixtureFiles, unknown> = {
   "tripEvent.startRun.request": startRequest,
@@ -73,6 +73,12 @@ describe("localDate", () => {
 });
 
 describe("endOfLocalDayMs", () => {
+  it("covers every zone the validator accepts, and the validator stops short of ±24:00", () => {
+    expect(isValidTimeZone("+23:59")).toBe(true);
+    expect(isValidTimeZone("-23:59")).toBe(true);
+    expect(isValidTimeZone("+24:00")).toBe(false);
+  });
+
   it.each([
     // Ordinary day, and both daylight-saving changes in New York (23 h and 25 h days).
     ["2026-11-25", "America/New_York", Date.UTC(2026, 10, 26, 5)],
@@ -85,6 +91,10 @@ describe("endOfLocalDayMs", () => {
     // Santiago falls back at midnight on 5 April: 00:00 -03 becomes 23:00 -04 on the 4th, so the 4th runs 25 h.
     ["2026-04-04", "America/Santiago", Date.UTC(2026, 3, 5, 4)],
     ["2026-04-05", "America/Santiago", Date.UTC(2026, 3, 6, 4)],
+    // Numeric offsets the time-zone validator accepts, out to its limits.
+    ["2026-11-25", "+16:00", Date.UTC(2026, 10, 25, 8)],
+    ["2026-11-25", "+23:59", Date.UTC(2026, 10, 25, 0, 1)],
+    ["2026-11-25", "-23:59", Date.UTC(2026, 10, 26, 23, 59)],
   ])("%s in %s ends when the next local date begins", (date, zone, expected) => {
     const end = endOfLocalDayMs(date, zone);
     expect(end).toBe(expected);

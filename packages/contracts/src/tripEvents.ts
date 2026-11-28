@@ -137,10 +137,12 @@ export function endOfLocalDayMs(date: string, timeZone: string): number {
   const nextMidnightAsUtc = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + 1);
   const format = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });
   const after = (atMs: number) => format.format(new Date(atMs)) > date;
-  // UTC offsets lie within -12 h and +14 h, so local time here is still `date`...
-  let lo = nextMidnightAsUtc - 15 * HOUR_MS;
+  // Every zone `isValidTimeZone` accepts, IANA names and numeric offsets
+  // alike, is less than 24 h from UTC (Intl rejects ±24:00). So local time
+  // here is still `date` or earlier...
+  let lo = nextMidnightAsUtc - 25 * HOUR_MS;
   // ...and here is already a later date.
-  let hi = nextMidnightAsUtc + 13 * HOUR_MS;
+  let hi = nextMidnightAsUtc + 25 * HOUR_MS;
   if (after(lo) || !after(hi)) throw new Error(`No end of ${date} found in ${timeZone}`);
   while (hi - lo > 1) {
     const mid = Math.floor((lo + hi) / 2);

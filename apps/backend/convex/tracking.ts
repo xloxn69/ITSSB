@@ -383,6 +383,27 @@ async function activeRunFor(ctx: QueryCtx, assignment: Doc<"assignments">) {
     .first();
 }
 
+/**
+ * The local date and the end of that day for a stored row, or null when its
+ * time zone can't be computed. One bad row is dropped and logged, never
+ * allowed to fail `myRun` for every family on it (docs/08 §8).
+ */
+function serviceDay(
+  nowMs: number,
+  serviceDate: string | undefined,
+  timeZone: string | undefined,
+  what: string,
+): { today: boolean; validUntilMs: number } | null {
+  if (serviceDate === undefined || timeZone === undefined) return null;
+  try {
+    if (serviceDate !== localDate(nowMs, timeZone)) return { today: false, validUntilMs: 0 };
+    return { today: true, validUntilMs: endOfLocalDayMs(serviceDate, timeZone) };
+  } catch (error) {
+    console.error(`tracking.myRun: dropped ${what} with an unusable time zone`, { serviceDate, timeZone, error });
+    return null;
+  }
+}
+
 const endedAt = (r: Doc<"runs">) => r.cancelledAtMs ?? r.endedAtMs ?? r._creationTime;
 const utcDate = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
@@ -415,23 +436,25 @@ async function todaysEndedRun(
     )
   )
     .flat()
-    .filter(
-      (r) => r.serviceDate !== undefined && r.serviceTimezone !== undefined && r.serviceDate === localDate(nowMs, r.serviceTimezone),
-    );
-  const latest = ended.reduce<Doc<"runs"> | null>((a, r) => (!a || endedAt(r) > endedAt(a) ? r : a), null);
-  if (!latest || latest.serviceDate === undefined || latest.serviceTimezone === undefined) return null;
+    .flatMap((run) => {
+      const day = serviceDay(nowMs, run.serviceDate, run.serviceTimezone, `run ${run._id}`);
+      return day?.today && run.serviceDate !== undefined ? [{ run, serviceDate: run.serviceDate, validUntilMs: day.validUntilMs }] : [];
+    });
+  const pick = ended.reduce<(typeof ended)[number] | null>((a, r) => (!a || endedAt(r.run) > endedAt(a.run) ? r : a), null);
+  if (!pick) return null;
+  const latest = pick.run;
   const state = latest.state === "cancelled" ? "cancelled" : "completed";
   return {
     runId: latest._id,
     state,
-    serviceDate: latest.serviceDate,
+    serviceDate: pick.serviceDate,
     endedAtMs: latest.cancelledAtMs ?? latest.endedAtMs ?? null,
     // An active replacement is returned as the run itself, never here.
     replacement:
       state === "cancelled" && latest.replacementDeviceId !== undefined && latest.replacedByRunId === undefined
         ? "pending"
         : null,
-    validUntilMs: endOfLocalDayMs(latest.serviceDate, latest.serviceTimezone),
+    validUntilMs: pick.validUntilMs,
   };
 }
 
@@ -447,13 +470,18 @@ async function todaysServiceNotice(ctx: QueryCtx, nowMs: number): Promise<Servic
     .query("serviceDays")
     .withIndex("by_date", (q) => q.gte("serviceDate", utcDate(nowMs - DAY_MS)).lte("serviceDate", utcDate(nowMs + DAY_MS)))
     .take(3);
-  const today = rows.find((r) => r.serviceDate === localDate(nowMs, r.timezone));
-  if (!today) return null;
+  for (const today of rows) {
+    const day = serviceDay(nowMs, today.serviceDate, today.timezone, `calendar entry ${today.serviceDate}`);
+    if (day?.today) return { ...noticeFields(today), validUntilMs: day.validUntilMs };
+  }
+  return null;
+}
+
+function noticeFields(today: Doc<"serviceDays">): Omit<ServiceNotice, "validUntilMs"> {
   return {
     serviceDate: today.serviceDate,
     status: today.status,
     lateStartMinutes: today.status === "late_start" ? (today.lateStartMinutes ?? null) : null,
     notice: today.notice,
-    validUntilMs: endOfLocalDayMs(today.serviceDate, today.timezone),
   };
 }

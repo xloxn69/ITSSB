@@ -286,3 +286,52 @@ describe("D14: service-calendar notices in tracking.myRun", () => {
     expect(r).toMatchObject({ status: "no_active_run", serviceNotice: null });
   });
 });
+
+describe("D14: one bad calendar entry or run never fails tracking.myRun", () => {
+  it("a notice saved with a far numeric offset (+16:00) is shown, with and without a running trip", async () => {
+    const s = await setup();
+    const zone = "+16:00";
+    const today = localDate(Date.now(), zone);
+    expect(
+      await s.staff.mutation(api.calendar.setDay, { serviceDate: today, timezone: zone, status: "no_service", notice: "Closed." }),
+    ).toMatchObject({ status: "ok" });
+    const noTrip = await s.student.query(api.tracking.myRun, { assignmentId: s.assignmentId });
+    expect(noTrip).toMatchObject({
+      status: "no_active_run",
+      serviceNotice: { serviceDate: today, validUntilMs: endOfLocalDayMs(today, zone) },
+    });
+    await activeRun(s, s.route);
+    const live = await s.student.query(api.tracking.myRun, { assignmentId: s.assignmentId });
+    expect(live).toMatchObject({ status: "ready", run: { state: "active" }, serviceNotice: { serviceDate: today } });
+  });
+
+  it("a stored entry or ended run whose time zone can't be computed is dropped; the rest still renders", async () => {
+    const s = await setup();
+    // Rows written before validation, or by a future validator change: never trusted to compute.
+    await s.t.run(async (ctx) => {
+      await ctx.db.insert("serviceDays", {
+        serviceDate: localDate(Date.now(), TZ),
+        timezone: "Not/AZone",
+        status: "no_service",
+        notice: "Closed.",
+        setByUserId: s.staffId,
+        setAtMs: Date.now(),
+      });
+      await ctx.db.insert("runs", {
+        deviceId: s.deviceA,
+        routeVersionId: s.route,
+        state: "cancelled",
+        startRequestId: crypto.randomUUID(),
+        serviceDate: localDate(Date.now(), TZ),
+        serviceTimezone: "Not/AZone",
+        endedAtMs: Date.now(),
+        cancelledAtMs: Date.now(),
+      });
+    });
+    const noTrip = await s.student.query(api.tracking.myRun, { assignmentId: s.assignmentId });
+    expect(noTrip).toMatchObject({ status: "no_active_run", endedRun: null, serviceNotice: null });
+    await activeRun(s, s.route);
+    const live = await s.student.query(api.tracking.myRun, { assignmentId: s.assignmentId });
+    expect(live).toMatchObject({ status: "ready", run: { state: "active" }, serviceNotice: null });
+  });
+});
