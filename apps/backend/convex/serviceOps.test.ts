@@ -388,3 +388,59 @@ describe("maintenance windows", () => {
     });
   });
 });
+
+// ── Acceptance gaps: non-staff callers (docs/13 §5) ────────────────────
+
+const FAMILY = "test|family";
+const PENDING = "test|pending-applicant";
+
+describe("acceptance: non-staff callers are denied run and maintenance operations", () => {
+  async function withWindow() {
+    const s = await setup();
+    await s.t.run((ctx) => ctx.db.insert("users", { tokenIdentifier: FAMILY, role: "family", displayName: "Pat Parent" }));
+    await s.staff.mutation(api.fleet.scheduleMaintenance, slot(s.deviceB, HOUR, 2));
+    const list = await s.staff.query(api.fleet.listMaintenance, {});
+    if (list.status !== "ready") throw new Error("expected ready");
+    const windowId = list.windows[0]!.windowId;
+    const snapshot = () =>
+      s.t.run(async (ctx) => ({
+        runs: await ctx.db.query("runs").collect(),
+        windows: await ctx.db.query("maintenanceWindows").collect(),
+      }));
+    return { ...s, windowId, snapshot, before: await snapshot(), auditBefore: (await audit(s.t)).length };
+  }
+
+  const callers: [string, string | null, "not_permitted" | "unauthenticated"][] = [
+    ["a driver", DRIVER, "not_permitted"],
+    ["a family account", FAMILY, "not_permitted"],
+    ["a pending applicant", PENDING, "not_permitted"],
+    ["a signed-out caller", null, "unauthenticated"],
+  ];
+
+  for (const [label, who, reason] of callers) {
+    it(`${label}: replaceDevice and cancelMaintenance change nothing; listMaintenance shows nothing`, async () => {
+      const s = await withWindow();
+      const caller = who ? s.t.withIdentity({ tokenIdentifier: who }) : s.t;
+      const answers = [
+        await caller.mutation(api.runOps.replaceDevice, { runId: s.runId, replacementDeviceId: s.deviceB, reason: "Flat tire" }),
+        await caller.mutation(api.fleet.cancelMaintenance, { windowId: s.windowId }),
+        await caller.query(api.fleet.listMaintenance, {}),
+      ];
+      for (const answer of answers) {
+        expect(Object.keys(answer).toSorted()).toEqual(["reason", "schemaVersion", "serverNowMs", "status"]);
+        expect(answer).toMatchObject({ status: "access_unavailable", reason });
+      }
+      expect(await s.snapshot()).toEqual(s.before);
+      // A signed-in attempt that changes something is audited as denied; an anonymous one has no actor.
+      const added = (await audit(s.t)).slice(s.auditBefore).map((a) => [a.action, a.result]);
+      expect(added).toEqual(
+        who === DRIVER || who === FAMILY
+          ? [
+              ["runs.replaceDevice", "denied"],
+              ["maintenance.cancel", "denied"],
+            ]
+          : [],
+      );
+    });
+  }
+});

@@ -200,6 +200,18 @@ describe("enrollment invitation preview", () => {
     });
   });
 
+  it.each([
+    ["expired", EXPIRED_TOKEN, "expired"],
+    ["revoked", REVOKED_TOKEN, "invalid"],
+    ["unknown", "ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ", "invalid"],
+    ["wrong-purpose", CHECKIN_TOKEN, "wrong_purpose"],
+  ])("A06: a %s token answer carries no route, stop or student fields", async (_name, token, problem) => {
+    const { t } = await setup();
+    const result = await as(t, APPLICANT).query(api.enrollment.previewInvitation, { token });
+    expect(Object.keys(result).toSorted()).toEqual(["problem", "schemaVersion", "serverNowMs", "status"]);
+    expect(result).toMatchObject({ status: "token_problem", problem });
+  });
+
   it("needs a sign-in", async () => {
     const { t } = await setup();
     expect(await t.query(api.enrollment.previewInvitation, { token: ROUTE_TOKEN })).toMatchObject({

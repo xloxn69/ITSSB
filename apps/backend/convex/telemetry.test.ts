@@ -146,3 +146,76 @@ describe("runs.live access", () => {
     });
   });
 });
+
+// ── Acceptance gaps (docs/13 §4: D03, D10) ──────────────────────────────
+
+const liveRow = (t: Awaited<ReturnType<typeof setup>>["t"]) => t.run((ctx) => ctx.db.query("liveState").collect());
+
+describe("acceptance: mixed batches and live-state integrity", () => {
+  it("D03: one batch with an accepted, a duplicate and a rejected event answers each explicitly, in order", async () => {
+    const { t, deviceId, event } = await setup();
+    await t.mutation(internal.telemetry.ingestBatch, { deviceId, events: [event], nowMs: NOW });
+    const fresh = {
+      ...event,
+      eventId: "5f0c2d1e-3333-4b4c-8d5e-444444444444",
+      sequence: event.sequence + 1,
+      runSequence: event.runSequence + 1,
+      capturedAtMs: event.capturedAtMs + 100,
+    };
+    const bad = { ...fresh, eventId: "6a1b2c3d-5555-4e6f-8a7b-666666666666", latitude: 91 };
+    const results = await t.mutation(internal.telemetry.ingestBatch, {
+      deviceId,
+      events: [fresh, event, bad],
+      nowMs: NOW + 200,
+    });
+    expect(results).toEqual([
+      { eventId: fresh.eventId, status: "accepted", receivedAtMs: NOW + 200, liveStateApplied: true },
+      // The live position moved on to `fresh` in this same batch.
+      { eventId: event.eventId, status: "duplicate", receivedAtMs: NOW, liveStateApplied: false },
+      { eventId: bad.eventId, status: "rejected", code: "INVALID_COORDINATES", message: expect.any(String) },
+    ]);
+    const stored = await t.run((ctx) => ctx.db.query("telemetryEvents").collect());
+    expect(stored.map((e) => e.eventId).toSorted()).toEqual([event.eventId, fresh.eventId].toSorted());
+  });
+
+  it.each([
+    ["latitude out of range", { latitude: 91 }, "INVALID_COORDINATES"],
+    ["a non-finite longitude", { longitude: Number.POSITIVE_INFINITY }, "INVALID_COORDINATES"],
+    ["a capture time in the future", { capturedAtMs: NOW + 10 * 60_000 }, "CLOCK_OUT_OF_RANGE"],
+  ])("D10: an invalid newer event (%s) leaves the run's live state unchanged", async (_n, change, code) => {
+    const { t, deviceId, event } = await setup();
+    await t.mutation(internal.telemetry.ingestBatch, { deviceId, events: [event], nowMs: NOW });
+    const before = await liveRow(t);
+    const [r] = await t.mutation(internal.telemetry.ingestBatch, {
+      deviceId,
+      events: [
+        {
+          ...event,
+          eventId: "7b2c3d4e-7777-4f8a-9b0c-888888888888",
+          sequence: event.sequence + 1,
+          runSequence: event.runSequence + 1,
+          capturedAtMs: event.capturedAtMs + 100,
+          ...change,
+        },
+      ],
+      nowMs: NOW + 200,
+    });
+    expect(r).toMatchObject({ status: "rejected", code });
+    expect(await liveRow(t)).toEqual(before);
+  });
+
+  it("D10: a duplicate eventId with newer, different content leaves the run's live state unchanged", async () => {
+    const { t, deviceId, event } = await setup();
+    await t.mutation(internal.telemetry.ingestBatch, { deviceId, events: [event], nowMs: NOW });
+    const before = await liveRow(t);
+    expect(before).toHaveLength(1);
+    const [r] = await t.mutation(internal.telemetry.ingestBatch, {
+      deviceId,
+      events: [{ ...event, capturedAtMs: event.capturedAtMs + 100, latitude: event.latitude + 0.001 }],
+      nowMs: NOW + 200,
+    });
+    expect(r).toMatchObject({ status: "rejected", code: "EVENT_CONTENT_CONFLICT" });
+    expect(await liveRow(t)).toEqual(before);
+    expect(await t.run((ctx) => ctx.db.query("telemetryEvents").collect())).toHaveLength(1);
+  });
+});
