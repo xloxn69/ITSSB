@@ -411,3 +411,22 @@ describe("users.bootstrapStaff", () => {
     await expect(t.mutation(internal.users.bootstrapStaff, { tokenIdentifier: ID, displayName: " " })).rejects.toThrow(/INVALID_DISPLAY_NAME/);
   });
 });
+
+// MARK: Grantable routes
+
+describe("driverGrants.listForStaff route choices", () => {
+  it("lists a version once when it predates route review and is also a route's current version", async () => {
+    // Seeded development data: the version has no routeId, and a route made
+    // later points at it as current. Staff saw it twice in the grant form.
+    const { t, staff } = await setup();
+    const legacyId = await t.run(async (ctx) => {
+      const id = await ctx.db.insert("routeVersions", { label: "Route 4 Afternoon", path: [] });
+      await ctx.db.insert("routes", { label: "Route 4 Afternoon", direction: "from_school", createdAtMs: Date.now(), currentVersionId: id });
+      return id;
+    });
+    const list = await staff.query(api.driverGrants.listForStaff, {});
+    if (list.status !== "ready") throw new Error("expected ready");
+    expect(list.routeVersions.filter((x) => x.routeVersionId === legacyId)).toHaveLength(1);
+    expect(new Set(list.routeVersions.map((x) => x.routeVersionId)).size).toBe(list.routeVersions.length);
+  });
+});

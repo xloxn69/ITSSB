@@ -307,7 +307,10 @@ export const listForStaff = query({
     }
     // Versions created before route review existed have no route and stay startable.
     for (const version of await ctx.db.query("routeVersions").take(500)) {
-      if (!version.routeId) routeVersions.push({ routeVersionId: version._id, label: version.label, versionNumber: null });
+      // A route made later may already point at one of them as current.
+      if (!version.routeId && !routeVersions.some((x) => x.routeVersionId === version._id)) {
+        routeVersions.push({ routeVersionId: version._id, label: version.label, versionNumber: null });
+      }
     }
     routeVersions.sort((a, b) => a.label.localeCompare(b.label));
     return { schemaVersion: SCHEMA_VERSION, status: "ready", serverNowMs: nowMs, grants, routeVersions };
