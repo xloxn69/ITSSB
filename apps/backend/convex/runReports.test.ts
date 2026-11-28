@@ -102,12 +102,10 @@ async function send(t: T, body: unknown, secret = SECRET_A) {
 const rows = (t: T) => t.run((ctx) => ctx.db.query("runReports").collect());
 const audits = (t: T) => t.run(async (ctx) => (await ctx.db.query("auditLog").collect()).filter((a) => a.action === "run.report"));
 
-async function rejectedWith(t: T, body: unknown, code: string, secret?: string) {
+/** A refused report's HTTP status, result and code, and how many reports are stored. */
+async function refusal(t: T, body: unknown, secret?: string) {
   const r = await send(t, body, secret);
-  expect(r.status).toBe(200);
-  expect(r.body.status).toBe("rejected");
-  if (r.body.status === "rejected") expect(r.body.code).toBe(code);
-  expect(await rows(t)).toHaveLength(0);
+  return { http: r.status, status: r.body.status, code: r.body.status === "rejected" ? r.body.code : null, stored: (await rows(t)).length };
 }
 
 describe("POST /device/v1/run-reports", () => {
@@ -120,9 +118,9 @@ describe("POST /device/v1/run-reports", () => {
     expect(again.body.status).toBe("already_recorded");
     if (first.body.status !== "accepted" || again.body.status !== "already_recorded") throw new Error("not stored");
     expect(again.body.report).toEqual(first.body.report);
-    const stored = await rows(t);
-    expect(stored).toHaveLength(1);
-    expect(stored[0]).toMatchObject({ runId: run, deviceId: deviceA, driverUserId: driver, category: "traffic", expectedDelayMinutes: 10 });
+    const saved = await rows(t);
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({ runId: run, deviceId: deviceA, driverUserId: driver, category: "traffic", expectedDelayMinutes: 10 });
     const allowed = (await audits(t)).filter((a) => a.result === "allowed");
     expect(allowed).toHaveLength(1);
     expect(allowed[0]).toMatchObject({ actor: { kind: "user", userId: driver }, viaDeviceId: deviceA, source: "driver_device" });
@@ -132,11 +130,10 @@ describe("POST /device/v1/run-reports", () => {
     const { t, run } = await setup();
     await send(t, report(run));
     const r = await send(t, report(run, { expectedDelayMinutes: 25 }));
-    expect(r.body.status).toBe("rejected");
-    if (r.body.status === "rejected") expect(r.body.code).toBe("request_id_conflict");
-    const stored = await rows(t);
-    expect(stored).toHaveLength(1);
-    expect(stored[0]?.expectedDelayMinutes).toBe(10);
+    expect(r.body).toMatchObject({ status: "rejected", code: "request_id_conflict" });
+    const saved = await rows(t);
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.expectedDelayMinutes).toBe(10);
   });
 
   it("never stores free text sent alongside the category", async () => {
@@ -150,14 +147,14 @@ describe("POST /device/v1/run-reports", () => {
 
   it("refuses another device's report on this bus's run", async () => {
     const { t, run } = await setup();
-    await rejectedWith(t, report(run, { driverOperatingGrant: GRANT_B }), "run_not_authorized", SECRET_B);
+    expect(await refusal(t, report(run, { driverOperatingGrant: GRANT_B }), SECRET_B)).toEqual({ http: 200, status: "rejected", code: "run_not_authorized", stored: 0 });
     const denied = (await audits(t)).filter((a) => a.result === "denied");
     expect(denied).toHaveLength(1);
   });
 
   it("refuses another device's grant presented by this device", async () => {
     const { t, run } = await setup();
-    await rejectedWith(t, report(run, { driverOperatingGrant: GRANT_B }), "grant_not_authorized");
+    expect(await refusal(t, report(run, { driverOperatingGrant: GRANT_B }))).toEqual({ http: 200, status: "rejected", code: "grant_not_authorized", stored: 0 });
   });
 
   it("refuses a revoked grant", async () => {
@@ -166,7 +163,7 @@ describe("POST /device/v1/run-reports", () => {
       const g = await ctx.db.query("driverGrants").collect();
       for (const row of g) await ctx.db.patch(row._id, { revoked: true });
     });
-    await rejectedWith(t, report(run), "grant_not_authorized");
+    expect(await refusal(t, report(run))).toEqual({ http: 200, status: "rejected", code: "grant_not_authorized", stored: 0 });
   });
 
   it("refuses an expired grant", async () => {
@@ -174,34 +171,34 @@ describe("POST /device/v1/run-reports", () => {
     await t.run(async (ctx) => {
       for (const row of await ctx.db.query("driverGrants").collect()) await ctx.db.patch(row._id, { expiresAtMs: NOW - MIN });
     });
-    await rejectedWith(t, report(run, { capturedAtMs: NOW - 2 * MIN }), "grant_not_authorized");
+    expect(await refusal(t, report(run, { capturedAtMs: NOW - 2 * MIN }))).toEqual({ http: 200, status: "rejected", code: "grant_not_authorized", stored: 0 });
   });
 
   it("refuses a report made before the grant was issued", async () => {
     const { t, run } = await setup();
-    await rejectedWith(t, report(run, { capturedAtMs: NOW - 2 * HOUR }), "grant_not_authorized");
+    expect(await refusal(t, report(run, { capturedAtMs: NOW - 2 * HOUR }))).toEqual({ http: 200, status: "rejected", code: "grant_not_authorized", stored: 0 });
   });
 
   it.each(["scheduled", "cancelled"] as const)("refuses a report on a %s run", async (state) => {
     const { t, run } = await setup();
     await t.run((ctx) => ctx.db.patch(run, { state }));
-    await rejectedWith(t, report(run), "run_not_authorized");
+    expect(await refusal(t, report(run))).toEqual({ http: 200, status: "rejected", code: "run_not_authorized", stored: 0 });
   });
 
   it("refuses a report made before the run started", async () => {
     const { t, run } = await setup();
-    await rejectedWith(t, report(run, { capturedAtMs: NOW - 45 * MIN }), "run_not_authorized");
+    expect(await refusal(t, report(run, { capturedAtMs: NOW - 45 * MIN }))).toEqual({ http: 200, status: "rejected", code: "run_not_authorized", stored: 0 });
   });
 
   it("refuses a run on a route the grant does not cover", async () => {
     const { t, run, otherVersion } = await setup();
     await t.run((ctx) => ctx.db.patch(run, { routeVersionId: otherVersion }));
-    await rejectedWith(t, report(run), "run_not_authorized");
+    expect(await refusal(t, report(run))).toEqual({ http: 200, status: "rejected", code: "run_not_authorized", stored: 0 });
   });
 
   it("refuses an unknown run id", async () => {
     const { t } = await setup();
-    await rejectedWith(t, report("not_a_run"), "run_not_authorized");
+    expect(await refusal(t, report("not_a_run"))).toEqual({ http: 200, status: "rejected", code: "run_not_authorized", stored: 0 });
   });
 
   it("accepts a report queued offline during the run that arrives after the run ended", async () => {
@@ -215,7 +212,7 @@ describe("POST /device/v1/run-reports", () => {
 
   it("refuses a capture time in the future", async () => {
     const { t, run } = await setup();
-    await rejectedWith(t, report(run, { capturedAtMs: NOW + 10 * MIN }), "capture_time_out_of_range");
+    expect(await refusal(t, report(run, { capturedAtMs: NOW + 10 * MIN }))).toEqual({ http: 200, status: "rejected", code: "capture_time_out_of_range", stored: 0 });
   });
 
   it("answers 401 to a revoked device credential and 400 to a category outside the list", async () => {
