@@ -706,13 +706,13 @@ function IssueGrant({
             </select>
           </label>
         </div>
-        <fieldset className="stack" style={{ gap: "var(--space-xs)" }}>
+        <fieldset className="stack flush" style={{ border: "none", padding: 0, gap: "var(--space-xs)" }}>
           <legend>Routes this driver may run</legend>
           {routeVersions.length === 0 ? (
             <p className="muted small">No approved routes yet. Approve one in Route review.</p>
           ) : (
             routeVersions.map((r) => (
-              <label key={r.routeVersionId} className="row" style={{ gap: "var(--space-xs)" }}>
+              <label key={r.routeVersionId} className="choice">
                 <input
                   type="checkbox"
                   checked={chosen.includes(r.routeVersionId)}
@@ -720,8 +720,10 @@ function IssueGrant({
                     setChosen((c) => (e.target.checked ? [...c, r.routeVersionId] : c.filter((x) => x !== r.routeVersionId)))
                   }
                 />
-                {r.label}
-                {r.versionNumber !== null && <span className="muted small"> v{r.versionNumber}</span>}
+                <span>
+                  {r.label}
+                  {r.versionNumber !== null && <span className="muted small"> v{r.versionNumber}</span>}
+                </span>
               </label>
             ))
           )}
