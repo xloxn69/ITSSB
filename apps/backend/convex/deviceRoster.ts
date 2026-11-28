@@ -29,14 +29,14 @@ type Failure = { ok: false; status: 400 | 403; code: "GRANT_NOT_AUTHORIZED" | "R
 const GRANT_DENIED: Failure = { ok: false, status: 403, code: "GRANT_NOT_AUTHORIZED", message: "The driver operating grant does not allow this." };
 const RUN_DENIED: Failure = { ok: false, status: 403, code: "RUN_NOT_AUTHORIZED", message: "This device is not authorized for that run." };
 
-async function liveDevice(ctx: QueryCtx, deviceId: Id<"devices">) {
+export async function liveDevice(ctx: QueryCtx, deviceId: Id<"devices">) {
   const device = await ctx.db.get(deviceId);
   if (!device || device.revoked) throw new ConvexError({ code: "DEVICE_NOT_AUTHORIZED" });
   return device;
 }
 
 /** A grant valid right now for this device. */
-async function currentGrant(ctx: QueryCtx, grantHash: string, device: Doc<"devices">, nowMs: number) {
+export async function currentGrant(ctx: QueryCtx, grantHash: string, device: Doc<"devices">, nowMs: number) {
   const grant = await grantForDevice(ctx, grantHash, device);
   return grant && grant.expiresAtMs > nowMs ? grant : null;
 }

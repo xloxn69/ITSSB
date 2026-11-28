@@ -12,6 +12,7 @@ import type * as alerts from "../alerts.js";
 import type * as audit from "../audit.js";
 import type * as checkIns from "../checkIns.js";
 import type * as crons from "../crons.js";
+import type * as deviceDrafts from "../deviceDrafts.js";
 import type * as deviceRoster from "../deviceRoster.js";
 import type * as calendar from "../calendar.js";
 import type * as devices from "../devices.js";
@@ -62,6 +63,7 @@ declare const fullApi: ApiFromModules<{
   audit: typeof audit;
   checkIns: typeof checkIns;
   crons: typeof crons;
+  deviceDrafts: typeof deviceDrafts;
   deviceRoster: typeof deviceRoster;
   calendar: typeof calendar;
   devices: typeof devices;

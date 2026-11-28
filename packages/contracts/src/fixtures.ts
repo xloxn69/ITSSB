@@ -26,3 +26,4 @@ export * from "./healthFixtures.js";
 export * from "./enrollmentFixtures.js";
 export * from "./checkInFixtures.js";
 export * from "./notificationFixtures.js";
+export * from "./routeDraftFixtures.js";

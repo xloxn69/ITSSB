@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "driverOperatingGrant": "EXAMPLE_ONLY_NOT_A_REAL_GRANT_0000000",
+  "draftIds": [
+    "demo_draft_001",
+    "demo_draft_002",
+    "demo_draft_404"
+  ]
+}

@@ -265,7 +265,24 @@ export default defineSchema({
     reviewedAtMs: v.optional(v.number()),
     decisionReason: v.optional(v.string()),
     approvedVersionId: v.optional(v.id("routeVersions")),
-  }).index("by_status", ["status", "submittedAtMs"]),
+    // Set when a driver submitted it from the Pi (docs/08 §7.1); optional so
+    // drafts written before device submission existed stay valid.
+    /** The Pi's own draft id: one server draft per device draft. */
+    deviceDraftId: v.optional(v.string()),
+    /** The requestId of the submission that stored it. */
+    submitRequestId: v.optional(v.string()),
+    /** SHA-256 of the recording's content; a retry must match it. */
+    contentHash: v.optional(v.string()),
+    /** The driver whose operating grant carried the submission. */
+    recordedByUserId: v.optional(v.id("users")),
+    recordingStartedAtMs: v.optional(v.number()),
+    recordingFinishedAtMs: v.optional(v.number()),
+    /** Path indexes where the receiver lost the fix before the point: not measured travel. */
+    gapBeforeIndexes: v.optional(v.array(v.number())),
+  })
+    .index("by_status", ["status", "submittedAtMs"])
+    .index("by_device_draft", ["recordedByDeviceId", "deviceDraftId"])
+    .index("by_device_request", ["recordedByDeviceId", "submitRequestId"]),
 
   /** A student record. `userId` is the student's own account, if they have one. */
   students: defineTable({
