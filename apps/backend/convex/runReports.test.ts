@@ -7,7 +7,7 @@ import { sha256Hex } from "./lib/deviceAuth";
 import schema from "./schema";
 
 /**
- * `POST /device/v1/run-reports` (docs/08 §9.3) and where a report shows:
+ * `POST /device/v1/run-reports` (docs/08 §9.4) and where a report shows:
  * the family's `tracking.myRun` (category and minutes only), and staff run
  * attendance and diagnostics.
  */

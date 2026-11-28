@@ -118,7 +118,7 @@ export interface TrackedRun {
   assignedStop: AssignedStop;
   eta: Eta | null;
   /**
-   * The driver's newest delay report on this run (docs/08 §9.3), or null.
+   * The driver's newest delay report on this run (docs/08 §9.4), or null.
    * Optional so older backends still decode; this backend always sends it.
    * Category and minutes only, never text, and never an arrival estimate:
    * shown even when `eta` is null (docs/10 §5).

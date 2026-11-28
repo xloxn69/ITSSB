@@ -99,6 +99,17 @@ struct RunDTO: Decodable {
     let nextStopId: String?
     let assignedStop: StopDTO
     let eta: EtaDTO?
+    /// The driver's delay report (docs/08 §9.4). Absent from older backends; null when none.
+    let reportedDelay: ReportedDelayDTO?
+}
+
+/// `run.reportedDelay`: a category and minutes, never free text and never an ETA.
+struct ReportedDelayDTO: Decodable {
+    let category: String
+    @OptionalConvexFloat var minutes: Double?
+    @ConvexFloat var reportedAtMs: Double
+    @ConvexFloat var validUntilMs: Double
+    let source: String
 }
 
 /// Today's finished trip on the route (`no_active_run.endedRun`). It has no position.

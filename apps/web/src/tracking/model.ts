@@ -81,7 +81,7 @@ export interface TrackedRun {
   nextStopId: string | null;
   /** Null when absent or malformed; never repaired or guessed. */
   eta: RunEta | null;
-  /** The driver's delay report (docs/08 §9.3); absent from older backends. Never an ETA. */
+  /** The driver's delay report (docs/08 §9.4); absent from older backends. Never an ETA. */
   reportedDelay?: ReportedDelay | null;
 }
 

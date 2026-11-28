@@ -3,7 +3,7 @@ import type { MyRunResult } from "./tracking.js";
 import { myRunReady } from "./trackingFixtures.js";
 
 /**
- * Canonical fictional run-report fixtures (docs/08 §9.3). Fake IDs and
+ * Canonical fictional run-report fixtures (docs/08 §9.4). Fake IDs and
  * grant. `bun run fixtures` writes them to `fixtures/*.json` for the device
  * and Swift tests.
  */

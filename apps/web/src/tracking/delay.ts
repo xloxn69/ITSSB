@@ -1,5 +1,5 @@
 /**
- * The driver's delay report on the Track screen (docs/10 §5, docs/08 §9.3).
+ * The driver's delay report on the Track screen (docs/10 §5, docs/08 §9.4).
  * Shown on an active run even without an arrival estimate, and never as
  * one: the category, the driver's minutes, and how long ago it was made on
  * the bus. Hidden once the server-aligned clock passes `validUntilMs`.

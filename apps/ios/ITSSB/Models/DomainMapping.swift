@@ -59,8 +59,24 @@ enum DomainMapping {
             gpsStatus: gpsStatus,
             position: dto.lastPosition.flatMap { position(from: $0, serverNow: serverNow) },
             assignedStop: try stop(from: dto.assignedStop, requireStatus: true),
-            eta: dto.eta.flatMap(eta(from:))
+            eta: dto.eta.flatMap(eta(from:)),
+            reportedDelay: dto.reportedDelay.flatMap(reportedDelay(from:))
         )
+    }
+
+    /// Nil for a report that isn't believable; the rest of the run stays usable.
+    static func reportedDelay(from dto: ReportedDelayDTO) -> ReportedDelay? {
+        guard let category = RunReportCategory(rawValue: dto.category), dto.source == "driver",
+              let reportedAt = try? timestamp(dto.reportedAtMs, field: "reportedDelay.reportedAtMs"),
+              let validUntil = try? timestamp(dto.validUntilMs, field: "reportedDelay.validUntilMs"),
+              validUntil > reportedAt
+        else { return nil }
+        var minutes: Int?
+        if let raw = dto.minutes {
+            guard let whole = try? safeWholeNumber(raw, field: "reportedDelay.minutes") else { return nil }
+            minutes = whole
+        }
+        return ReportedDelay(category: category, minutes: minutes, reportedAt: reportedAt, validUntil: validUntil)
     }
 
     /// Nil for an estimate that isn't believable; the rest of the run stays usable.

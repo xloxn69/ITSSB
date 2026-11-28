@@ -102,7 +102,9 @@ Measure 2-, 5-, 10-, and 15-minute horizons where enough examples exist. Report 
 
 ## 7. When to withhold or change a prediction
 
-Suppress or downgrade the ETA when GPS is stale, no valid position exists, the route version is mismatched, progress is ambiguous, the run has ended, or a detour is outside the supported model. A staff-confirmed delay can be displayed immediately even if an accurate new ETA is unavailable.
+Suppress or downgrade the ETA when GPS is stale, no valid position exists, the route version is mismatched, progress is ambiguous, the run has ended, or a detour is outside the supported model. A staff-confirmed or driver-reported delay can be displayed immediately even if an accurate new ETA is unavailable.
+
+**Implemented: driver-reported delay.** A driver's report (docs/05 D20, docs/08 §9.4) reaches families as `reportedDelay` on `tracking:myRun`: "Driver reported a delay (traffic), about 10 min — reported 3 min ago". It is informational only: it never changes, replaces or fakes the ETA, which keeps all of its own suppression rules, and it is shown with its age and hidden after 60 minutes. Staff-confirmed delays have no endpoint yet.
 
 Avoid double-counting a delay. If updated travel observations already reflect slower movement, blindly adding the full driver's delay estimate again may exaggerate the remaining time. Define whether a staff report changes a specific expected segment/hold time or is informational only.
 

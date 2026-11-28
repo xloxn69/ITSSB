@@ -325,7 +325,7 @@ export type RunAttendanceResult =
       runState: "scheduled" | "active" | "completed" | "cancelled";
       startedAtMs: number | null;
       students: RunAttendanceStudent[];
-      /** Driver delay and issue reports on this run, newest first (docs/08 §9.3). */
+      /** Driver delay and issue reports on this run, newest first (docs/08 §9.4). */
       reports?: StaffRunReport[];
     })
   | (Envelope & { status: "not_found" })

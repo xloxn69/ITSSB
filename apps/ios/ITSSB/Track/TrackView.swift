@@ -92,7 +92,8 @@ private struct TrackingScreen: View {
                                    eta: EtaPresentation.make(run: run, clock: clock, now: timeline.date),
                                    progress: EtaPresentation.stopProgress(run),
                                    notice: context.notices.current(at: clock.ageClock(at: timeline.date))
-                                       .serviceNotice)
+                                       .serviceNotice,
+                                   delay: ReportedDelayPresentation.line(run: run, clock: clock, now: timeline.date))
                 }
         }
     }
@@ -179,6 +180,7 @@ struct TripStatusCard: View {
     var progress: String?
     /// Today's service-calendar notice from the school, when it isn't the title.
     var notice: ServiceNotice?
+    var delay: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
@@ -204,6 +206,12 @@ struct TripStatusCard: View {
                 Text(progress)
                     .font(AppFonts.callout)
                     .foregroundStyle(AppColors.textPrimary)
+            }
+            if let delay {
+                Text(delay)
+                    .font(AppFonts.callout)
+                    .foregroundStyle(AppColors.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if let eta {
                 VStack(alignment: .leading, spacing: AppSpacing.xxs) {

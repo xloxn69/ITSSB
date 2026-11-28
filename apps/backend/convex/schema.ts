@@ -92,7 +92,7 @@ export default defineSchema({
     .index("by_replacement_device", ["replacementDeviceId"]),
 
   /**
-   * A driver's delay or issue report on a run (docs/08 §9.3, docs/05 D20),
+   * A driver's delay or issue report on a run (docs/08 §9.4, docs/05 D20),
    * sent from the Pi with the driver operating grant. A fixed category and
    * optional minutes only: no free text is stored. One row per device and
    * `requestId`; a retry returns it.

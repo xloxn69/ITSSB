@@ -1,4 +1,4 @@
-"""Driver delay and issue reports (docs/08 §9.3, docs/05 D20).
+"""Driver delay and issue reports (docs/08 §9.4, docs/05 D20).
 
 Rules enforced here (driver_api.py adds the session, CSRF, unlock and
 parked checks):

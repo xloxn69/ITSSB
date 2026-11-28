@@ -58,13 +58,13 @@ These 24 named screens match the visual atlas. Each screen also owns its loading
 | D11 | Route awaiting approval | Shows the submitted version, review status, and requested changes. Approval does not rewrite an active run. |
 | D12 | Start-trip preflight | Confirms driver, bus, approved route version, roster freshness, fix, storage, and cloud authorization before starting one run. |
 | D13 | Driving view | Read-only next-stop information, simple progress, and concise positioning/connection status. No enabled complex controls. |
-| D14 | Stopped at a bus stop | Shows the relevant stop, expected students, recorded check-ins, and limited authorized actions. |
+| D14 | Stopped at a bus stop | Shows the relevant stop, expected students, recorded check-ins, and limited authorized actions. Implemented: "Stopped near <stop>" when the device's own fresh fix is within 75 m of an approved stop of the run's route (stops come with the roster, docs/08 §9.2), otherwise "not near a stop" or "position unknown"; never an arrival, which only the server computes. Names only while unlocked and parked. Links to Show QR, Show Students and Report a delay. Opens after the driver confirms Parked during a run. |
 | D15 | Route enrollment QR | Displays **Join this route**, route/direction, expiring invitation, and an accessible alternative code. No private roster appears behind it. |
 | D16 | Trip check-in QR | Displays **Check in for this trip**, the active run, and a temporary challenge. Expired/unavailable states explain the fallback. |
 | D17 | Student roster | Shows authorized names, assigned stops, seats where applicable, and record-based statuses. Supports stopped-state search/grouping. |
 | D18 | Student detail and seat note | Edits permitted seat information and notes; includes **Remove from route**, confirmation, reason, and pending/accepted results. |
 | D19 | Attendance correction | Identifies student and run, shows existing status, collects a correction/reason, and preserves its audit history. |
-| D20 | Report a delay or issue | Selects a predefined category and optional explanation; reviews the notice and shows queued/submitted status. |
+| D20 | Report a delay or issue | Selects a predefined category (traffic, mechanical problem, weather, student incident, other) and an optional expected delay in minutes; there is no free-text explanation, so no student name can be typed into a notice families see. Previews the sentence families will read, saves it on the device, and shows "waiting to send" until the school server accepts it (docs/08 §9.4). Parked only. |
 | D21 | GPS and device diagnostics | Shows receiver/fix age, cloud contact, queue depth, disk state, temperature, app version, and restricted maintenance controls. |
 | D22 | Offline bus operation | Explains which records are saved locally, when the backend last heard from the bus, and what cannot currently be confirmed. |
 | D23 | End-trip confirmation | Confirms the intended run, highlights unsynchronized/unresolved records, and saves completion once. |

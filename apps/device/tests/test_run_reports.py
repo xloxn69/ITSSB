@@ -1,5 +1,5 @@
 """Delay reports (D20) and "stopped near a stop" (D14) on the local API
-(docs/08 §9.3, docs/05 D14/D20), against the local fake backend over real
+(docs/08 §9.4, docs/05 D14/D20), against the local fake backend over real
 HTTP. FICTIONAL students, stops and grants only. No wall-clock sleeps:
 retries run through `tick()`."""
 

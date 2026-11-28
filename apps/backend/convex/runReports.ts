@@ -18,7 +18,7 @@ import { grantForDevice } from "./driverGrants";
 import { insertAudit } from "./lib/staff";
 
 /**
- * Driver delay and issue reports from the Pi (docs/08 §9.3, docs/05 D20).
+ * Driver delay and issue reports from the Pi (docs/08 §9.4, docs/05 D20).
  *
  * Authority is rechecked here, for a report queued offline too: the device
  * credential is the one the request presented and is not revoked; the

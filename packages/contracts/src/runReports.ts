@@ -1,5 +1,5 @@
 /**
- * Driver delay and issue reports (docs/08 §9.3, docs/05 D20, docs/10 §5).
+ * Driver delay and issue reports (docs/08 §9.4, docs/05 D20, docs/10 §5).
  *
  * The driver picks one fixed category and, optionally, how many minutes late
  * they expect to be. There is no free text anywhere in this contract: a

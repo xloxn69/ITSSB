@@ -149,7 +149,7 @@ const endedRun = v.union(
   v.null(),
 );
 
-/** A driver's delay report (docs/08 §9.3): category and minutes only, never text. */
+/** A driver's delay report (docs/08 §9.4): category and minutes only, never text. */
 const reportedDelay = v.object({
   category: v.union(
     v.literal("traffic"),

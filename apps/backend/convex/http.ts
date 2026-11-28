@@ -369,7 +369,7 @@ http.route({
 
 /**
  * POST /device/v1/run-reports — a driver's delay or issue report, possibly
- * queued offline (docs/08 §9.3). Fixed category and optional minutes only.
+ * queued offline (docs/08 §9.4). Fixed category and optional minutes only.
  */
 http.route({
   path: "/device/v1/run-reports",
