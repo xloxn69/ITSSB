@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { sha256Hex } from "./lib/deviceAuth";
+import { retryDelayMs } from "./notificationJobs";
 import { BASELINE_V1 } from "./lib/eta";
 import schema from "./schema";
 
@@ -953,5 +954,95 @@ describe("access answers for a caller with no approved person", () => {
       const r = await call(s.t);
       expect({ name, r }).toMatchObject({ name, r: { status: "access_unavailable", reason: "unauthenticated" } });
     }
+  });
+});
+
+describe("acceptance: A05 a revoked person gets no new alert", () => {
+  it("after a guardian link is revoked, a new evaluation alerts only the student", async () => {
+    const s = await setup();
+    await enable(s, STUDENT);
+    await enable(s, GUARDIAN); // the guardian's preference stays on after the revoke
+    await register(s, STUDENT, TOKEN_A);
+    await register(s, GUARDIAN, TOKEN_B);
+    await s.t.run((ctx) => ctx.db.patch(s.guardianLinkId, { status: "revoked" }));
+    await approach(s);
+    // The evaluation ran (the student is alerted) and skipped the revoked guardian.
+    expect((await alerts(s)).map((a) => a.userId)).toEqual([s.studentUser]);
+    expect((await jobs(s)).map((j) => j.userId)).toEqual([s.studentUser]);
+  });
+
+  it("after an assignment is revoked, a new evaluation creates no alert or job for anyone", async () => {
+    const s = await setup();
+    await enable(s, STUDENT);
+    await enable(s, GUARDIAN);
+    await register(s, STUDENT, TOKEN_A);
+    await register(s, GUARDIAN, TOKEN_B);
+    await s.t.run((ctx) => ctx.db.patch(s.assignmentId, { status: "revoked" }));
+    await approach(s);
+    expect(await alerts(s)).toEqual([]);
+    expect(await jobs(s)).toEqual([]);
+  });
+});
+
+describe("acceptance: a signed-out phone is never sent a queued alert", () => {
+  // What the iOS app sends before sign-out (PushRegistrar.deactivatePush).
+  const signOut = (s: Setup, permission: "authorized" | "denied", token: string | null) =>
+    s.t.withIdentity({ tokenIdentifier: STUDENT }).mutation(api.notifications.registerDevice, {
+      installationId: INSTALL_A,
+      apnsToken: token,
+      environment: "sandbox",
+      permission,
+    });
+
+  it("a token cleared at sign-out cancels the pending job at claim time", async () => {
+    const { s, jobId } = await oneJob();
+    expect(await signOut(s, "authorized", null)).toMatchObject({ status: "registered", pushEnabled: false });
+    expect((await claim(s, jobId, s.NOW)).r).toBeNull();
+    expect(await job(s, jobId)).toMatchObject({ state: "cancelled", endReason: "token_inactive", attempts: 0 });
+  });
+
+  it("notifications turned off on the phone cancels the pending job at claim time", async () => {
+    const { s, jobId } = await oneJob();
+    expect(await signOut(s, "denied", TOKEN_A)).toMatchObject({ status: "registered", pushEnabled: false });
+    expect((await claim(s, jobId, s.NOW)).r).toBeNull();
+    expect(await job(s, jobId)).toMatchObject({ state: "cancelled", endReason: "token_inactive", attempts: 0 });
+  });
+});
+
+describe("retry backoff", () => {
+  it("doubles from 5 s with up to 20% jitter; the base is capped at 5 minutes", () => {
+    expect([1, 2, 3, 4].map((a) => retryDelayMs(a, () => 0))).toEqual([5_000, 10_000, 20_000, 40_000]);
+    expect(retryDelayMs(1, () => 0.5)).toBe(5_500);
+    expect(retryDelayMs(4, () => 0.999_999)).toBe(48_000);
+    // Unreachable at today's MAX_DELIVERY_ATTEMPTS, but pinned: the cap applies before jitter.
+    expect(retryDelayMs(7, () => 0)).toBe(300_000);
+    expect(retryDelayMs(20, () => 0)).toBe(300_000);
+    expect(retryDelayMs(20, () => 0.5)).toBe(330_000);
+  });
+
+  it("every scheduled retry waits between its base and 20% more", async () => {
+    const { s, jobId } = await oneJob();
+    let nowMs = s.NOW;
+    const waits: number[] = [];
+    for (let attempt = 1; attempt < MAX_DELIVERY_ATTEMPTS; attempt++) {
+      const c = await claim(s, jobId, nowMs);
+      await s.t.mutation(internal.notificationJobs.record, {
+        jobId,
+        leaseId: c.leaseId,
+        result: { kind: "retryable", reason: "ServiceUnavailable" },
+        nowMs,
+      });
+      const row = (await job(s, jobId))!;
+      if (row.state !== "retryable_failure") break;
+      waits.push(row.nextAttemptAtMs - nowMs);
+      nowMs = row.nextAttemptAtMs;
+      await keepFresh(s, nowMs);
+    }
+    expect(waits).toHaveLength(MAX_DELIVERY_ATTEMPTS - 1);
+    waits.forEach((w, i) => {
+      const base = 5_000 * 2 ** i;
+      expect(w).toBeGreaterThanOrEqual(base);
+      expect(w).toBeLessThanOrEqual(base * 1.2);
+    });
   });
 });
