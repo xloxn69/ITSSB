@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { sha256Hex } from "./lib/deviceAuth";
+import { familyReportedDelay } from "./runReports";
 import schema from "./schema";
 
 /**
@@ -286,6 +287,18 @@ describe("tracking.myRun reportedDelay", () => {
     const r = await t.withIdentity({ tokenIdentifier: STUDENT }).query(api.tracking.myRun, { assignmentId: assignment });
     if (r.status !== "ready") throw new Error(r.status);
     expect(r.run.reportedDelay).toBeNull();
+  });
+
+  it("is never given for a run that is not active, even with a recent report", async () => {
+    const { t, run } = await setup();
+    await stored(t, run, { capturedAtMs: NOW - 2 * MIN, receivedAtMs: NOW - MIN });
+    for (const state of ["completed", "cancelled", "scheduled"] as const) {
+      const delay = await t.run(async (ctx) => {
+        await ctx.db.patch(run, { state });
+        return familyReportedDelay(ctx, (await ctx.db.get(run))!, NOW);
+      });
+      expect(delay).toBeNull();
+    }
   });
 
   it("is null on an active run with no report", async () => {
