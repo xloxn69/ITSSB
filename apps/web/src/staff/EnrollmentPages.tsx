@@ -18,7 +18,7 @@ import {
   TOKEN_LINK_PATHS,
 } from "@itssb/contracts";
 import { useState } from "react";
-import { DIRECTION_LABEL, dateTime, staffReportText } from "./format";
+import { DIRECTION_LABEL, dateTime, runHistoryLines, staffReportText } from "./format";
 import type { StaffSource } from "./source";
 import { Empty, Loaded, Outcome, type Ready, useMutation, useStaffQuery } from "./ui";
 
@@ -618,6 +618,23 @@ export function RunAttendancePage({ source, runId }: { source: StaffSource; runI
                     {staffReportText(r)}
                   </p>
                 ))}
+              </div>
+            )}
+            {run.history && run.history.length > 0 && (
+              <div className="stack">
+                <h2>Run history</h2>
+                <ol className="stack small" style={{ margin: 0, paddingLeft: "var(--space-xl)" }}>
+                  {runHistoryLines(run.history).map((line, i) => (
+                    <li key={i}>
+                      <span className="muted">{dateTime(line.atMs)}</span> · {line.text}
+                      {line.link && (
+                        <div>
+                          <a href={`#/staff/attendance/${encodeURIComponent(line.link.runId)}`}>{line.link.label}</a>
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ol>
               </div>
             )}
             {run.students.length === 0 ? (

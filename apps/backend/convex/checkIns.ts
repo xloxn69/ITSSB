@@ -16,6 +16,7 @@ import { currentCheckIn, currentOf, historyFor, receiptFor, recordOnce, storeRec
 import { getTrackableAssignment, getUser, missingUserReason } from "./lib/authz";
 import { isRequestId, tokenProblem } from "./lib/family";
 import { audit, denied, staffCaller } from "./lib/staff";
+import { runHistory } from "./lib/runHistory";
 import { resolveToken } from "./lib/tokens";
 import { reportsForRun, staffReports } from "./runReports";
 
@@ -223,6 +224,7 @@ export const runAttendance = query({
       startedAtMs: run.startedAtMs ?? null,
       students,
       reports: await staffReports(ctx, await reportsForRun(ctx, run._id)),
+      history: await runHistory(ctx, run),
     };
   },
 });

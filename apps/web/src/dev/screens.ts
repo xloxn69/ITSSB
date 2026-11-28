@@ -197,6 +197,8 @@ export const FIXTURE_SCREENS: {
   { name: "staff-students", path: "?fixture=staff#/staff/students", ready: "article" },
   { name: "staff-attendance", path: "?fixture=staff#/staff/attendance", ready: "table" },
   { name: "staff-run-attendance", path: "?fixture=staff#/staff/attendance/demo_run_001", ready: "article" },
+  { name: "staff-run-history-cancelled", path: "?fixture=staff#/staff/attendance/demo_run_002", ready: "main ol" },
+  { name: "staff-run-history-replacement", path: "?fixture=staff#/staff/attendance/demo_run_003", ready: "main ol" },
   { name: "staff-run-missing", path: "?fixture=staff#/staff/attendance/nope", ready: "main .message h2" },
   { name: "staff-audit", path: "?fixture=staff#/staff/audit", ready: "table" },
   { name: "staff-empty-enrollment", path: "?fixture=staff-empty#/staff/enrollment", ready: "main section p" },
