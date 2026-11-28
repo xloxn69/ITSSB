@@ -46,6 +46,8 @@ describe("validateDeviceHealthReport", () => {
     ["coordinates smuggled in", { ...noFix, latitude: 34.1 }],
     ["fractional queue", { ...noFix, pendingCount: 1.5 }],
     ["long version", { ...noFix, appVersion: "x".repeat(33) }],
+    ["unconfirmed end not an ID", { ...noFix, unconfirmedEndRunId: 7 }],
+    ["unconfirmed end too long", { ...noFix, unconfirmedEndRunId: "x".repeat(65) }],
     ["negative retries", { ...withMetrics, uploadRetriesSinceStart: -1 }],
     ["null retry count", { ...withMetrics, uploadConsecutiveFailures: null }],
     ["fractional bytes", { ...withMetrics, processRssBytes: 1.5 }],

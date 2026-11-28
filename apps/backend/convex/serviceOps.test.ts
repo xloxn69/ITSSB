@@ -102,11 +102,17 @@ async function postTelemetry(t: T, secret: string, runId: string) {
   return ((await res.json()) as { results: Record<string, unknown>[] }).results[0];
 }
 
-async function postHealth(t: T, secret: string, runId: string | null, capturedAtMs = Date.now() - 1000) {
+async function postHealth(
+  t: T,
+  secret: string,
+  runId: string | null,
+  capturedAtMs = Date.now() - 1000,
+  extra: Record<string, unknown> = {},
+) {
   const res = await t.fetch("/device/v1/health", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
-    body: JSON.stringify({ ...deviceHealthNoFix, runId, capturedAtMs }),
+    body: JSON.stringify({ ...deviceHealthNoFix, runId, capturedAtMs, ...extra }),
   });
   expect(res.status).toBe(200);
   return (await res.json()) as Record<string, unknown>;
@@ -186,6 +192,17 @@ describe("runOps.cancelRun", () => {
       cancelledAtMs,
     });
     expect(await getRun(t, runB)).toMatchObject({ state: "cancelled" });
+  });
+
+  it("answers about a run the bus ended but the server never confirmed, with no grant needed", async () => {
+    const { t, staff, runId } = await setup();
+    await staff.mutation(api.runOps.cancelRun, { runId, reason: "Weather" });
+    const cancelledAtMs = (await getRun(t, runId))?.cancelledAtMs;
+    expect(await postHealth(t, SECRET_A, null, undefined, { unconfirmedEndRunId: runId })).toMatchObject({
+      run: { runId, state: "cancelled", cancelledAtMs },
+    });
+    // Another bus naming it gets nothing.
+    expect(await postHealth(t, SECRET_B, null, undefined, { unconfirmedEndRunId: runId })).not.toHaveProperty("run");
   });
 
   it("never tells another bus that a run it doesn't own was cancelled", async () => {

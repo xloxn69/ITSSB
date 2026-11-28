@@ -374,6 +374,17 @@ class Database:
                 )
         return bool(ended)
 
+    def unconfirmed_end_run_id(self) -> str | None:
+        """The most recently ended run, if the driver ended it here and the
+        server has not accepted that end (pending or refused). Health asks the
+        server about it, so a school cancellation still arrives (docs/13 D14)."""
+        row = self.conn.execute(
+            "SELECT r.run_id FROM local_runs r JOIN run_end_requests e ON e.run_id=r.run_id "  # noqa: S608 - constant SQL
+            "WHERE r.state='completed' AND e.status!='accepted' "
+            f"AND r.run_id IN ({LAST_ENDED_RUN_SQL})"
+        ).fetchone()
+        return row["run_id"] if row else None
+
     def run_of_event(self, event_id: str) -> str | None:
         row = self.conn.execute(
             "SELECT run_id FROM telemetry_events WHERE event_id=?", (event_id,)

@@ -44,7 +44,7 @@ export const record = internalMutation({
     if (existing && existing.bootId === r.bootId && r.capturedAtMs <= existing.capturedAtMs) {
       await ctx.db.patch(existing._id, { receivedAtMs: nowMs });
       await ctx.scheduler.runAfter(POSITION_STALE_AFTER_MS, internal.health.expire, { deviceId, receivedAtMs: nowMs });
-      return { ok: true, receivedAtMs: nowMs, ...(await reportedRun(ctx, deviceId, r.runId)) };
+      return { ok: true, receivedAtMs: nowMs, ...(await reportedRun(ctx, deviceId, namedRun(r))) };
     }
     const row = {
       deviceId,
@@ -67,14 +67,20 @@ export const record = internalMutation({
     if (existing) await ctx.db.replace(existing._id, row);
     else await ctx.db.insert("deviceHealth", row);
     await ctx.scheduler.runAfter(POSITION_STALE_AFTER_MS, internal.health.expire, { deviceId, receivedAtMs: nowMs });
-    return { ok: true, receivedAtMs: nowMs, ...(await reportedRun(ctx, deviceId, r.runId)) };
+    return { ok: true, receivedAtMs: nowMs, ...(await reportedRun(ctx, deviceId, namedRun(r))) };
   },
 });
 
+/** The run the report asks about: the one it records, else one it ended unconfirmed. */
+function namedRun(r: DeviceHealthReport): string | null {
+  return r.runId ?? r.unconfirmedEndRunId ?? null;
+}
+
 /**
  * The server's state of the run the report named, only if it is this
- * device's own run: a Pi with no GPS fix uploads no telemetry, so this is how
- * it learns staff cancelled its run (docs/13 D14). Another device's run, or
+ * device's own run: a Pi with no GPS fix uploads no telemetry, and a driver
+ * whose grant expired can't resend an end, so this is how it learns staff
+ * cancelled its run (docs/13 D14). Needs no grant. Another device's run, or
  * an unknown one, gets nothing (no existence leak).
  */
 async function reportedRun(

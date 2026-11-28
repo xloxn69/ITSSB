@@ -350,6 +350,9 @@ class Uploader:
             "lastValidFixAtMs": snap["gps"]["lastValidFixCapturedAtMs"],
             "pendingCount": counts["pending"],
             "oldestPendingCapturedAtMs": counts["oldestPendingCapturedAtMs"],
+            # Asks the server about a run ended here but not confirmed, so a
+            # cancellation reaches it without a driver grant (docs/13 D14).
+            "unconfirmedEndRunId": None if run else self.db.unconfirmed_end_run_id(),
             # Measurements for staff diagnostics (docs/13 §10); null = not
             # measurable on this device, never a guess.
             "uploadConsecutiveFailures": snap["upload"]["consecutiveFailures"],
@@ -379,7 +382,8 @@ class Uploader:
             self.health_base_only_until_ms = self._now_ms() + HEALTH_BASE_ONLY_MS
             outcome, resp = self._post_health({k: report[k] for k in BASE_HEALTH_KEYS})
         if outcome == "ok" and resp is not None:
-            note_health_answer(self.db, report["runId"], resp.body, self._now_ms())
+            asked = report["runId"] or report.get("unconfirmedEndRunId")
+            note_health_answer(self.db, asked, resp.body, self._now_ms())
         if outcome == "rejected" and resp is not None:
             log.warning("health: HTTP %s (%s)", resp.status, _error_code(resp))
         return outcome

@@ -40,6 +40,14 @@ export interface DeviceHealthReport {
   pendingCount: number;
   /** Capture time of the oldest unacknowledged row, or `null`. */
   oldestPendingCapturedAtMs: number | null;
+  /**
+   * The last run this Pi ended locally whose end the server has not accepted
+   * yet, or `null`. Lets the server answer that run's state (`run`) even when
+   * the driver's grant has expired, so a run staff cancelled before the end
+   * reached them is shown as cancelled (docs/13 D14). Optional: older Pis omit
+   * it; an older backend refuses it and the Pi falls back to the base report.
+   */
+  unconfirmedEndRunId?: string | null;
 
   // Measurements for staff diagnostics (docs/13 §10). Optional: a Pi from
   // before them omits every one. `null` means the Pi cannot measure it.
@@ -77,7 +85,8 @@ export const MAX_CPU_TEMPERATURE_C = 150;
 const ERROR_CLASS = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
 
 /**
- * The server's state of the run the report named, sent only when that run
+ * The server's state of the run the report named (`runId`, else
+ * `unconfirmedEndRunId`), sent only when that run
  * belongs to the reporting device (another device's run, or an unknown one,
  * gets no `run`). This is how a Pi with no GPS fix, which uploads no
  * telemetry, still learns that staff cancelled its run (docs/13 D14).
@@ -118,8 +127,10 @@ const KEYS = new Set([
   "lastValidFixAtMs",
   "pendingCount",
   "oldestPendingCapturedAtMs",
+  "unconfirmedEndRunId",
   ...DEVICE_HEALTH_METRIC_KEYS,
 ]);
+const isNullableId = (v: unknown) => v === null || (typeof v === "string" && v.length > 0 && v.length <= 64);
 const isCount = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
 const isTemperature = (v: unknown) =>
   v === null ||
@@ -147,6 +158,7 @@ export function validateDeviceHealthReport(input: unknown, nowMs: number): Devic
   if (r.runId !== null && (typeof r.runId !== "string" || r.runId.length === 0 || r.runId.length > 64)) {
     return invalid("runId must be null or an ID.");
   }
+  if (!absentOr(r, "unconfirmedEndRunId", isNullableId)) return invalid("unconfirmedEndRunId must be null or an ID.");
   if (!DEVICE_GPS_STATUSES.includes(r.gpsStatus as DeviceGpsStatus)) return invalid("Unknown gpsStatus.");
   if (!isNullableMs(r.lastValidFixAtMs) || !isNullableMs(r.oldestPendingCapturedAtMs)) {
     return invalid("Timestamps must be epoch milliseconds or null.");

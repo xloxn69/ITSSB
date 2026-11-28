@@ -188,7 +188,7 @@ class FakeBackend(ThreadingHTTPServer):
                 "receivedAtMs": now,
                 "serverNowMs": now,
             }
-            run_id = body.get("runId")
+            run_id = body.get("runId") or body.get("unconfirmedEndRunId")
             run = self.runs.get(run_id) if isinstance(run_id, str) else None
             if run is not None:
                 answer["run"] = {

@@ -254,3 +254,45 @@ def test_an_accepted_end_is_never_turned_into_a_cancellation(tmp_path):
     assert not db.cancel_run_locally("demo_run_001", T0, T0, "health")
     assert db.last_ended_run()["endedBy"] == "driver"
     db.close()
+
+
+def test_expired_grant_and_empty_queue_still_learn_the_cancellation(tmp_path, pin_hash, backend):
+    """Staff cancel; the driver ends offline; the grant expires, so the end is
+    refused for the grant and says nothing about the run; no positions are
+    queued. The heartbeat still asks about the unconfirmed run and needs no grant."""
+    env, run_id = started(tmp_path, pin_hash, backend)
+    cancelled_at = backend.cancel_run(run_id)
+    backend.mode = "down"
+    assert env.post(f"/api/runs/{run_id}/end", {"requestId": rid()})[1]["endSync"] == "pending"
+    backend.mode = "ok"
+    del backend.grants[GRANT]  # the driver's grant expired
+    db = env.db()
+    EndRetryThread(env.db_path, events_for(backend), threading.Event(), now_ms=lambda: T0).tick(db)
+    assert db.last_ended_run()["endError"] == "GRANT_NOT_AUTHORIZED"
+    assert db.last_ended_run()["endedBy"] == "driver"
+    assert db.outbox_counts()["pending"] == 0
+
+    up = uploader(db, backend)
+    assert up.health_report()["runId"] is None
+    assert up.health_report()["unconfirmedEndRunId"] == run_id
+    assert up.send_health() == "ok"
+
+    assert backend.health_reports[-1]["unconfirmedEndRunId"] == run_id
+    summary = db.last_ended_run()
+    assert (summary["endedBy"], summary["cancelledAtMs"]) == ("school", cancelled_at)
+    assert summary["endError"] == "GRANT_NOT_AUTHORIZED"  # the driver's attempt is kept
+    assert up.health_report()["unconfirmedEndRunId"] is None  # nothing left to ask
+    db.close()
+    again = Database(env.db_path)  # restart
+    assert again.last_ended_run()["endedBy"] == "school"
+    again.close()
+
+
+def test_an_accepted_end_is_not_asked_about(tmp_path):
+    db = Database(tmp_path / "d.db")
+    db.save_run("demo_run_001", "active")
+    payload = db.end_run_locally("demo_run_001", rid(), GRANT, T0)
+    assert db.unconfirmed_end_run_id() == "demo_run_001"
+    db.resolve_end_request(payload["requestId"], "accepted", None, T0)
+    assert db.unconfirmed_end_run_id() is None
+    db.close()

@@ -30,6 +30,7 @@ export const deviceHealthWithMetrics: DeviceHealthReport = {
   memAvailableBytes: 1_232_457_728,
   cpuTemperatureC: 48.3,
   databaseBytes: 3_158_016,
+  unconfirmedEndRunId: null,
 };
 
 export const deviceHealthAccepted: DeviceHealthAccepted = {
