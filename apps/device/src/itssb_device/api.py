@@ -50,6 +50,18 @@ def _age(ms: int | None) -> str:
     return f"{s}s ago" if s < 120 else f"{s // 60}m ago"
 
 
+def _storage_line(st: dict[str, Any] | None) -> str:
+    if not st:
+        return "unknown"
+    free = st["disk"]["freeBytes"]
+    space = "free space unknown" if free is None else f"{free // 1_000_000} MB free"
+    pending = st["queue"]["pending"]
+    line = f"{st['level']} ({space}; {'?' if pending is None else pending} waiting)"
+    if st["recording"] == "reduced":
+        line += f"; recording reduced to one position every {st['reducedIntervalS']:g} s"
+    return line
+
+
 def render_page(snap: dict[str, Any]) -> str:
     g, n, b, o, r = snap["gps"], snap["network"], snap["backend"], snap["outbox"], snap["run"]
     rows = [
@@ -59,6 +71,7 @@ def render_page(snap: dict[str, Any]) -> str:
         ("Backend", f"{b['status']}" + (f" ({b['detail']})" if b["detail"] else "")),
         ("Run", f"{r['runId']} {r['state']}" if r else "no active run"),
         ("Recording", f"FAULT: {snap['recorder']['fault']}" if snap["recorder"]["fault"] else "ok"),
+        ("Storage", _storage_line(snap.get("storage"))),
         (
             "Outbox",
             f"{o['pending']} pending, {o['acknowledged']} acknowledged, {o['rejected']} rejected",

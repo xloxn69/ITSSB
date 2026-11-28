@@ -11,6 +11,7 @@ timestamps use UTC epoch milliseconds.
 
 from __future__ import annotations
 
+import copy
 import threading
 import time
 from collections.abc import Callable
@@ -19,6 +20,7 @@ from typing import Any
 
 from . import __version__
 from .release import load_release
+from .storage import StorageLimits, unmeasured
 
 # A valid fix older than this (by local receipt time) no longer counts as `valid`.
 GPS_FRESH_S = 5.0
@@ -63,8 +65,10 @@ class StatusBoard:
         monotonic: Callable[[], float] = time.monotonic,
         now_ms: Callable[[], int] = wall_ms,
         environment: str = "development",
+        storage_limits: StorageLimits | None = None,
     ) -> None:
         self.environment = environment
+        self._storage: dict[str, Any] = unmeasured(storage_limits or StorageLimits())
         self._lock = threading.Lock()
         self._mono = monotonic
         self._now_ms = now_ms
@@ -143,6 +147,10 @@ class StatusBoard:
         with self._lock:
             self._run = dict(run) if run else None
 
+    def storage(self, state: dict[str, Any]) -> None:
+        with self._lock:
+            self._storage = dict(state)
+
     def recorded(self, captured_at_ms: int) -> None:
         with self._lock:
             self._recorder["lastRecordedAtMs"] = captured_at_ms
@@ -219,4 +227,6 @@ class StatusBoard:
                 "outbox": dict(self._outbox),
                 "run": dict(self._run) if self._run else None,
                 "recorder": dict(self._recorder),
+                # Free space, queue depth, and whether recording is reduced (storage.py).
+                "storage": copy.deepcopy(self._storage),
             }

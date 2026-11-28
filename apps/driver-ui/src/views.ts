@@ -1,5 +1,5 @@
 import { formatAge } from "./format.js";
-import { allIndicators, environmentLabel, type Indicator } from "./indicators.js";
+import { allIndicators, environmentLabel, formatBytes, type Indicator } from "./indicators.js";
 import { ACTIONS, type ActionId, actionAvailability, parked, type ScreenId } from "./screens.js";
 import { ageNow, ageOfTimestamp, type Observed, serviceAnswering } from "./snapshot.js";
 
@@ -36,7 +36,10 @@ function runLabel(o: Observed): string {
 
 export function statusBar(o: Observed, nav: Nav): HTMLElement {
   const inds = allIndicators(o);
-  const shown = inds.filter((i) => i.key === "gps" || i.key === "network" || i.key === "cloud" || i.key === "queue");
+  // Storage joins the bar only when space or the queue needs attention (D12).
+  const shown = inds.filter(
+    (i) => i.key === "gps" || i.key === "network" || i.key === "cloud" || i.key === "queue" || (i.key === "storage" && storageAlert(i)),
+  );
   const service = inds.find((i) => i.key === "service");
   const driver = !serviceAnswering(o)
     ? "Driver unknown"
@@ -65,6 +68,10 @@ export function statusBar(o: Observed, nav: Nav): HTMLElement {
       ...shown.map((i) => chip(i, () => nav.go(i.key === "network" && offline ? "D22" : "D21"))),
     ),
   );
+}
+
+function storageAlert(i: Indicator): boolean {
+  return i.key === "storage" && (i.level === "warn" || i.level === "problem");
 }
 
 function chip(i: Indicator, onclick: () => void): HTMLElement {
@@ -171,7 +178,15 @@ export function drivingView(o: Observed, nav: Nav, extra: (HTMLElement | null)[]
         ),
       ),
     ),
-    h("div", { class: "card" }, checkList([pick("gps"), pick("network"), pick("cloud"), pick("queue")].filter((i) => i !== undefined))),
+    h(
+      "div",
+      { class: "card" },
+      checkList(
+        [pick("gps"), pick("network"), pick("cloud"), pick("queue"), pick("storage")].filter(
+          (i): i is Indicator => i !== undefined && (i.key !== "storage" || storageAlert(i)),
+        ),
+      ),
+    ),
     h(
       "div",
       { class: "row" },
@@ -198,6 +213,12 @@ export function diagnosticsView(o: Observed, nav: Nav): HTMLElement {
         [
           "Saved records",
           `${s.outbox.pending ?? "?"} waiting, ${s.outbox.acknowledged ?? "?"} accepted, ${s.outbox.rejected ?? "?"} rejected`,
+        ],
+        [
+          "Free space",
+          s.storage?.disk.freeBytes == null
+            ? "not measured yet"
+            : `${formatBytes(s.storage.disk.freeBytes)} (warning below ${formatBytes(s.storage.disk.warnFreeBytes)}, reduced recording below ${formatBytes(s.storage.disk.criticalFreeBytes)})`,
         ],
         ["Run", runLabel(o)],
       ]

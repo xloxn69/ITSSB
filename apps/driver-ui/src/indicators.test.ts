@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { cloudIndicator, environmentLabel, gpsIndicator, networkIndicator, queueIndicator, serviceIndicator, storageIndicator } from "./indicators.js";
+import { startBlockers } from "./flows.js";
+import type { StorageLevel, StoragePart } from "./snapshot.js";
 import { observed, snapshot } from "./testing.js";
 
 const validFix = snapshot({
@@ -90,6 +92,63 @@ describe("state from health", () => {
   it("a recorder fault is shown as not saving", () => {
     const st = storageIndicator(observed(snapshot({ recorder: { fault: "disk I/O error" } })));
     expect(st.level).toBe("problem");
+  });
+});
+
+describe("D12 storage and queue limits", () => {
+  const MB = 1_000_000;
+  const storage = (disk: StorageLevel, queue: StorageLevel, freeMb: number, pending: number): StoragePart => ({
+    level: disk === "critical" || queue === "critical" ? "critical" : disk === "warning" || queue === "warning" ? "warning" : "ok",
+    recording: disk === "critical" || queue === "critical" ? "reduced" : "normal",
+    reducedIntervalS: 60,
+    disk: { level: disk, freeBytes: freeMb * MB, totalBytes: 29_000 * MB, warnFreeBytes: 512 * MB, criticalFreeBytes: 128 * MB, error: null },
+    queue: { level: queue, pending, warnPending: 10_000, criticalPending: 50_000 },
+  });
+  const active = { runId: "demo_run_001", state: "active" } as const;
+
+  it("low space warns with the free space and its limit while still saving", () => {
+    const st = storageIndicator(observed(snapshot({ run: active, storage: storage("warning", "ok", 410, 12) })));
+    expect(st.level).toBe("warn");
+    expect(st.value).toBe("Space low");
+    expect(st.detail).toBe("Storage getting full: 410 MB free (limit 512 MB). Positions still save normally.");
+  });
+
+  it("a long queue warns with the count and its limit", () => {
+    const st = storageIndicator(observed(snapshot({ run: active, storage: storage("ok", "warning", 4_000, 12_345) })));
+    expect(st.value).toBe("Queue long");
+    expect(st.detail).toBe("12345 positions waiting to sync (limit 10000). Positions still save normally.");
+  });
+
+  it("critical says recording is reduced, how often, and that nothing waiting is deleted", () => {
+    const st = storageIndicator(observed(snapshot({ run: active, storage: storage("critical", "ok", 95, 184) })));
+    expect(st.level).toBe("problem");
+    expect(st.value).toBe("Saving less");
+    expect(st.detail).toBe(
+      "Storage nearly full: 95 MB free (limit 128 MB). Saving one position every 60 s until this clears; nothing waiting to sync is deleted.",
+    );
+  });
+
+  it("the warning shows even with no active run", () => {
+    expect(storageIndicator(observed(snapshot({ storage: storage("warning", "ok", 410, 0) }))).value).toBe("Space low");
+  });
+
+  it("a save failure still outranks a storage warning", () => {
+    const st = storageIndicator(observed(snapshot({ run: active, recorder: { fault: "save failed: OperationalError" }, storage: storage("critical", "ok", 3, 0) })));
+    expect(st.value).toBe("Not saving");
+  });
+
+  it("an unmeasured or healthy device makes no space claim", () => {
+    const unknown = storage("unknown", "unknown", 0, 0);
+    expect(storageIndicator(observed(snapshot({ run: active, storage: { ...unknown, level: "unknown" } }))).value).toBe("Saving");
+    expect(storageIndicator(observed(snapshot({ run: active, storage: storage("ok", "ok", 4_000, 0) }))).value).toBe("Saving");
+  });
+
+  it("reduced recording does not block starting a run; a save failure does", () => {
+    const caps = { recordRoute: { available: true }, startRoute: { available: true }, showQr: { available: true }, showStudents: { available: true } };
+    const critical = observed(snapshot({ capabilities: caps, storage: storage("critical", "critical", 95, 60_000) }));
+    expect(startBlockers(critical, "demo_route_version_003")).toEqual([]);
+    const failing = observed(snapshot({ capabilities: caps, recorder: { fault: "save failed: OperationalError" } }));
+    expect(startBlockers(failing, "demo_route_version_003")).toEqual(["This device is not saving positions."]);
   });
 });
 

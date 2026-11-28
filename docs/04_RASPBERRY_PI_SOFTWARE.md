@@ -206,6 +206,26 @@ These settings do not make an SD card immune to corruption or guarantee survival
 
 Set a storage budget and monitor disk space, outbox age, and outbox count. Remove acknowledged records according to retention policy; do not silently delete unacknowledged trip events to make the status look healthy. If space becomes insufficient, show an operational fault and follow an explicit degraded-mode policy.
 
+**Built storage policy (docs/13 D12).** Before each recording step the recorder measures free space on the database's volume (what the service user may still write) and the number of pending outbox rows. Each has two thresholds, set in `device.env`:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `ITSSB_STORAGE_WARN_FREE_MB` | 512 | Warning at or below this free space (1 MB = 1,000,000 bytes) |
+| `ITSSB_STORAGE_CRITICAL_FREE_MB` | 128 | Critical at or below this; must be below the warning |
+| `ITSSB_OUTBOX_WARN_PENDING` | 10000 | Warning at this many unsent positions (about 14 hours of recording) |
+| `ITSSB_OUTBOX_CRITICAL_PENDING` | 50000 | Critical at this many; must be above the warning |
+| `ITSSB_REDUCED_PUBLISH_INTERVAL_SECONDS` | 60, or 4 × the publish interval if that is longer | Cadence while critical; must be longer than the publish interval |
+| `ITSSB_ACKNOWLEDGED_RETENTION_HOURS` | 168 | Acknowledged rows kept this long while space is fine |
+
+- **Warning:** nothing changes in recording. `GET /health` has a `storage` section (`level`, `recording`, free and total bytes, pending count, each threshold, and the last cleanup), and the driver screen adds a **Recording** chip, for example "Space low: Storage getting full: 410 MB free (limit 512 MB)."
+- **Critical:** recording is reduced, not stopped. An active run saves a position only when it was captured at least the reduced interval after the run's newest saved one, so families still get an aged, honest position while the queue drains or space returns. Health says `recording: "reduced"`, and the driver screen shows "Saving less" with the cause, the number, and the cadence. It is not a start blocker: only a failing save (`recorder.fault`) blocks starting a run.
+- **Recovery:** the first check below critical returns to the normal cadence. No restart is needed.
+- **Never:** a pending or rejected row is never deleted, rewritten, or marked acknowledged to free space or clear a warning.
+- **Cleanup:** the recorder removes acknowledged events (and their outbox rows) captured before the retention cutoff, at most 2,000 per transaction, hourly while space is fine and every 5 minutes while it is low. With space at warning or critical the age cutoff is dropped, because the server already holds those rows. The active run and the most recently ended run are never cleaned, since the trip summary counts them. SQLite reuses the freed pages, so the database stops growing, but the file does not shrink and disk free space does not rise; `VACUUM` is not run because it needs free space the size of the database. A failed cleanup is logged and retried; it never stops recording.
+- **Unknown:** if free space cannot be measured, the disk part reads `unknown` with the error name and recording stays normal. Before the first check the whole section is `unknown`.
+
+The cloud heartbeat is unchanged: it already sends `pendingCount` and `oldestPendingCapturedAtMs`, which show a growing queue to staff. Free space stays on the device for now.
+
 Back up a live SQLite database through a supported backup method. Copying only the main file while writes are active can omit relevant WAL state. [SQLite backup API](https://www.sqlite.org/backup.html)
 
 ## 9. Upload and acknowledgment
@@ -282,7 +302,7 @@ Local endpoints. Built ones are marked; the rest are still proposals:
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /health` | Built. Minimal process readiness without secret/roster disclosure. |
+| `GET /health` | Built. Minimal process readiness without secret/roster disclosure, including the `storage` budget (§8). |
 | `GET /api/session` | Built. Kiosk session cookie, CSRF token, and provisioned driver names. |
 | `GET /api/status` | Built. Authorized operating snapshot for the kiosk: health plus motion, driver session, capabilities, and the recording. |
 | `POST /api/session/unlock` | Built. Unlock a provisioned driver with a PIN (scrypt hash, device-wide lockout). |

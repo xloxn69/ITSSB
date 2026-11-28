@@ -8,7 +8,8 @@ import { css } from "../styles.js";
 import type { ScreenId } from "../screens.js";
 import { correctionView, detailView, emptyStudentUi, qrView, rosterView, type StudentController, type StudentUi } from "../studentViews.js";
 import { type DeviceQrCode, type RosterAction, type RosterResponse, studentChangeLines } from "../students.js";
-import { dashboardView, h } from "../views.js";
+import type { StoragePart } from "../snapshot.js";
+import { dashboardView, drivingView, h, statusBar } from "../views.js";
 import { observed, snapshot } from "../testing.js";
 
 const RUN = "demo_run_001";
@@ -165,8 +166,35 @@ const dashboard = () => {
   const lines = studentChangeLines(ended.snapshot?.studentChanges).map((l) => h("div", { class: `banner lv-${l.level}` }, l.text));
   return dashboardView(ended, { go: () => {}, action: () => {} }, lines);
 };
+// D12: low space (warning) and nearly full (critical, recording reduced), during a run.
+const MB = 1_000_000;
+const storageFor = (level: "warning" | "critical"): StoragePart => ({
+  level,
+  recording: level === "critical" ? "reduced" : "normal",
+  reducedIntervalS: 60,
+  disk: { level, freeBytes: level === "critical" ? 95 * MB : 410 * MB, totalBytes: 29_000 * MB, warnFreeBytes: 512 * MB, criticalFreeBytes: 128 * MB, error: null },
+  queue: { level: "ok", pending: 184, warnPending: 10_000, criticalPending: 50_000 },
+});
+const storageScreen = (level: "warning" | "critical") => {
+  const so = observed(
+    snapshot({
+      gps: { status: "valid", gpsd: "connected", receivers: 1, lastReportAgeMs: 300, lastValidFixAgeMs: 400, lastValidFixCapturedAtMs: NOW - 400, lastValidFixMode: 3 },
+      network: { status: "offline", detail: null, lastCheckedAtMs: NOW - 2_000, lastOnlineAtMs: NOW - 900_000 },
+      backend: { status: "unreachable", detail: null, lastOkAtMs: NOW - 900_000 },
+      outbox: { pending: 184, acknowledged: 0, rejected: 0, oldestPendingCapturedAtMs: NOW - 900_000 },
+      run: { runId: RUN, state: "active" },
+      motion: { state: "moving", parked: false },
+      storage: storageFor(level),
+      generatedAtMs: NOW,
+    }),
+  );
+  const nav = { go: () => {}, action: () => {} };
+  return h("div", {}, statusBar(so, nav), drivingView(so, nav));
+};
 const view = name === "dashboard-changes"
   ? dashboard()
+  : name === "storage-warning" || name === "storage-critical"
+  ? storageScreen(name === "storage-warning" ? "warning" : "critical")
   : name.startsWith("qr")
   ? qrView(o, ui, noop, NOW, "Route 17 Morning")
   : name.startsWith("roster")

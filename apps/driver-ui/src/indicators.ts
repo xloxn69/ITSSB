@@ -1,5 +1,5 @@
 import { formatAge } from "./format.js";
-import { ageNow, ageOfTimestamp, type Observed, serviceAnswering } from "./snapshot.js";
+import { ageNow, ageOfTimestamp, type Observed, serviceAnswering, type StoragePart } from "./snapshot.js";
 
 /**
  * Turns the device snapshot into independent status indicators (docs/05 §2).
@@ -160,6 +160,29 @@ export function queueIndicator(o: Observed): Indicator {
   );
 }
 
+/** "95 MB", "1.2 GB": decimal units, matching the device's MB settings. */
+export function formatBytes(bytes: number): string {
+  const mb = bytes / 1_000_000;
+  return mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : `${Math.floor(mb)} MB`;
+}
+
+/** Why storage is low, with the measured number and the limit it crossed. */
+function storageReasons(st: StoragePart): string[] {
+  const out: string[] = [];
+  const d = st.disk;
+  if ((d.level === "warning" || d.level === "critical") && d.freeBytes !== null) {
+    const limit = d.level === "critical" ? d.criticalFreeBytes : d.warnFreeBytes;
+    const state = d.level === "critical" ? "nearly full" : "getting full";
+    out.push(`Storage ${state}: ${formatBytes(d.freeBytes)} free (limit ${formatBytes(limit)})`);
+  }
+  const q = st.queue;
+  if ((q.level === "warning" || q.level === "critical") && q.pending !== null) {
+    const limit = q.level === "critical" ? q.criticalPending : q.warnPending;
+    out.push(`${q.pending} positions waiting to sync (limit ${limit})`);
+  }
+  return out;
+}
+
 export function storageIndicator(o: Observed): Indicator {
   const s = o.snapshot;
   if (s === null || !serviceAnswering(o)) {
@@ -168,6 +191,19 @@ export function storageIndicator(o: Observed): Indicator {
   const fault = s.recorder?.fault;
   if (fault) {
     return make("storage", "problem", "Not saving", `Positions are not being saved on this device (${fault}).`);
+  }
+  const st = s.storage;
+  if (st && (st.level === "critical" || st.level === "warning")) {
+    const why = storageReasons(st).join(". ");
+    if (st.recording === "reduced") {
+      return make(
+        "storage",
+        "problem",
+        "Saving less",
+        `${why}. Saving one position every ${st.reducedIntervalS} s until this clears; nothing waiting to sync is deleted.`,
+      );
+    }
+    return make("storage", "warn", st.disk.level === "warning" || st.disk.level === "critical" ? "Space low" : "Queue long", `${why}. Positions still save normally.`);
   }
   if (s.run?.state !== "active") {
     return make("storage", "off", "No run", "Positions save on this device only during an active run.");

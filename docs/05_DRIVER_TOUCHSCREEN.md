@@ -135,7 +135,7 @@ Text entry can use the installed on-screen keyboard or a suitable application co
 
 A failed command must preserve understandable state. If the service times out after a save, ask for the same command result using its original `requestId`; do not manufacture a new action every retry. **Saved on this device**, **Waiting to sync**, **Accepted by server**, and **Rejected** are different outcomes.
 
-If Chromium crashes, restart the browser and fetch authoritative state. If the device service restarts, recover its durable run and queue before displaying success. If storage cannot accept another event, show a blocking or degraded state according to the documented policy; a green **Recording** badge would be misleading.
+If Chromium crashes, restart the browser and fetch authoritative state. If the device service restarts, recover its durable run and queue before displaying success. If storage cannot accept another event, show a blocking or degraded state according to the documented policy; a green **Recording** badge would be misleading. Built: a failing save shows "Not saving" and blocks starting a run; low space or a long queue adds a **Recording** chip to the status bar ("Space low", "Queue long", or "Saving less" with the numbers), as in [04 §8](04_RASPBERRY_PI_SOFTWARE.md#8-database-durability-and-bounded-storage).
 
 A queued issue report is not an emergency call, and cloud acceptance is not confirmation that a dispatcher read it. Use the school's existing urgent communication procedure when needed; the interface should accurately describe only the communication it performed.
 

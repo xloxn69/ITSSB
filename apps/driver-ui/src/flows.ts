@@ -406,21 +406,31 @@ function ind(i: Indicator, ok: string): [string, string] {
   return [i.level === "ok" ? "ok" : i.level === "problem" ? "problem" : "warn", i.level === "ok" ? ok : i.detail];
 }
 
+/** Why Start is disabled, first reason first. */
+export function startBlockers(o: Observed, routeVersionId: string | null): string[] {
+  const cap = o.snapshot?.capabilities?.startRoute;
+  const blockers: string[] = [];
+  if (cap?.available !== true) blockers.push(cap?.reason ?? "This device cannot start runs.");
+  if (routeVersionId === null) blockers.push("Choose a route.");
+  // Only a failing save blocks a start. Low space or a long queue slows
+  // recording (D12) but the run still records, so it warns instead.
+  if (o.snapshot?.recorder?.fault) blockers.push("This device is not saving positions.");
+  return blockers;
+}
+
 export function preflightView(o: Observed, session: SessionInfo | null, ui: UiState, c: Controller): HTMLElement {
   const routes = session?.routes ?? [];
-  const cap = o.snapshot?.capabilities?.startRoute;
   const pending = o.snapshot?.runStart?.pending === true;
   const gps = gpsIndicator(o);
   const net = networkIndicator(o);
   const cloud = cloudIndicator(o);
   const storage = storageIndicator(o);
-  const blockers: string[] = [];
-  if (cap?.available !== true) blockers.push(cap?.reason ?? "This device cannot start runs.");
-  if (ui.routeVersionId === null) blockers.push("Choose a route.");
-  if (storage.level === "problem") blockers.push("This device is not saving positions.");
+  const blockers = startBlockers(o, ui.routeVersionId);
   const [gl, gt] = ind(gps, "Current fix.");
   const [nl, nt] = ind(net, "Online.");
   const [cl, ct] = ind(cloud, "Reached recently.");
+  // Before a run the indicator reads "No run" (off): that is not a storage problem.
+  const [sl, st] = storage.level === "off" || storage.level === "unknown" ? ["ok", "Positions will save on this device."] : ind(storage, "Positions will save on this device.");
   return h(
     "main",
     { class: "page" },
@@ -456,7 +466,7 @@ export function preflightView(o: Observed, session: SessionInfo | null, ui: UiSt
         checkRow("GPS", gl, gt),
         checkRow("Internet", nl, nt),
         checkRow("School server", cl, ct),
-        checkRow("Storage", storage.level === "problem" ? "problem" : "ok", storage.level === "problem" ? storage.detail : "Positions will save on this device."),
+        checkRow("Storage", sl, st),
       ),
     ),
     h("p", { class: "muted" }, "Starting needs the school server to answer. A new run never starts from this device alone."),

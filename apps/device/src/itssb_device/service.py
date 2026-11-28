@@ -34,6 +34,7 @@ from .local_auth import SessionManager, allowed_origins, load_drivers
 from .motion import MotionJudge, ObservedFixHolder
 from .recorder import Recorder, RecorderThread
 from .status import StatusBoard
+from .storage import StorageGuard
 from .students import DeviceGrantClient, RosterSyncThread, StudentDesk
 from .trips import EndRetryThread, HttpTripEvents
 from .uploader import HttpTransport, UploaderThread
@@ -78,7 +79,10 @@ class Service:
         self.boot_id = str(uuid.uuid4())
         self.stop_event = threading.Event()
         self.board = StatusBoard(
-            self.boot_id, upload_enabled=config.upload_enabled, environment=config.environment
+            self.boot_id,
+            upload_enabled=config.upload_enabled,
+            environment=config.environment,
+            storage_limits=config.storage_limits,
         )
         self.latest = ObservedFixHolder()
         self.judge = MotionJudge(self.latest)
@@ -150,7 +154,11 @@ class Service:
         self._threads.append(
             RecorderThread(
                 lambda: Recorder(
-                    Database(cfg.database_path), self.board, self.latest, self.boot_id
+                    Database(cfg.database_path),
+                    self.board,
+                    self.latest,
+                    self.boot_id,
+                    storage=StorageGuard(cfg.database_path, cfg.storage_limits),
                 ),
                 cfg.publish_interval_s,
                 self.stop_event,

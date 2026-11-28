@@ -143,7 +143,8 @@ Recorded 2026-11-26 against the development backend, with fictional data only. T
 | D10 invalid / conflicting | `validate.test.ts` (NaN, range, future); `telemetry.test.ts` content conflict | — | Pass |
 | D13 end trip offline | `test_runs_api.py` end completes locally, stays pending, retries the same request | — | Pass (device); backend `tripEvents.test.ts` |
 | D15 end during a write | `test_recorder.py::test_d15_run_ended_between_check_and_write_commits_nothing` and `test_recorder.py::test_d15_restart_after_the_race_records_nothing_past_the_final_sequence` (device); `tripEvents.test.ts` final sequence boundary (backend) | — | Pass |
-| D11, D12, D14 | Not in this milestone: route progress and alerts (Phase 8), queue limits, staff assignment workflow | — | Not run |
+| D12 near full disk or queue limit | Device: `test_storage.py` (fake free space and a filled outbox: warning with numbers, critical reduces recording, no pending row deleted or acknowledged, recovery, cleanup keeps pending and rejected rows). Driver screen: `indicators.test.ts` D12 cases, including that reduced recording does not block a start | Not run on the Pi (no real full disk) | Pass (simulated disk) |
+| D11, D14 | Not in this milestone: route progress and alerts (Phase 8), staff assignment workflow | — | Not run |
 
 Phone internet loss is a client state. Web shows a "Connection lost" banner and never calls the position fresh while disconnected (`live.test.ts`). iOS does the same: while the phone reconnects, the status card says "Reconnecting — Your phone lost its connection" and never calls the position fresh (`TrackViewModelTests`, `StatusCopyTests`, `LivePresentationTests` connection-lost cases). Starting up is not treated as lost.
 

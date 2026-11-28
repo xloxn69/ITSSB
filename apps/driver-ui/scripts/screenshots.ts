@@ -24,6 +24,8 @@ const STATES = [
   "detail-confirm-remove",
   "correction",
   "dashboard-changes",
+  "storage-warning",
+  "storage-critical",
 ];
 
 const outDir = process.argv[2] ?? "build/screenshots";
