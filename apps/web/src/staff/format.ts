@@ -8,7 +8,9 @@ import {
   POSITION_AGING_AFTER_MS,
   POSITION_STALE_AFTER_MS,
   RUN_REPORT_CATEGORY_LABELS,
+  type LinkedRun,
   type RouteDirection,
+  type RunHistoryEvent,
   type StaffRunReport,
 } from "@itssb/contracts";
 import type { Tone } from "../tracking/presentation";
@@ -34,6 +36,65 @@ export function staffReportText(r: StaffRunReport): string {
   const minutes = r.expectedDelayMinutes === null ? "no delay estimate" : `about ${r.expectedDelayMinutes} min late`;
   const who = r.driverName ?? "Driver";
   return `${reason}, ${minutes} · ${who} · made ${dateTime(r.capturedAtMs)} on the bus, received ${dateTime(r.receivedAtMs)}`;
+}
+
+const RUN_STATE_WORDS: Record<LinkedRun["state"], string> = {
+  scheduled: "scheduled",
+  active: "running now",
+  completed: "finished",
+  cancelled: "cancelled",
+};
+
+function linkTo(run: LinkedRun, what: string) {
+  return { runId: run.runId, label: `${what}: ${run.busLabel ?? "bus not recorded"}, ${RUN_STATE_WORDS[run.state]}` };
+}
+
+function quoted(reason: string | null): string {
+  return reason ? `: “${reason}”` : ", no reason recorded";
+}
+
+export interface RunHistoryLine {
+  atMs: number;
+  text: string;
+  /** The linked run's page, for a replacement. */
+  link: { runId: string; label: string } | null;
+}
+
+/**
+ * A run's history for staff, oldest first (docs/13 D14). A missing name
+ * reads "not recorded", never a guess; a replacement bus that was sent but
+ * hasn't started says so instead of implying a linked run.
+ */
+export function runHistoryLines(events: readonly RunHistoryEvent[]): RunHistoryLine[] {
+  const replacementStarted = events.some((e) => e.kind === "replaced_by");
+  return events.map((e): RunHistoryLine => {
+    switch (e.kind) {
+      case "started":
+        return { atMs: e.atMs, text: `Started on ${e.busLabel ?? "a bus not recorded"} by ${e.driverName ?? "a driver not recorded"}`, link: null };
+      case "replaces":
+        return { atMs: e.atMs, text: "Took over this route from a cancelled run", link: linkTo(e.run, "Replaced run") };
+      case "cancelled": {
+        const sent = e.replacementBusLabel
+          ? ` · ${e.replacementBusLabel} sent to take over${replacementStarted ? "" : " (not started yet)"}`
+          : "";
+        return { atMs: e.atMs, text: `Cancelled by ${e.byName ?? "staff (name not recorded)"}${quoted(e.reason)}${sent}`, link: null };
+      }
+      case "replaced_by":
+        return { atMs: e.atMs, text: `${e.run.busLabel ?? "The replacement bus"} started this route`, link: linkTo(e.run, "Replacement run") };
+      case "ended":
+        return { atMs: e.atMs, text: `Ended by ${e.driverName ?? "a driver not recorded"} on ${e.busLabel ?? "a bus not recorded"}`, link: null };
+      case "assignment_removed": {
+        const where = e.source === "driver_device" ? " on the bus" : e.source === "staff_web" ? " in the staff console" : "";
+        // The line already starts with when it was made; a queued one also says when it arrived.
+        const late = e.receivedAtMs !== e.atMs ? ` · received ${dateTime(e.receivedAtMs)}` : "";
+        return {
+          atMs: e.atMs,
+          text: `${e.studentDisplayName} removed from the route by ${e.byName ?? "someone not recorded"}${where}${quoted(e.reason)}${late}`,
+          link: null,
+        };
+      }
+    }
+  });
 }
 
 function ago(ms: number): string {

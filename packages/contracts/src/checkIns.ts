@@ -317,6 +317,43 @@ export interface RunAttendanceStudent {
   history: (CheckInRecord & { recordedByName: string | null; reason: string | null })[];
 }
 
+/** Another run linked to this one by a replacement, as staff see it. */
+export interface LinkedRun {
+  runId: string;
+  busLabel: string | null;
+  state: "scheduled" | "active" | "completed" | "cancelled";
+}
+
+/**
+ * One entry in a run's history for staff (docs/08 §11), oldest first. Names
+ * are `null` when the record predates who-did-it fields: never guessed.
+ */
+export type RunHistoryEvent =
+  | { kind: "started"; atMs: number; driverName: string | null; busLabel: string | null }
+  | {
+      kind: "cancelled";
+      atMs: number;
+      byName: string | null;
+      reason: string | null;
+      /** The bus staff sent to take over, or null for a plain cancellation. */
+      replacementBusLabel: string | null;
+    }
+  /** This run took over a cancelled run's route; `atMs` is this run's start. */
+  | { kind: "replaces"; atMs: number; run: LinkedRun }
+  /** The replacement bus started; `atMs` is the replacement's start. */
+  | { kind: "replaced_by"; atMs: number; run: LinkedRun }
+  | { kind: "ended"; atMs: number; driverName: string | null; busLabel: string | null }
+  | {
+      kind: "assignment_removed";
+      /** When it was made: on the bus for a queued driver removal, else when received. */
+      atMs: number;
+      receivedAtMs: number;
+      studentDisplayName: string;
+      byName: string | null;
+      reason: string | null;
+      source: "staff_web" | "driver_device" | null;
+    };
+
 export type RunAttendanceResult =
   | (Envelope & {
       status: "ready";
@@ -327,6 +364,8 @@ export type RunAttendanceResult =
       students: RunAttendanceStudent[];
       /** Driver delay and issue reports on this run, newest first (docs/08 §9.4). */
       reports?: StaffRunReport[];
+      /** Start, cancellation, replacement links, end and roster removals, oldest first. */
+      history?: RunHistoryEvent[];
     })
   | (Envelope & { status: "not_found" })
   | AccessUnavailable;

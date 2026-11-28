@@ -4,6 +4,7 @@ import { staffFixtureSource } from "../dev/staffFixtures";
 import {
   approvalBlocker,
   contactStatus,
+  dateTime,
   deviceMetricFacts,
   driversFileEntry,
   METRIC_NOT_AVAILABLE,
@@ -13,6 +14,7 @@ import {
   maintenanceWindow,
   PIN_HASH_PLACEHOLDER,
   runActionsAvailable,
+  runHistoryLines,
   serviceDateLabel,
   sweepSummary,
   staffReportText,
@@ -397,5 +399,71 @@ describe("staff driver report text", () => {
     expect(t.startsWith("Mechanical problem, no delay estimate · Dana Driver · made ")).toBe(true);
     expect(t).toContain("on the bus, received");
     expect(staffReportText({ ...report, expectedDelayMinutes: 10, category: "traffic" })).toContain("Traffic, about 10 min late");
+  });
+});
+
+describe("runHistoryLines", () => {
+  const replacement = { runId: "demo_run_b", busLabel: "Bus 30", state: "active" as const };
+  const cancelled = {
+    kind: "cancelled" as const,
+    atMs: 3_000,
+    byName: "Riley Staff",
+    reason: "Flat tire",
+    replacementBusLabel: "Bus 30",
+  };
+
+  it("says who cancelled and why, and links the replacement once it started", () => {
+    const lines = runHistoryLines([
+      { kind: "started", atMs: 1_000, driverName: "Dana Driver", busLabel: "Bus 12" },
+      cancelled,
+      { kind: "replaced_by", atMs: 4_000, run: replacement },
+    ]);
+    expect(lines.map((l) => l.text)).toEqual([
+      "Started on Bus 12 by Dana Driver",
+      "Cancelled by Riley Staff: “Flat tire” · Bus 30 sent to take over",
+      "Bus 30 started this route",
+    ]);
+    expect(lines[2]?.link).toEqual({ runId: "demo_run_b", label: "Replacement run: Bus 30, running now" });
+  });
+
+  it("a replacement sent but not started says so and links nothing", () => {
+    const [line] = runHistoryLines([cancelled]);
+    expect(line?.text).toBe("Cancelled by Riley Staff: “Flat tire” · Bus 30 sent to take over (not started yet)");
+    expect(line?.link).toBeNull();
+  });
+
+  it("never guesses a missing name or reason", () => {
+    const lines = runHistoryLines([
+      { kind: "started", atMs: 1, driverName: null, busLabel: null },
+      { ...cancelled, byName: null, reason: null, replacementBusLabel: null },
+      { kind: "ended", atMs: 2, driverName: null, busLabel: "Bus 12" },
+    ]);
+    expect(lines.map((l) => l.text)).toEqual([
+      "Started on a bus not recorded by a driver not recorded",
+      "Cancelled by staff (name not recorded), no reason recorded",
+      "Ended by a driver not recorded on Bus 12",
+    ]);
+  });
+
+  it("a removal queued on the bus also shows when it arrived", () => {
+    const removal = {
+      kind: "assignment_removed" as const,
+      atMs: Date.UTC(2026, 10, 2, 12, 20),
+      receivedAtMs: Date.UTC(2026, 10, 2, 12, 40),
+      studentDisplayName: "Sam Example",
+      byName: "Dana Driver",
+      reason: "Family moved away",
+      source: "driver_device" as const,
+    };
+    const [queued, direct] = runHistoryLines([removal, { ...removal, receivedAtMs: removal.atMs, source: "staff_web" }]);
+    expect(queued?.text).toBe(
+      `Sam Example removed from the route by Dana Driver on the bus: “Family moved away” · received ${dateTime(removal.receivedAtMs)}`,
+    );
+    expect(direct?.text).toBe("Sam Example removed from the route by Dana Driver in the staff console: “Family moved away”");
+  });
+
+  it("the replaced run links back from the replacement", () => {
+    const [line] = runHistoryLines([{ kind: "replaces", atMs: 1, run: { runId: "demo_run_a", busLabel: "Bus 12", state: "cancelled" } }]);
+    expect(line?.link).toEqual({ runId: "demo_run_a", label: "Replaced run: Bus 12, cancelled" });
   });
 });

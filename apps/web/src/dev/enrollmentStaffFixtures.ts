@@ -12,6 +12,7 @@ import type {
   InvitationSummary,
   RecentRun,
   RunAttendanceStudent,
+  RunHistoryEvent,
   StudentSummary,
 } from "@itssb/contracts";
 
@@ -41,6 +42,7 @@ export function enrollmentFixtureState(empty: boolean) {
       runs: [] as RecentRun[],
       attendance: new Map<string, RunAttendanceStudent[]>(),
       audit: [] as AuditEntry[],
+      histories: new Map<string, RunHistoryEvent[]>(),
     };
   }
   const requests: EnrollmentRequestForReview[] = [
@@ -180,6 +182,26 @@ export function enrollmentFixtureState(empty: boolean) {
       boardedCount: 1,
     },
     {
+      runId: "demo_run_003",
+      routeLabel: "Route 9 Morning",
+      busLabel: "Bus 30",
+      state: "active",
+      startedAtMs: now - 40 * MIN,
+      endedAtMs: null,
+      assignedCount: 1,
+      boardedCount: 0,
+    },
+    {
+      runId: "demo_run_002",
+      routeLabel: "Route 9 Morning",
+      busLabel: "Bus 21",
+      state: "cancelled",
+      startedAtMs: now - 75 * MIN,
+      endedAtMs: now - 55 * MIN,
+      assignedCount: 1,
+      boardedCount: 0,
+    },
+    {
       runId: "demo_run_000",
       routeLabel: "Route 4 Afternoon",
       busLabel: "Bus 7",
@@ -273,7 +295,33 @@ export function enrollmentFixtureState(empty: boolean) {
       capturedAtMs: null,
     },
   ];
-  return { requests, links, invitations, students, runs, attendance, audit };
+  const histories = new Map<string, RunHistoryEvent[]>([
+    [
+      "demo_run_002",
+      [
+        { kind: "started", atMs: now - 75 * MIN, driverName: "Dana Driver", busLabel: "Bus 21" },
+        {
+          kind: "assignment_removed",
+          atMs: now - 70 * MIN,
+          receivedAtMs: now - 50 * MIN,
+          studentDisplayName: "Jordan Sample",
+          byName: "Dana Driver",
+          reason: "Family moved to another school.",
+          source: "driver_device",
+        },
+        { kind: "cancelled", atMs: now - 55 * MIN, byName: "Riley Staff", reason: "Flat tire at Cedar Park.", replacementBusLabel: "Bus 30" },
+        { kind: "replaced_by", atMs: now - 40 * MIN, run: { runId: "demo_run_003", busLabel: "Bus 30", state: "active" } },
+      ],
+    ],
+    [
+      "demo_run_003",
+      [
+        { kind: "started", atMs: now - 40 * MIN, driverName: "Morgan Driver", busLabel: "Bus 30" },
+        { kind: "replaces", atMs: now - 40 * MIN, run: { runId: "demo_run_002", busLabel: "Bus 21", state: "cancelled" } },
+      ],
+    ],
+  ]);
+  return { requests, links, invitations, students, runs, attendance, audit, histories };
 }
 
 type State = ReturnType<typeof enrollmentFixtureState>;
@@ -303,6 +351,7 @@ export function enrollmentAnswer(state: State, name: string, args: Record<string
         runState: run.state,
         startedAtMs: run.startedAtMs,
         students: state.attendance.get(run.runId) ?? [],
+        history: state.histories.get(run.runId) ?? [],
         reports:
           run.runId === "demo_run_001"
             ? [
