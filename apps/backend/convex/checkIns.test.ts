@@ -645,16 +645,18 @@ describe("acceptance: driver correction refusals", () => {
   });
 
   it.each([
-    ["a revoked grant", SECRET_A, GRANT_REVOKED, "grant_not_authorized"],
-    ["an expired grant", SECRET_A, GRANT_EXPIRED, "grant_not_authorized"],
-    ["another route's driver grant on its own bus", SECRET_B, GRANT_B, "assignment_not_authorized"],
-  ])("a correction under %s is rejected and changes nothing", async (_n, secret, grant, code) => {
+    ["a revoked grant", SECRET_A, GRANT_REVOKED, "grant_not_authorized", 60_000],
+    // Backdated into the expired grant's old window (and after the run start), so only expiry refuses it.
+    ["an expired grant", SECRET_A, GRANT_EXPIRED, "grant_not_authorized", 2.5 * HOUR],
+    ["another route's driver grant on its own bus", SECRET_B, GRANT_B, "assignment_not_authorized", 60_000],
+  ])("a correction under %s is rejected and changes nothing", async (_n, secret, grant, code, ageMs) => {
     const { t, runA, a1 } = await setup();
     const scanned = (await scan(t, STUDENT_1, runA)) as { checkIn: { checkInId: string } };
     const before = await rows(t);
     const res = await post(t, "/device/v1/roster-actions", secret, {
       ...correct(runA, a1, scanned.checkIn.checkInId),
       driverOperatingGrant: grant,
+      capturedAtMs: Date.now() - ageMs,
     });
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ status: "rejected", code });
