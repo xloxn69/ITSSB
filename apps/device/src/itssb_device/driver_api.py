@@ -650,7 +650,9 @@ class DriverApi:
             "endSync": sync,
             "summary": summary,
         }
-        if result is not None and result.status == "rejected":
+        if result is not None and result.run_state == "cancelled":
+            body["message"] = "The school had already cancelled this run."
+        elif result is not None and result.status == "rejected":
             body["message"] = SERVER_WORDS.get(
                 result.code or "", f"The school server refused the end ({result.code})."
             )

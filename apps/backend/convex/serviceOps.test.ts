@@ -1,5 +1,5 @@
 import { localDate } from "@itssb/contracts";
-import { demoTelemetryEvent } from "@itssb/contracts/fixtures";
+import { demoTelemetryEvent, deviceHealthNoFix } from "@itssb/contracts/fixtures";
 import { convexTest } from "convex-test";
 import { describe, expect, it } from "vitest";
 import { api } from "./_generated/api";
@@ -89,6 +89,35 @@ async function startOn(t: T, secret: string, grant: string, routeVersionId: stri
   return { status: res.status, body: (await res.json()) as { runId?: string; error?: { code: string } } };
 }
 
+async function postTelemetry(t: T, secret: string, runId: string) {
+  const res = await t.fetch("/device/v1/telemetry", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
+    body: JSON.stringify({
+      schemaVersion: 1,
+      events: [{ ...demoTelemetryEvent, eventId: crypto.randomUUID(), runId, capturedAtMs: Date.now() - 1000 }],
+    }),
+  });
+  expect(res.status).toBe(200);
+  return ((await res.json()) as { results: Record<string, unknown>[] }).results[0];
+}
+
+async function postHealth(
+  t: T,
+  secret: string,
+  runId: string | null,
+  capturedAtMs = Date.now() - 1000,
+  extra: Record<string, unknown> = {},
+) {
+  const res = await t.fetch("/device/v1/health", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
+    body: JSON.stringify({ ...deviceHealthNoFix, runId, capturedAtMs, ...extra }),
+  });
+  expect(res.status).toBe(200);
+  return (await res.json()) as Record<string, unknown>;
+}
+
 // ── Cancellation ──────────────────────────────────────────────────────
 
 describe("runOps.cancelRun", () => {
@@ -112,19 +141,104 @@ describe("runOps.cancelRun", () => {
     expect(deviceB).toBeTruthy();
   });
 
-  it("stops accepting positions for a cancelled run", async () => {
+  it("stops accepting positions for a cancelled run, and tells its own bus why", async () => {
     const { t, staff, runId } = await setup();
     await staff.mutation(api.runOps.cancelRun, { runId, reason: "Weather" });
-    const res = await t.fetch("/device/v1/telemetry", {
+    const cancelledAtMs = (await getRun(t, runId))?.cancelledAtMs;
+    const result = await postTelemetry(t, SECRET_A, runId);
+    // Still a plain rejection for an older Pi, which reads only status and code.
+    expect(result).toEqual({
+      eventId: expect.any(String),
+      status: "rejected",
+      code: "RUN_CANCELLED",
+      message: expect.any(String),
+      runState: "cancelled",
+      cancelledAtMs,
+    });
+    expect(cancelledAtMs).toEqual(expect.any(Number));
+    expect(await t.run((ctx) => ctx.db.query("telemetryEvents").collect())).toEqual([]);
+  });
+
+  it("answers a driver's end of a run staff already cancelled with the cancellation", async () => {
+    const { t, staff, route } = await setup();
+    // Bus B's own run, ended by its driver after staff cancelled it.
+    await t.run(async (ctx) => {
+      const active = await ctx.db.query("runs").collect();
+      for (const r of active) await ctx.db.patch(r._id, { state: "completed" });
+    });
+    const started = await startOn(t, SECRET_B, GRANT_B, route);
+    const runB = started.body.runId as Id<"runs">;
+    await staff.mutation(api.runOps.cancelRun, { runId: runB, reason: "Bus broke down at Elm St" });
+    const cancelledAtMs = (await getRun(t, runB))?.cancelledAtMs;
+    const res = await t.fetch("/device/v1/trip-events", {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${SECRET_A}` },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${SECRET_B}` },
       body: JSON.stringify({
         schemaVersion: 1,
-        events: [{ ...demoTelemetryEvent, eventId: crypto.randomUUID(), runId, capturedAtMs: Date.now() - 1000 }],
+        requestId: crypto.randomUUID(),
+        type: "endRun",
+        driverOperatingGrant: GRANT_B,
+        runId: runB,
+        capturedAtMs: Date.now() - 500,
+        lastRunSequence: null,
       }),
     });
-    const body = (await res.json()) as { results: { status: string; code?: string }[] };
-    expect(body.results[0]).toMatchObject({ status: "rejected", code: "RUN_NOT_AUTHORIZED" });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: unknown }).error).toEqual({
+      code: "RUN_NOT_ACTIVE",
+      message: expect.any(String),
+      retryable: false,
+      runState: "cancelled",
+      cancelledAtMs,
+    });
+    expect(await getRun(t, runB)).toMatchObject({ state: "cancelled" });
+  });
+
+  it("answers about a run the bus ended but the server never confirmed, with no grant needed", async () => {
+    const { t, staff, runId } = await setup();
+    await staff.mutation(api.runOps.cancelRun, { runId, reason: "Weather" });
+    const cancelledAtMs = (await getRun(t, runId))?.cancelledAtMs;
+    expect(await postHealth(t, SECRET_A, null, undefined, { unconfirmedEndRunId: runId })).toMatchObject({
+      run: { runId, state: "cancelled", cancelledAtMs },
+    });
+    // Another bus naming it gets nothing.
+    expect(await postHealth(t, SECRET_B, null, undefined, { unconfirmedEndRunId: runId })).not.toHaveProperty("run");
+  });
+
+  it("never tells another bus that a run it doesn't own was cancelled", async () => {
+    const { t, staff, runId } = await setup();
+    await staff.mutation(api.runOps.cancelRun, { runId, reason: "Weather" });
+    const result = await postTelemetry(t, SECRET_B, runId);
+    expect(result).toMatchObject({ status: "rejected", code: "RUN_NOT_AUTHORIZED" });
+    expect(result).not.toHaveProperty("runState");
+    expect(result).not.toHaveProperty("cancelledAtMs");
+    expect(await postHealth(t, SECRET_B, runId)).not.toHaveProperty("run");
+  });
+
+  it("answers the bus's heartbeat with the cancellation, so a Pi with no GPS fix learns it too", async () => {
+    const { t, staff, runId } = await setup();
+    expect(await postHealth(t, SECRET_A, runId)).toMatchObject({
+      status: "accepted",
+      run: { runId, state: "active", cancelledAtMs: null },
+    });
+    await staff.mutation(api.runOps.cancelRun, { runId, reason: "Bus broke down at Elm St" });
+    const cancelledAtMs = (await getRun(t, runId))?.cancelledAtMs;
+    const capturedAtMs = Date.now() - 1000;
+    const first = await postHealth(t, SECRET_A, runId, capturedAtMs);
+    expect(first).toEqual({
+      schemaVersion: 1,
+      status: "accepted",
+      receivedAtMs: expect.any(Number),
+      serverNowMs: expect.any(Number),
+      run: { runId, state: "cancelled", cancelledAtMs },
+    });
+    // A delayed (older) report from the same boot gets the same answer.
+    expect(await postHealth(t, SECRET_A, runId, capturedAtMs - 5000)).toMatchObject({
+      run: { runId, state: "cancelled", cancelledAtMs },
+    });
+    // No run named, or an unknown one: no run state.
+    expect(await postHealth(t, SECRET_A, null)).not.toHaveProperty("run");
+    expect(await postHealth(t, SECRET_A, "not_a_run")).not.toHaveProperty("run");
   });
 
   it("requires a reason and changes nothing without one", async () => {
@@ -178,6 +292,21 @@ describe("runOps.replaceDevice", () => {
     expect(await getRun(t, newRunId)).toMatchObject({ replacesRunId: runId });
     expect(await getRun(t, runId)).toMatchObject({ replacedByRunId: newRunId });
     expect((await audit(t)).map((a) => a.action)).toEqual(["runs.replaceDevice", "runs.start"]);
+  });
+
+  it("tells the old bus its run was cancelled, and leaves the replacement bus's run alone", async () => {
+    const { t, staff, runId, route, deviceB } = await setup();
+    await staff.mutation(api.runOps.replaceDevice, { runId, replacementDeviceId: deviceB, reason: "Flat tire" });
+    const started = await startOn(t, SECRET_B, GRANT_B, route);
+    const newRunId = started.body.runId as Id<"runs">;
+    expect(await getRun(t, runId)).toMatchObject({ replacedByRunId: newRunId });
+
+    expect(await postTelemetry(t, SECRET_A, runId)).toMatchObject({ status: "rejected", code: "RUN_CANCELLED" });
+    expect(await postHealth(t, SECRET_A, runId)).toMatchObject({ run: { runId, state: "cancelled" } });
+    expect(await postTelemetry(t, SECRET_B, newRunId)).toMatchObject({ status: "accepted" });
+    expect(await postHealth(t, SECRET_B, newRunId)).toMatchObject({
+      run: { runId: newRunId, state: "active", cancelledAtMs: null },
+    });
   });
 
   it("a different bus starting the route is not linked as the replacement", async () => {

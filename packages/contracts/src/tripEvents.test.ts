@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import activeRunConflict from "../fixtures/tripEvent.activeRunConflict.json" with { type: "json" };
 import endAccepted from "../fixtures/tripEvent.endRun.accepted.json" with { type: "json" };
 import endRequest from "../fixtures/tripEvent.endRun.request.json" with { type: "json" };
+import endRunCancelled from "../fixtures/tripEvent.endRun.runCancelled.json" with { type: "json" };
 import startAccepted from "../fixtures/tripEvent.startRun.accepted.json" with { type: "json" };
 import startRequest from "../fixtures/tripEvent.startRun.request.json" with { type: "json" };
 import { tripEventFixtureFiles } from "./tripEventFixtures.js";
@@ -13,6 +14,7 @@ const json: Record<keyof typeof tripEventFixtureFiles, unknown> = {
   "tripEvent.endRun.request": endRequest,
   "tripEvent.endRun.accepted": endAccepted,
   "tripEvent.activeRunConflict": activeRunConflict,
+  "tripEvent.endRun.runCancelled": endRunCancelled,
 };
 
 describe("trip-event fixtures", () => {

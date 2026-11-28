@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "serverNowMs": 1795609085400,
+  "results": [
+    {
+      "eventId": "5fe2a60d-7c11-45b9-995d-f50192adea42",
+      "status": "rejected",
+      "code": "RUN_CANCELLED",
+      "message": "The school cancelled this run.",
+      "runState": "cancelled",
+      "cancelledAtMs": 1795609000000
+    }
+  ]
+}

@@ -14,7 +14,9 @@ import { boundedText, okResult, refusedResult, staffActionResult } from "./lib/s
  * Staff run operations (docs/12 §7). A cancelled run stops accepting
  * positions (telemetry accepts only active runs, plus bounded late history
  * of completed ones) and frees its route for another authorized bus. The
- * Pi learns about it when its next end request is answered `RUN_NOT_ACTIVE`.
+ * bus's Pi learns about it from its next health answer (`run.state`) or
+ * telemetry result (`RUN_CANCELLED`) and ends the run locally as cancelled,
+ * with no driver or GPS needed (docs/13 D14).
  */
 
 const result = staffActionResult(RUN_OP_REFUSAL_CODES);

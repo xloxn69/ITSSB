@@ -80,7 +80,25 @@ MIGRATIONS: list[str] = [
     SUBMISSIONS_MIGRATION,
     # 7: review-status reads rotate by a counter, not the wall clock
     REVIEW_ROTATION_MIGRATION,
+    # 8: runs the school cancelled, learned from the server (docs/13 D14).
+    # Separate from run_end_requests: nothing is sent for them.
+    """
+    CREATE TABLE run_cancellations (
+        run_id TEXT PRIMARY KEY REFERENCES local_runs(run_id),
+        cancelled_at_ms INTEGER,
+        noted_at_ms INTEGER NOT NULL,
+        source TEXT NOT NULL CHECK (source IN ('health','telemetry','end_answer'))
+    );
+    """,
 ]
+
+# The most recently ended run, by driver end or school cancellation. Runs are
+# inserted at start and only one is active at a time, so start order is end
+# order. The trip summary and pruning share this so they agree.
+LAST_ENDED_RUN_SQL = (
+    "SELECT run_id FROM local_runs WHERE run_id IN (SELECT run_id FROM run_end_requests) "
+    "OR run_id IN (SELECT run_id FROM run_cancellations) ORDER BY rowid DESC LIMIT 1"
+)
 
 
 class RunNotActive(Exception):
@@ -331,33 +349,109 @@ class Database:
                     (status, error, now_ms, request_id),
                 )
 
-    def last_ended_run(self) -> dict | None:
-        """The most recently ended run and its sync state, for the trip summary."""
+    def cancel_run_locally(
+        self, run_id: str, cancelled_at_ms: int | None, noted_at_ms: int, source: str
+    ) -> bool:
+        """The server says the school cancelled this run (docs/13 D14). In ONE
+        transaction: mark it `cancelled` locally and record when. Only the
+        named run, and only while it is active here, or completed by the
+        driver with an end the server has not accepted (staff cancelled first;
+        the end request stays as the audit of the driver's attempt). Nothing is
+        sent to the server and no queued row changes (the server decides each
+        one). Returns True if this call recorded it."""
+        with self.transaction() as tx:
+            ended = tx.execute(
+                "UPDATE local_runs SET state='cancelled' WHERE run_id=? AND (state='active' "
+                "OR (state='completed' AND NOT EXISTS (SELECT 1 FROM run_end_requests e "
+                "WHERE e.run_id=local_runs.run_id AND e.status='accepted')))",
+                (run_id,),
+            ).rowcount
+            if ended:
+                tx.execute(
+                    "INSERT INTO run_cancellations(run_id, cancelled_at_ms, noted_at_ms, source) "
+                    "VALUES(?, ?, ?, ?)",
+                    (run_id, cancelled_at_ms, noted_at_ms, source),
+                )
+        return bool(ended)
+
+    def unconfirmed_end_run_id(self) -> str | None:
+        """The most recently ended run, if the driver ended it here and the
+        server has not accepted that end (pending or refused). Health asks the
+        server about it, so a school cancellation still arrives (docs/13 D14)."""
         row = self.conn.execute(
-            "SELECT e.run_id, e.status, e.last_error, e.attempts, e.payload, e.resolved_at_ms, "
-            "(SELECT COUNT(*) FROM telemetry_events t WHERE t.run_id=e.run_id) AS events, "
-            "(SELECT COUNT(*) FROM telemetry_events t JOIN outbox o ON o.event_id=t.event_id "
-            " WHERE t.run_id=e.run_id AND o.status='pending') AS pending, "
-            "(SELECT COUNT(*) FROM telemetry_events t JOIN outbox o ON o.event_id=t.event_id "
-            " WHERE t.run_id=e.run_id AND o.status='acknowledged') AS acknowledged, "
-            "(SELECT COUNT(*) FROM telemetry_events t JOIN outbox o ON o.event_id=t.event_id "
-            " WHERE t.run_id=e.run_id AND o.status='rejected') AS rejected "
-            "FROM run_end_requests e ORDER BY e.rowid DESC LIMIT 1"
+            "SELECT r.run_id FROM local_runs r JOIN run_end_requests e ON e.run_id=r.run_id "  # noqa: S608 - constant SQL
+            "WHERE r.state='completed' AND e.status!='accepted' "
+            f"AND r.run_id IN ({LAST_ENDED_RUN_SQL})"
         ).fetchone()
-        if row is None:
+        return row["run_id"] if row else None
+
+    def run_of_event(self, event_id: str) -> str | None:
+        row = self.conn.execute(
+            "SELECT run_id FROM telemetry_events WHERE event_id=?", (event_id,)
+        ).fetchone()
+        return row["run_id"] if row else None
+
+    def last_ended_run(self) -> dict | None:
+        """The most recently ended run and its sync state, for the trip summary.
+        `endedBy` is `driver` (ended here, end sent to the server) or `school`
+        (cancelled by staff). A school cancellation wins over a driver's end the
+        server never accepted; that attempt stays visible as `driverEndedAtMs`
+        with its `endSync`. With no driver attempt, `endSync` is `not_needed`."""
+        last = self.conn.execute(LAST_ENDED_RUN_SQL).fetchone()
+        if last is None:
             return None
-        payload = json.loads(row["payload"])
-        return {
-            "runId": row["run_id"],
-            "endedAtMs": payload["capturedAtMs"],
-            "endSync": row["status"],
-            "endError": row["last_error"],
-            "endAttempts": row["attempts"],
-            "positionsRecorded": row["events"],
-            "positionsWaiting": row["pending"],
-            "positionsAccepted": row["acknowledged"],
-            "positionsRejected": row["rejected"],
+        run_id = last["run_id"]
+        counts = self.conn.execute(
+            "SELECT COUNT(*) AS events, "
+            "COALESCE(SUM(o.status='pending'), 0) AS pending, "
+            "COALESCE(SUM(o.status='acknowledged'), 0) AS acknowledged, "
+            "COALESCE(SUM(o.status='rejected'), 0) AS rejected "
+            "FROM telemetry_events t LEFT JOIN outbox o ON o.event_id=t.event_id "
+            "WHERE t.run_id=?",
+            (run_id,),
+        ).fetchone()
+        positions = {
+            "positionsRecorded": counts["events"],
+            "positionsWaiting": counts["pending"],
+            "positionsAccepted": counts["acknowledged"],
+            "positionsRejected": counts["rejected"],
         }
+        end = self.conn.execute(
+            "SELECT status, last_error, attempts, payload FROM run_end_requests WHERE run_id=?",
+            (run_id,),
+        ).fetchone()
+        c = self.conn.execute(
+            "SELECT cancelled_at_ms, noted_at_ms FROM run_cancellations WHERE run_id=?", (run_id,)
+        ).fetchone()
+        if c is None and end is not None:
+            return {
+                "runId": run_id,
+                "endedBy": "driver",
+                "endedAtMs": json.loads(end["payload"])["capturedAtMs"],
+                "endSync": end["status"],
+                "endError": end["last_error"],
+                "endAttempts": end["attempts"],
+                **positions,
+            }
+        summary = {
+            "runId": run_id,
+            "endedBy": "school",
+            "endedAtMs": c["noted_at_ms"] if c["cancelled_at_ms"] is None else c["cancelled_at_ms"],
+            "cancelledAtMs": c["cancelled_at_ms"],
+            "cancelNotedAtMs": c["noted_at_ms"],
+            "endSync": "not_needed",
+            "endError": None,
+            "endAttempts": 0,
+            **positions,
+        }
+        if end is not None:
+            summary.update(
+                driverEndedAtMs=json.loads(end["payload"])["capturedAtMs"],
+                endSync=end["status"],
+                endError=end["last_error"],
+                endAttempts=end["attempts"],
+            )
+        return summary
 
     # ── Observations ──────────────────────────────────────────────────
 
@@ -424,19 +518,18 @@ class Database:
     def prune_acknowledged(self, captured_before_ms: int, limit: int) -> int:
         """Removes up to `limit` acknowledged events captured before the cutoff,
         with their outbox rows. Never touches a pending or rejected row, the
-        active (or scheduled) run, or the most recently ended run, whose trip
-        summary counts its rows. Returns how many events were removed."""
+        active (or scheduled) run, or the most recently ended (or cancelled)
+        run, whose trip summary counts its rows. Returns how many events were removed."""
         with self.transaction() as tx:
             ids = [
                 (r["event_id"],)
                 for r in tx.execute(
-                    "SELECT o.event_id FROM outbox o JOIN telemetry_events t "
+                    "SELECT o.event_id FROM outbox o JOIN telemetry_events t "  # noqa: S608 - constant SQL
                     "ON t.event_id = o.event_id WHERE o.status='acknowledged' "
                     "AND t.captured_at_ms < ? "
                     "AND t.run_id NOT IN (SELECT run_id FROM local_runs "
                     "  WHERE state IN ('active','scheduled')) "
-                    "AND t.run_id NOT IN (SELECT run_id FROM run_end_requests "
-                    "  ORDER BY rowid DESC LIMIT 1) "
+                    f"AND t.run_id NOT IN ({LAST_ENDED_RUN_SQL}) "
                     "ORDER BY o.rowid LIMIT ?",
                     (captured_before_ms, limit),
                 )

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import accepted from "../fixtures/health.accepted.json" with { type: "json" };
+import acceptedRunCancelled from "../fixtures/health.accepted.runCancelled.json" with { type: "json" };
 import noFix from "../fixtures/health.report.noFix.json" with { type: "json" };
 import withMetrics from "../fixtures/health.report.withMetrics.json" with { type: "json" };
+import telemetryRunCancelled from "../fixtures/telemetry.response.runCancelled.json" with { type: "json" };
 import { validateDeviceHealthReport } from "./health.js";
 import { healthFixtureFiles } from "./healthFixtures.js";
 
@@ -11,6 +13,8 @@ describe("health fixtures", () => {
   it("fixtures/*.json match the typed fixtures (run `bun run fixtures` if not)", () => {
     expect(noFix).toEqual(healthFixtureFiles["health.report.noFix"]);
     expect(accepted).toEqual(healthFixtureFiles["health.accepted"]);
+    expect(acceptedRunCancelled).toEqual(healthFixtureFiles["health.accepted.runCancelled"]);
+    expect(telemetryRunCancelled).toEqual(healthFixtureFiles["telemetry.response.runCancelled"]);
     expect(withMetrics).toEqual(healthFixtureFiles["health.report.withMetrics"]);
   });
 
@@ -42,6 +46,8 @@ describe("validateDeviceHealthReport", () => {
     ["coordinates smuggled in", { ...noFix, latitude: 34.1 }],
     ["fractional queue", { ...noFix, pendingCount: 1.5 }],
     ["long version", { ...noFix, appVersion: "x".repeat(33) }],
+    ["unconfirmed end not an ID", { ...noFix, unconfirmedEndRunId: 7 }],
+    ["unconfirmed end too long", { ...noFix, unconfirmedEndRunId: "x".repeat(65) }],
     ["negative retries", { ...withMetrics, uploadRetriesSinceStart: -1 }],
     ["null retry count", { ...withMetrics, uploadConsecutiveFailures: null }],
     ["fractional bytes", { ...withMetrics, processRssBytes: 1.5 }],

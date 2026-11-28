@@ -1,5 +1,6 @@
 import { ApiError, api, currentSession, fetchSession, fetchSnapshot, noAnswer, RequestIds } from "./api.js";
 import {
+  cancelledBanner,
   awaitingView,
   type Controller,
   editStopsView,
@@ -505,7 +506,8 @@ function dashboardControls(o: Observed): (HTMLElement | null)[] {
     extra.push(end);
   }
   // Student changes still waiting, and any rejection, even after the run ended.
-  for (const line of studentChangeLines(o.snapshot?.studentChanges)) {
+  for (const line of [cancelledBanner(o), ...studentChangeLines(o.snapshot?.studentChanges)]) {
+    if (!line) continue;
     const note = document.createElement("div");
     note.className = `banner lv-${line.level}`;
     note.textContent = line.text;

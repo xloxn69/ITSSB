@@ -68,7 +68,7 @@ These 24 named screens match the visual atlas. Each screen also owns its loading
 | D21 | GPS and device diagnostics | Shows receiver/fix age, cloud contact, queue depth, disk state, temperature, app version, and restricted maintenance controls. |
 | D22 | Offline bus operation | Explains which records are saved locally, when the backend last heard from the bus, and what cannot currently be confirmed. |
 | D23 | End-trip confirmation | Confirms the intended run, highlights unsynchronized/unresolved records, and saves completion once. |
-| D24 | Trip summary | Shows start/end, stop progress, record counts, reported issues, and Completed locally versus Synced. |
+| D24 | Trip summary | Shows start/end, stop progress, record counts, reported issues, and Completed locally versus Synced. A run the school cancelled shows "Cancelled by the school" with the time, never "Completed" or "End synced". |
 
 ## 5. First setup and a normal shift
 
@@ -143,6 +143,8 @@ Text entry can use the installed on-screen keyboard or a suitable application co
 A failed command must preserve understandable state. If the service times out after a save, ask for the same command result using its original `requestId`; do not manufacture a new action every retry. **Saved on this device**, **Waiting to sync**, **Accepted by server**, and **Rejected** are different outcomes.
 
 If Chromium crashes, restart the browser and fetch authoritative state. If the device service restarts, recover its durable run and queue before displaying success. If storage cannot accept another event, show a blocking or degraded state according to the documented policy; a green **Recording** badge would be misleading. Built: a failing save shows "Not saving" and blocks starting a run; low space or a long queue adds a **Recording** chip to the status bar ("Space low", "Queue long", or "Saving less" with the numbers), as in [04 §8](04_RASPBERRY_PI_SOFTWARE.md#8-database-durability-and-bounded-storage).
+
+When staff cancel the bus's run, or send a replacement bus, the Pi ends it locally as cancelled ([04 §10](04_RASPBERRY_PI_SOFTWARE.md#10-trip-lifecycle)). The dashboard then shows "Run cancelled by the school at HH:MM. This bus stopped recording it." until another run starts, locked or not, and the status bar no longer says the run is active. This is the recovery when the driver cannot end the run (for example, GPS lost so the bus can't be confirmed parked).
 
 A queued issue report is not an emergency call, and cloud acceptance is not confirmation that a dispatcher read it. Use the school's existing urgent communication procedure when needed; the interface should accurately describe only the communication it performed.
 

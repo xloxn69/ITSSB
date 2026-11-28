@@ -116,7 +116,9 @@ Each submitted event receives one result, unless a transport failure leaves the 
 
 Accepted historical data can have `liveStateApplied: false`. It is still stored; it simply did not replace the latest live observation. A duplicate returns the original receipt identity/time where available, not a newly fabricated observation.
 
-For rejected/retryable results include a stable `code`, a safe user/support message, and optional `retryAfterMs`. Example codes include `INVALID_COORDINATES`, `CLOCK_OUT_OF_RANGE`, `RUN_NOT_AUTHORIZED`, `EVENT_CONTENT_CONFLICT`, and `TEMPORARILY_UNAVAILABLE`.
+For rejected/retryable results include a stable `code`, a safe user/support message, and optional `retryAfterMs`. Example codes include `INVALID_COORDINATES`, `CLOCK_OUT_OF_RANGE`, `RUN_NOT_AUTHORIZED`, `RUN_CANCELLED`, `EVENT_CONTENT_CONFLICT`, and `TEMPORARILY_UNAVAILABLE`.
+
+`RUN_CANCELLED` is sent only for the device's own run after staff cancelled it or sent a replacement bus. It adds `runState: "cancelled"` and `cancelledAtMs` (epoch ms, or `null` if unknown), so the Pi ends the run locally ([04 §10](04_RASPBERRY_PI_SOFTWARE.md#10-trip-lifecycle)). Another device's cancelled run still answers `RUN_NOT_AUTHORIZED`. Fixture: `fixtures/telemetry.response.runCancelled.json`. An older Pi reads it as an ordinary rejection.
 
 An HTTP `200` means the batch was processed; it does not mean every element was accepted. Missing result IDs remain pending. Acknowledging the newest event must not delete older unsent records. If a request times out after the server may have committed it, retry the same event IDs.
 
@@ -216,7 +218,7 @@ Trip-event failures use the request-level error body (§5):
 | `403` | `RUN_NOT_AUTHORIZED` | Unknown run or another device's run (deliberately indistinguishable). |
 | `409` | `REQUEST_ID_CONFLICT` | Same `requestId`, different content. |
 | `409` | `ACTIVE_RUN_CONFLICT` | The device or route version already has an active run. |
-| `409` | `RUN_NOT_ACTIVE` | The run was already ended by a different request. |
+| `409` | `RUN_NOT_ACTIVE` | The run was already ended by a different request, or staff cancelled it. For a cancellation the error adds `runState: "cancelled"` and `cancelledAtMs` (fixture `tripEvent.endRun.runCancelled.json`), so a Pi whose driver ended the run before hearing records it as cancelled by the school. |
 | `413` | `BODY_TOO_LARGE` | Body above 8 KiB. |
 
 Canonical fixtures: `packages/contracts/fixtures/tripEvent.*.json`. The iOS app does not call this endpoint. Before upload, atomically mark the local run completed, freeze its final sequence boundary, and persist its end command/outbox record using the serialized database writer. Telemetry insertion re-checks active state inside its own transaction. The backend verifies that the grant belongs to the authenticated device and authorized driver, covers the intended run and operation, and meets the applicable validity/revocation rules. A device credential alone does not authorize ending a run. The sequence boundary helps reconcile earlier captured telemetry that arrives later; it is checked against the authenticated stream and plausible timing.
@@ -257,10 +259,11 @@ Health tells "online without a GPS fix" apart from "no device contact." The Pi s
 | `bootId` | UUID of the current collector process. |
 | `capturedAtMs` | Device time of the report. More than 2 minutes in the future is refused. |
 | `appVersion` | 1–32 characters. |
-| `runId` | The run the Pi is recording, or `null`. Kept for diagnostics only. It never grants scope: the backend links health to runs through the credential's device. |
+| `runId` | The run the Pi is recording, or `null`. Kept for diagnostics, and answered with that run's state (below). It never grants scope: the backend links health to runs through the credential's device. |
 | `gpsStatus` | `valid`, `no_fix`, `receiver_missing`, or `unknown` (GPSD unreachable on the Pi). Never send fake coordinates to signal no fix. |
 | `lastValidFixAtMs` | Capture time of the last valid fix this process saw, or `null`. |
 | `pendingCount`, `oldestPendingCapturedAtMs` | Outbox rows not yet acknowledged, and the oldest one's capture time (or `null`). |
+| `unconfirmedEndRunId` | Optional. The last run this Pi ended locally whose end the server has not accepted, or `null`. Sent only when `runId` is `null`, so the server can answer that run's state without a driver grant. An older backend refuses the key; the Pi then sends the base report. |
 | `uploadConsecutiveFailures` | Optional. Telemetry requests that failed in a row; `0` after a success. Non-negative integer. |
 | `uploadRetriesSinceStart` | Optional. Failed telemetry requests since the device software started (each is retried with the same `eventId`s). Resets on restart. |
 | `lastUploadErrorClass` | Optional. Class of the last failure, kept after recovery: an exception class name (`OSError`) or `http_NNN`, at most 40 characters of letters, digits and `_`; never a message, host or path. `null` when none since start. |
@@ -272,7 +275,7 @@ The measurement fields are optional and additive: a Pi from before them omits al
 
 Unknown fields are refused. A health report never carries coordinates, secrets, student names or addresses. Bodies are at most 2 KB (`MAX_HEALTH_BODY_BYTES`).
 
-The answer is `200 { "schemaVersion": 1, "status": "accepted", "receivedAtMs", "serverNowMs" }`. Request errors use the §5 body: 400 `INVALID_REQUEST`, `MALFORMED_JSON` or `UNSUPPORTED_SCHEMA_VERSION`; 401 `UNAUTHENTICATED`, including a device revoked before the commit; 413 `BODY_TOO_LARGE`.
+The answer is `200 { "schemaVersion": 1, "status": "accepted", "receivedAtMs", "serverNowMs" }`, plus an optional `run: { runId, state, cancelledAtMs }` when the report's `runId` (else `unconfirmedEndRunId`) is this device's own run (`cancelledAtMs` is `null` unless `state` is `cancelled`). Another device's run, or an unknown one, gets no `run`. This is how a Pi with no GPS fix, which uploads no telemetry, learns that staff cancelled its run; it then ends the run locally ([04 §10](04_RASPBERRY_PI_SOFTWARE.md#10-trip-lifecycle)). Older backends never send `run`; older Pis ignore it. Fixture: `fixtures/health.accepted.runCancelled.json`. Request errors use the §5 body: 400 `INVALID_REQUEST`, `MALFORMED_JSON` or `UNSUPPORTED_SCHEMA_VERSION`; 401 `UNAUTHENTICATED`, including a device revoked before the commit; 413 `BODY_TOO_LARGE`.
 
 The backend keeps the latest report per device and assigns `receivedAtMs`. The measurements are returned only to staff (`fleet:diagnostics`, §11); family queries read `gpsStatus` and contact time and nothing else from health. A report older than the stored one from the same `bootId` (a delayed report, or the Pi clock stepping back) still counts as contact but does not replace the stored status. If no later report arrives within `POSITION_STALE_AFTER_MS`, the stored status becomes `unknown`. A missed heartbeat does not prove whether the cause is cellular service, device power, or software failure.
 

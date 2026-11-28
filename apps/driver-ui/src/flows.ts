@@ -668,15 +668,23 @@ export function endConfirmView(o: Observed, ui: UiState, c: Controller): HTMLEle
 
 // ── D24 trip summary ────────────────────────────────────────────────
 
+const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+/** The dashboard line after staff cancelled this bus's run, until another run starts (docs/13 D14). */
+export function cancelledBanner(o: Observed): { level: string; text: string } | null {
+  const e = o.snapshot?.lastEndedRun;
+  if (!e || e.endedBy !== "school" || o.snapshot?.run) return null;
+  return { level: "warn", text: `${cancelledText(e)} This bus stopped recording it.` };
+}
+
+function cancelledText(e: EndedRun): string {
+  const at = e.cancelledAtMs ?? null;
+  return at === null ? "Run cancelled by the school." : `Run cancelled by the school at ${clock(at)}.`;
+}
+
 export function summaryView(o: Observed, ui: UiState, c: Controller): HTMLElement {
   const e = o.snapshot?.lastEndedRun ?? null;
   if (!e) return h("main", { class: "page" }, header("Trip summary", () => c.go(null)), h("p", {}, "No ended run on this device."));
-  const sync =
-    e.endSync === "accepted"
-      ? ["ok", "Accepted by the school server."]
-      : e.endSync === "rejected"
-        ? ["problem", `Rejected by the school server (${e.endError ?? "no reason given"}). Kept on this device for review.`]
-        : ["warn", `Waiting to sync. The device resends the same end until the server answers${e.endAttempts ? ` (${e.endAttempts} ${e.endAttempts === 1 ? "try" : "tries"} so far)` : ""}.`];
   return h(
     "main",
     { class: "page" },
@@ -686,11 +694,28 @@ export function summaryView(o: Observed, ui: UiState, c: Controller): HTMLElemen
       "div",
       { class: "card checks-1" },
       h("h2", {}, `Run ${e.runId}`),
-      checkRow("Completed on this device", "ok", `Ended ${new Date(e.endedAtMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`),
-      checkRow("End synced", sync[0] ?? "warn", sync[1] ?? ""),
-      checkRow("Positions", positionsLevel(e), positionsText(e)),
+      ...summaryChecks(e).map(([label, level, text]) => checkRow(label, level, text)),
     ),
   );
+}
+
+/** The trip summary's rows: label, level, text. */
+export function summaryChecks(e: EndedRun): [string, string, string][] {
+  const positions: [string, string, string] = ["Positions", positionsLevel(e), positionsText(e)];
+  if (e.endedBy === "school") {
+    // Nothing was ended or sent from this bus: no "Completed" and no "End synced".
+    const cancelled: [string, string, string] = ["Cancelled by the school", "warn", `${cancelledText(e)} Recording stopped on this bus.`];
+    if (e.driverEndedAtMs === undefined) return [cancelled, positions];
+    // The driver ended it here before the bus heard; keep that attempt visible.
+    return [cancelled, ["Ended on this bus", "warn", `You ended it at ${clock(e.driverEndedAtMs)}, after the school had cancelled it. The school server kept the cancellation.`], positions];
+  }
+  const sync: [string, string] =
+    e.endSync === "accepted"
+      ? ["ok", "Accepted by the school server."]
+      : e.endSync === "rejected"
+        ? ["problem", `Rejected by the school server (${e.endError ?? "no reason given"}). Kept on this device for review.`]
+        : ["warn", `Waiting to sync. The device resends the same end until the server answers${e.endAttempts ? ` (${e.endAttempts} ${e.endAttempts === 1 ? "try" : "tries"} so far)` : ""}.`];
+  return [["Completed on this device", "ok", `Ended ${clock(e.endedAtMs)}.`], ["End synced", ...sync], positions];
 }
 
 function positionsLevel(e: EndedRun): string {

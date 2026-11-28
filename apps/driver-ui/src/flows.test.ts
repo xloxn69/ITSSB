@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { draftFrozen, positionsText, SENT_STATES, submissionLabel, submissionStatus, submitBlocked } from "./flows.js";
+import {
+  cancelledBanner,
+  draftFrozen,
+  positionsText,
+  SENT_STATES,
+  submissionLabel,
+  submissionStatus,
+  submitBlocked,
+  summaryChecks,
+} from "./flows.js";
 import { selectScreen } from "./screens.js";
 import type { DraftSummary, SubmissionDetail } from "./snapshot.js";
 import { observed, snapshot } from "./testing.js";
@@ -16,6 +25,51 @@ describe("trip summary positions", () => {
   it("names waiting positions", () => {
     const t = positionsText({ ...base, positionsRecorded: 3, positionsWaiting: 2, positionsAccepted: 1, positionsRejected: 0 });
     expect(t).toBe("3 recorded; 1 accepted by the school server; 2 waiting to sync.");
+  });
+});
+
+describe("run cancelled by the school (docs/13 D14)", () => {
+  const cancelledAtMs = 1_795_611_000_000;
+  const cancelled = {
+    ...base,
+    endedBy: "school",
+    cancelledAtMs,
+    cancelNotedAtMs: cancelledAtMs + 20_000,
+    endedAtMs: cancelledAtMs,
+    endSync: "not_needed",
+    endAttempts: 0,
+    positionsRecorded: 5,
+    positionsWaiting: 0,
+    positionsAccepted: 3,
+    positionsRejected: 2,
+  } as const;
+  const time = new Date(cancelledAtMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  it("tells the driver on the dashboard, with the time, until another run starts", () => {
+    const o = observed(snapshot({ run: null, lastEndedRun: cancelled }));
+    expect(cancelledBanner(o)?.text).toBe(`Run cancelled by the school at ${time}. This bus stopped recording it.`);
+    expect(cancelledBanner(observed(snapshot({ run: { runId: "demo_run_002", state: "active" }, lastEndedRun: cancelled })))).toBeNull();
+    expect(cancelledBanner(observed(snapshot({ run: null, lastEndedRun: { ...base, positionsRecorded: 1, positionsWaiting: 0 } })))).toBeNull();
+  });
+
+  it("never calls the cancelled run completed or its end synced", () => {
+    const rows = summaryChecks(cancelled);
+    expect(rows.map(([label]) => label)).toEqual(["Cancelled by the school", "Positions"]);
+    expect(rows[0]?.[2]).toContain(`Run cancelled by the school at ${time}.`);
+    expect(rows[1]?.[2]).toContain("2 rejected");
+  });
+
+  it("shows the cancellation first when the driver ended it before the bus heard", () => {
+    const driverEndedAtMs = cancelledAtMs + 60_000;
+    const rows = summaryChecks({ ...cancelled, driverEndedAtMs, endSync: "rejected", endError: "RUN_NOT_ACTIVE" });
+    expect(rows.map(([label]) => label)).toEqual(["Cancelled by the school", "Ended on this bus", "Positions"]);
+    const ended = new Date(driverEndedAtMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    expect(rows[1]?.[2]).toContain(`You ended it at ${ended}, after the school had cancelled it.`);
+  });
+
+  it("still shows a driver-ended run as completed", () => {
+    const rows = summaryChecks({ ...base, positionsRecorded: 1, positionsWaiting: 0 });
+    expect(rows.map(([label]) => label)).toEqual(["Completed on this device", "End synced", "Positions"]);
   });
 });
 

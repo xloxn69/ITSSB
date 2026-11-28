@@ -34,6 +34,12 @@ content is a conflict), always stored `submitted`. `decide_draft()` stands in
 for staff approval or rejection; every raw submit body is kept in
 `draft_bodies`.
 
+Health (`POST /device/v1/health`, docs/08 §7) is answered `accepted`, with
+the named run's `run` state when it is one this fake started.
+`cancel_run()` stands in for staff cancelling a run in the console
+(apps/backend/convex/runOps.ts): its positions are then rejected
+`RUN_CANCELLED` and health reports for it carry `state: "cancelled"`.
+
 `GET /_stats` lists stored eventIds and every request's eventIds (test-only).
 Binds to 127.0.0.1 only. Never use it as a real backend.
 """
@@ -94,6 +100,7 @@ class FakeBackend(ThreadingHTTPServer):
         # Route drafts (docs/08 §7.1): server draft id -> stored draft.
         self.route_drafts: dict[str, dict[str, Any]] = {}
         self.draft_bodies: list[bytes] = []  # every submit body that arrived
+        self.health_reports: list[dict[str, Any]] = []
         super().__init__(("127.0.0.1", port), _Handler)
 
     @property
@@ -119,7 +126,19 @@ class FakeBackend(ThreadingHTTPServer):
             for e in events:
                 eid = e.get("eventId", "")
                 old = self.events.get(eid)
-                if old is None:
+                run = self.runs.get(e.get("runId", ""))
+                if old is None and run is not None and run["state"] == "cancelled":
+                    results.append(
+                        {
+                            "eventId": eid,
+                            "status": "rejected",
+                            "code": "RUN_CANCELLED",
+                            "message": "The school cancelled this run.",
+                            "runState": "cancelled",
+                            "cancelledAtMs": run["cancelledAtMs"],
+                        }
+                    )
+                elif old is None:
                     self.events[eid] = e
                     self.received_at[eid] = now
                     results.append(
@@ -150,14 +169,43 @@ class FakeBackend(ThreadingHTTPServer):
                     )
         return results
 
+    def cancel_run(self, run_id: str) -> int:
+        """Staff cancel (or replace the bus on) an active run. Returns cancelledAtMs."""
+        now = int(time.time() * 1000)
+        with self.lock:
+            run = self.runs[run_id]
+            assert run["state"] == "active"  # noqa: S101 - test helper
+            run["state"], run["endedAtMs"], run["cancelledAtMs"] = "cancelled", now, now
+        return now
+
+    def health(self, body: dict[str, Any]) -> dict[str, Any]:
+        now = int(time.time() * 1000)
+        with self.lock:
+            self.health_reports.append(body)
+            answer: dict[str, Any] = {
+                "schemaVersion": 1,
+                "status": "accepted",
+                "receivedAtMs": now,
+                "serverNowMs": now,
+            }
+            run_id = body.get("runId") or body.get("unconfirmedEndRunId")
+            run = self.runs.get(run_id) if isinstance(run_id, str) else None
+            if run is not None:
+                answer["run"] = {
+                    "runId": run_id,
+                    "state": run["state"],
+                    "cancelledAtMs": run.get("cancelledAtMs"),
+                }
+            return answer
+
     def trip_event(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         """FICTIONAL run issuing, mirroring apps/backend/convex/tripEvents.ts rules."""
         now = int(time.time() * 1000)
         rid, kind = body.get("requestId"), body.get("type")
         content = json.dumps(body, sort_keys=True)
 
-        def err(status: int, code: str) -> tuple[int, dict[str, Any]]:
-            return status, {"schemaVersion": 1, "error": {"code": code, "message": code}}
+        def err(status: int, code: str, **extra: Any) -> tuple[int, dict[str, Any]]:
+            return status, {"schemaVersion": 1, "error": {"code": code, "message": code, **extra}}
 
         with self.lock:
             if rid in self.trip_requests:
@@ -182,6 +230,13 @@ class FakeBackend(ThreadingHTTPServer):
                 run = self.runs.get(run_id)
                 if run is None or run["route"] not in routes:
                     return err(403, "RUN_NOT_AUTHORIZED")
+                if run["state"] == "cancelled":
+                    return err(
+                        409,
+                        "RUN_NOT_ACTIVE",
+                        runState="cancelled",
+                        cancelledAtMs=run["cancelledAtMs"],
+                    )
                 if run["state"] != "active":
                     return err(409, "RUN_NOT_ACTIVE")
                 run["state"], run["endedAtMs"] = "completed", now
@@ -503,7 +558,12 @@ class _Handler(BaseHTTPRequestHandler):
         srv = self.server
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length)
-        if self.path not in ("/device/v1/telemetry", "/device/v1/trip-events", *GRANT_PATHS):
+        if self.path not in (
+            "/device/v1/telemetry",
+            "/device/v1/trip-events",
+            "/device/v1/health",
+            *GRANT_PATHS,
+        ):
             self._error(404, "NOT_FOUND")
             return
         if self.headers.get("Authorization") != f"Bearer {srv.token}" or srv.mode == "unauthorized":
@@ -511,6 +571,18 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if self.path in GRANT_PATHS:
             self._grant_request(raw)
+            return
+        if self.path == "/device/v1/health":
+            if srv.mode == "down":
+                self._error(503, "TEMPORARILY_UNAVAILABLE")
+                return
+            try:
+                body = json.loads(raw)
+                assert isinstance(body, dict)  # noqa: S101
+            except (ValueError, AssertionError):
+                self._error(400, "MALFORMED_JSON")
+                return
+            self._json(200, srv.health(body))
             return
         if self.path == "/device/v1/trip-events":
             if srv.mode == "down":

@@ -69,7 +69,9 @@ export interface TripEventAccepted {
  *   device's run; deliberately indistinguishable)
  * - 409 `REQUEST_ID_CONFLICT` (same `requestId`, different content),
  *   `ACTIVE_RUN_CONFLICT` (device or route already has an active run),
- *   `RUN_NOT_ACTIVE` (end of a run already ended by another request)
+ *   `RUN_NOT_ACTIVE` (end of a run already ended by another request, or
+ *   cancelled by staff: then the error adds `runState: "cancelled"` and
+ *   `cancelledAtMs`)
  * - 413 `BODY_TOO_LARGE`
  */
 export type TripEventErrorCode =

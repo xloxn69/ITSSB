@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "error": {
+    "code": "RUN_NOT_ACTIVE",
+    "message": "The school cancelled this run.",
+    "retryable": false,
+    "runState": "cancelled",
+    "cancelledAtMs": 1795611000000
+  }
+}
