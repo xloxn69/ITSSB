@@ -28,7 +28,7 @@ enum AlertCurrency: Equatable {
             return .unknown
         case .noActiveRun:
             return .tripEnded
-        case let .ready(assignmentId, _, run, _):
+        case let .ready(assignmentId, _, run, _, _):
             guard assignmentId == alert.assignmentId else { return .unknown }
             // `myRun` only reports an active run; any other run or state means this one is over.
             guard run.runId == alert.runId, run.state == .active else { return .tripEnded }

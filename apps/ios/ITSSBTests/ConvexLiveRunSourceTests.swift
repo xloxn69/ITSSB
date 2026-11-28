@@ -234,11 +234,13 @@ final class ConvexLiveRunSourceTests: XCTestCase {
 
         await source.reverifyServerTime()
         var iterator = source.run(assignmentId: "c").makeAsyncIterator()
-        guard case let .ready(_, _, _, clock)? = try await iterator.next() else { return XCTFail("expected ready") }
+        guard case let .ready(_, _, _, clock, _)? = try await iterator.next() else { return XCTFail("expected ready") }
         XCTAssertFalse(clock.isVerified, "the old clock is not reused after returning to the app")
         let remeasured = await eventuallyAsync { await source.serverTime.requestCount == 2 }
         XCTAssertTrue(remeasured)
-        guard case let .ready(_, _, _, verified)? = try await iterator.next() else { return XCTFail("expected ready") }
+        guard case let .ready(_, _, _, verified, _)? = try await iterator.next() else {
+            return XCTFail("expected ready")
+        }
         XCTAssertTrue(verified.isVerified)
         first.cancel()
         reused.cancel()
@@ -258,7 +260,9 @@ final class ConvexLiveRunSourceTests: XCTestCase {
         gate.release()
         let retaken = await eventuallyAsync { await source.serverTime.requestCount == 2 }
         XCTAssertTrue(retaken, "the pre-reverify answer is discarded and measured again")
-        guard case let .ready(_, _, _, verified)? = try await iterator.next() else { return XCTFail("expected ready") }
+        guard case let .ready(_, _, _, verified, _)? = try await iterator.next() else {
+            return XCTFail("expected ready")
+        }
         XCTAssertTrue(verified.isVerified)
     }
 

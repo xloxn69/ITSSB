@@ -44,7 +44,8 @@ final class MissingStatesTests: XCTestCase {
         }
         let run = TrackedRun(runId: runId, state: state, liveRevision: 1, busLabel: "Bus 12", lastDeviceContactAt: nil,
                              gpsStatus: .valid, position: nil, assignedStop: PreviewFixtures.stop, eta: eta)
-        return .ready(assignmentId: assignmentId, routeVersionId: "rv_1", run: run, clock: .deviceOnly)
+        return .ready(assignmentId: assignmentId, routeVersionId: "rv_1", run: run, clock: .deviceOnly,
+                      notices: .none)
     }
 
     private func currency(_ snapshot: RunSnapshot?, failed: Bool = false) -> AlertCurrency {
@@ -59,7 +60,8 @@ final class MissingStatesTests: XCTestCase {
     }
 
     func testAlertFromAnEndedTripSaysSo() {
-        XCTAssertEqual(currency(.noActiveRun(assignmentId: "a_1", routeVersionId: "rv_1")), .tripEnded)
+        XCTAssertEqual(currency(.noActiveRun(assignmentId: "a_1", routeVersionId: "rv_1", clock: .deviceOnly,
+                                                                notices: .none)), .tripEnded)
         XCTAssertEqual(currency(ready(runId: "run_2", etaMadeAt: 2_000)), .tripEnded, "a later trip isn't this one")
         XCTAssertEqual(currency(ready(state: .completed, etaMadeAt: 1_000)), .tripEnded)
         XCTAssertEqual(currency(ready(state: .cancelled, etaMadeAt: 1_000)), .tripEnded)
@@ -81,7 +83,8 @@ final class MissingStatesTests: XCTestCase {
         source.runContinuation("a_1")?.yield(ready(etaMadeAt: 1_000))
         let latest = await eventually { model.currency == .latest }
         XCTAssertTrue(latest)
-        source.runContinuation("a_1")?.yield(.noActiveRun(assignmentId: "a_1", routeVersionId: "rv_1"))
+        source.runContinuation("a_1")?.yield(.noActiveRun(assignmentId: "a_1", routeVersionId: "rv_1",
+                                                          clock: .deviceOnly, notices: .none))
         let ended = await eventually { model.currency == .tripEnded }
         XCTAssertTrue(ended, "a run that ends while the detail is open is shown as ended")
         model.stop()

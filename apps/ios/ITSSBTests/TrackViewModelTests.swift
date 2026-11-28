@@ -31,34 +31,6 @@ final class TrackViewModelTests: XCTestCase {
         return model
     }
 
-    /// docs/13 §7 foreground refresh: server time is re-measured, then tracking
-    /// resubscribes, and a guardian's selected student stays selected.
-    func testResumeFromBackgroundReverifiesAndResubscribesKeepingSelection() async {
-        let source = MockLiveRunSource()
-        let model = await started(source)
-        source.assignmentsContinuation?.yield(.ready([alex, jordan]))
-        _ = await eventually { source.runContinuation("a_alex") != nil }
-        model.select(assignmentId: "a_jordan")
-        _ = await eventually { source.runContinuation("a_jordan") != nil }
-
-        await model.resumeFromBackground()
-        XCTAssertEqual(source.reverifyCount, 1)
-        let resubscribed = await eventually { source.assignmentSubscriptionCount == 2 }
-        XCTAssertTrue(resubscribed, "assignments are subscribed again")
-        source.assignmentsContinuation?.yield(.ready([alex, jordan]))
-        let kept = await eventually { model.selectedAssignmentId == "a_jordan" }
-        XCTAssertTrue(kept, "the selected student survives the refresh")
-    }
-
-    func testResumeWhileStoppedDoesNothing() async {
-        let source = MockLiveRunSource()
-        let model = await started(source)
-        model.stop()
-        await model.resumeFromBackground()
-        XCTAssertEqual(source.reverifyCount, 0)
-        XCTAssertEqual(source.assignmentSubscriptionCount, 1, "a hidden Track tab isn't restarted")
-    }
-
     func testStartsLoading() async {
         let model = await started(MockLiveRunSource())
         XCTAssertEqual(model.state, .loading)
@@ -340,5 +312,36 @@ extension TrackViewModelTests {
         XCTAssertTrue(trackingB, "B sees only B's run, and no route of A's")
         XCTAssertEqual(model.assignments, [jordan])
         XCTAssertEqual(model.selectedAssignmentId, "a_jordan")
+    }
+}
+
+/// docs/13 §7 foreground refresh.
+extension TrackViewModelTests {
+    /// docs/13 §7 foreground refresh: server time is re-measured, then tracking
+    /// resubscribes, and a guardian's selected student stays selected.
+    func testResumeFromBackgroundReverifiesAndResubscribesKeepingSelection() async {
+        let source = MockLiveRunSource()
+        let model = await started(source)
+        source.assignmentsContinuation?.yield(.ready([alex, jordan]))
+        _ = await eventually { source.runContinuation("a_alex") != nil }
+        model.select(assignmentId: "a_jordan")
+        _ = await eventually { source.runContinuation("a_jordan") != nil }
+
+        await model.resumeFromBackground()
+        XCTAssertEqual(source.reverifyCount, 1)
+        let resubscribed = await eventually { source.assignmentSubscriptionCount == 2 }
+        XCTAssertTrue(resubscribed, "assignments are subscribed again")
+        source.assignmentsContinuation?.yield(.ready([alex, jordan]))
+        let kept = await eventually { model.selectedAssignmentId == "a_jordan" }
+        XCTAssertTrue(kept, "the selected student survives the refresh")
+    }
+
+    func testResumeWhileStoppedDoesNothing() async {
+        let source = MockLiveRunSource()
+        let model = await started(source)
+        model.stop()
+        await model.resumeFromBackground()
+        XCTAssertEqual(source.reverifyCount, 0)
+        XCTAssertEqual(source.assignmentSubscriptionCount, 1, "a hidden Track tab isn't restarted")
     }
 }
