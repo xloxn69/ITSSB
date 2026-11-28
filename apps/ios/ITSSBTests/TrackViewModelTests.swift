@@ -15,7 +15,8 @@ final class TrackViewModelTests: XCTestCase {
                              lastDeviceContactAt: nil, gpsStatus: .valid,
                              position: PreviewFixtures.position(capturedSecondsAgo: 3),
                              assignedStop: PreviewFixtures.stop)
-        return .ready(assignmentId: assignmentId, routeVersionId: routeVersionId, run: run, clock: .deviceOnly)
+        return .ready(assignmentId: assignmentId, routeVersionId: routeVersionId, run: run, clock: .deviceOnly,
+                      notices: .none)
     }
 
     private func route(_ assignmentId: String, routeVersionId: String = "rv_1") -> RouteSnapshot {
@@ -74,12 +75,33 @@ final class TrackViewModelTests: XCTestCase {
         let model = await started(source)
         source.assignmentsContinuation?.yield(.ready([alex]))
         _ = await eventually { source.runContinuation("a_alex") != nil }
-        source.runContinuation("a_alex")?.yield(.noActiveRun(assignmentId: "a_alex", routeVersionId: "rv_1"))
+        source.runContinuation("a_alex")?.yield(.noActiveRun(assignmentId: "a_alex", routeVersionId: "rv_1",
+                                                                clock: .deviceOnly, notices: .none))
         let reached = await eventually {
-            if case let .noActiveRun(context) = model.state { return context.assignment == self.alex }
+            if case let .noActiveRun(context, _) = model.state { return context.assignment == self.alex }
             return false
         }
         XCTAssertTrue(reached)
+    }
+
+    /// D14: a cancelled trip and its pending replacement reach the no-trip screen with their clock.
+    func testCancelledTripReachesTheNoTripState() async {
+        let source = MockLiveRunSource()
+        let model = await started(source)
+        source.assignmentsContinuation?.yield(.ready([alex]))
+        _ = await eventually { source.runContinuation("a_alex") != nil }
+        let notices = PreviewFixtures.notices(.replacementPending)
+        let clock = ServerClock(serverNow: Date(), receivedAt: Date())
+        source.runContinuation("a_alex")?.yield(.noActiveRun(assignmentId: "a_alex", routeVersionId: "rv_1",
+                                                                clock: clock, notices: notices))
+        let reached = await eventually {
+            if case let .noActiveRun(context, shownClock) = model.state {
+                return context.notices == notices && shownClock == clock
+            }
+            return false
+        }
+        XCTAssertTrue(reached)
+        XCTAssertEqual(notices.endedRun?.replacementPending, true)
     }
 
     func testNoApprovedAssignmentsIsAccessUnavailable() async {

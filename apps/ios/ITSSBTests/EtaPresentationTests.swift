@@ -10,7 +10,7 @@ final class EtaPresentationTests: XCTestCase {
         let data = try patch.map { try ContractFixture.patched("myRun.ready", $0, value as Any) }
             ?? ContractFixture.data("myRun.ready")
         let dto = try JSONDecoder().decode(MyRunDTO.self, from: data)
-        guard case let .ready(_, _, run, _) = try DomainMapping.snapshot(from: dto, receivedAt: Date()) else {
+        guard case let .ready(_, _, run, _, _) = try DomainMapping.snapshot(from: dto, receivedAt: Date()) else {
             throw XCTSkip("not ready")
         }
         return run

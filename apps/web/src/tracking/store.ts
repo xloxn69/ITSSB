@@ -5,7 +5,7 @@
  */
 import { type Instant, queryClock, readInstant, type ServerClock, verifiedClock } from "./clock";
 import { assignmentsSnapshot, MappingError, routeSnapshot, runSnapshot } from "./mapping";
-import type { AssignmentSummary, RouteGeometry, RunSnapshot, TrackedRun } from "./model";
+import type { AssignmentSummary, RouteGeometry, RunSnapshot, TrackedRun, TripNotices } from "./model";
 
 export type Unsubscribe = () => void;
 
@@ -61,6 +61,8 @@ export interface TrackContext {
   assignment: AssignmentSummary;
   /** Null until `tracking:myRoute` answers, or if it answered for another route version. */
   route: RouteGeometry | null;
+  /** Today's ended trip and calendar notice; hidden by the view once their day ends. */
+  notices: TripNotices;
 }
 
 /**
@@ -70,7 +72,7 @@ export interface TrackContext {
 export type TrackState =
   | { kind: "loading" }
   | { kind: "tracking"; context: TrackContext; run: TrackedRun; clock: ServerClock }
-  | { kind: "no_active_run"; context: TrackContext }
+  | { kind: "no_active_run"; context: TrackContext; clock: ServerClock }
   /** No approved assignment, or access was removed. Protected data is cleared. */
   | { kind: "access_unavailable" }
   /** The backend no longer accepts the session. Protected data is cleared. */
@@ -285,13 +287,15 @@ export class TrackStore {
       case "ready": {
         if (value.assignmentId !== selected) return;
         const clock = this.verified ?? queryClock(value.serverNowMs, snap.receivedAtWallMs);
-        this.set({ kind: "tracking", context: this.context(assignment, value.routeVersionId), run: value.run, clock });
+        this.set({ kind: "tracking", context: this.context(assignment, value), run: value.run, clock });
         return;
       }
-      case "no_active_run":
+      case "no_active_run": {
         if (value.assignmentId !== selected) return;
-        this.set({ kind: "no_active_run", context: this.context(assignment, value.routeVersionId) });
+        const clock = this.verified ?? queryClock(value.serverNowMs, snap.receivedAtWallMs);
+        this.set({ kind: "no_active_run", context: this.context(assignment, value), clock });
         return;
+      }
       case "access_unavailable":
         this.clearSelection();
         this.set(value.reason === "unauthenticated" ? { kind: "session_expired" } : { kind: "access_unavailable" });
@@ -300,8 +304,11 @@ export class TrackStore {
   }
 
   /** Only geometry for the run's own route version is drawn. */
-  private context(assignment: AssignmentSummary, routeVersionId: string): TrackContext {
-    return { assignment, route: this.route?.routeVersionId === routeVersionId ? this.route : null };
+  private context(
+    assignment: AssignmentSummary,
+    { routeVersionId, notices }: { routeVersionId: string; notices: TripNotices },
+  ): TrackContext {
+    return { assignment, route: this.route?.routeVersionId === routeVersionId ? this.route : null, notices };
   }
 
   private fail(error: unknown): void {

@@ -64,6 +64,8 @@ enum MyRunDTO: Decodable {
         let assignmentId: String
         let routeVersionId: String
         let run: RunDTO
+        /// Added after the first release: nil when an older deployment omits it.
+        let serviceNotice: ServiceNoticeDTO?
     }
 
     struct NoActiveRun: Decodable {
@@ -71,6 +73,9 @@ enum MyRunDTO: Decodable {
         @ConvexFloat var serverNowMs: Double
         let assignmentId: String
         let routeVersionId: String
+        /// Added after the first release: nil when an older deployment omits them.
+        let endedRun: EndedRunDTO?
+        let serviceNotice: ServiceNoticeDTO?
     }
 
     init(from decoder: Decoder) throws {
@@ -94,6 +99,25 @@ struct RunDTO: Decodable {
     let nextStopId: String?
     let assignedStop: StopDTO
     let eta: EtaDTO?
+}
+
+/// Today's finished trip on the route (`no_active_run.endedRun`). It has no position.
+struct EndedRunDTO: Decodable {
+    let runId: String
+    let state: String
+    let serviceDate: String
+    @OptionalConvexFloat var endedAtMs: Double?
+    let replacement: String?
+    @ConvexFloat var validUntilMs: Double
+}
+
+/// Today's service-calendar entry (`serviceNotice`), district-wide.
+struct ServiceNoticeDTO: Decodable {
+    let serviceDate: String
+    let status: String
+    @OptionalConvexFloat var lateStartMinutes: Double?
+    let notice: String
+    @ConvexFloat var validUntilMs: Double
 }
 
 /// `run.lastPosition`. Matches the illustrative fragment in docs/06 §7.

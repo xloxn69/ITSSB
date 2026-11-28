@@ -123,6 +123,35 @@ export function localDate(atMs: number, timeZone: string): string {
   }).format(new Date(atMs));
 }
 
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * The UTC instant `date` (`YYYY-MM-DD`) ends in `timeZone`: the first
+ * instant whose local date is later. Found by bisection on the local date,
+ * so it is right on 23- and 25-hour days and where local midnight is
+ * skipped (a change at 00:00) or repeated.
+ */
+export function endOfLocalDayMs(date: string, timeZone: string): number {
+  const m = DATE.exec(date);
+  if (!m) throw new Error(`Not a YYYY-MM-DD date: ${date}`);
+  const nextMidnightAsUtc = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + 1);
+  const format = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });
+  const after = (atMs: number) => format.format(new Date(atMs)) > date;
+  // Every zone `isValidTimeZone` accepts, IANA names and numeric offsets
+  // alike, is less than 24 h from UTC (Intl rejects ±24:00). So local time
+  // here is still `date` or earlier...
+  let lo = nextMidnightAsUtc - 25 * HOUR_MS;
+  // ...and here is already a later date.
+  let hi = nextMidnightAsUtc + 25 * HOUR_MS;
+  if (after(lo) || !after(hi)) throw new Error(`No end of ${date} found in ${timeZone}`);
+  while (hi - lo > 1) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (after(mid)) hi = mid;
+    else lo = mid;
+  }
+  return hi;
+}
+
 export type TripEventValidation =
   | { ok: true; request: TripEventRequest }
   | { ok: false; code: "INVALID_REQUEST" | "UNSUPPORTED_SCHEMA_VERSION"; message: string };

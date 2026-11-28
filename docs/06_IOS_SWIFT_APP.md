@@ -106,7 +106,7 @@ Every trip-related detail should preserve the selected student/assignment. A not
 | I16 | Bus at assigned stop | Show arrival state and eligible student check-in action. |
 | I17 | Scan trip check-in QR | Scan the active run's temporary challenge and offer a help path. |
 | I18 | Check-in result | Show accepted, already recorded, pending, or rejected status truthfully. |
-| I19 | Trip completed | Clear active countdowns and show relevant completed/next-trip information. |
+| I19 | Trip completed | Clear active countdowns. With no trip running, show "Trip completed" and when it finished for today's completed run on the route (`endedRun`), with no bus marker, until that service day ends. |
 | I20 | Alerts inbox | Show authorized notices with timestamps, unread state, and empty state. |
 | I21 | Alert details | Show source, affected run, issue/update time, and current/superseded status. |
 | I22 | Account and settings | Manage profile, preferences, privacy, Delete account, and sign-out. |
@@ -114,7 +114,7 @@ Every trip-related detail should preserve the selected student/assignment. A not
 | I24 | Display and accessibility | Appearance, reduced map motion, contrast, and system text-size behavior. |
 | I25 | Connection lost or stale position | Preserve explicit last-known age while withholding unsupported current estimates. |
 | I26 | GPS unavailable | Explain the bus's missing fix independently of the phone connection. |
-| I27 | No active trip | Show next scheduled service or applicable cancellation without a live marker. |
+| I27 | No active trip | No live marker. Show what `tracking:myRun` says about today: "Trip cancelled", with "the school is sending a replacement bus" while a replacement is pending, and fixed wording, never the staff reason. Or show today's calendar notice ("No service today", "Starts 20 minutes late today", with the school's text). Otherwise "No trip right now". A running trip shows today's notice on its status card. Each item disappears when its service day ends. Next scheduled service is not built yet. |
 | I28 | Session or access unavailable | Reauthenticate or explain assignment/relationship loss; clear restricted content. |
 
 Camera, notification, and optional location permission prompts are native iOS overlays. Scanner retries, deletion confirmation, walking-time preference, and sign-out confirmation belong to their parent flow. Do not invent custom permission switches that claim to override iOS.

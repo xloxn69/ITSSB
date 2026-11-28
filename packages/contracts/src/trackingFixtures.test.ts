@@ -4,7 +4,12 @@ import myAssignmentsReady from "../fixtures/myAssignments.ready.json" with { typ
 import myRouteAccessUnavailable from "../fixtures/myRoute.accessUnavailable.json" with { type: "json" };
 import myRouteReady from "../fixtures/myRoute.ready.json" with { type: "json" };
 import myRunAccessUnavailable from "../fixtures/myRun.accessUnavailable.json" with { type: "json" };
+import myRunCancelled from "../fixtures/myRun.cancelled.json" with { type: "json" };
+import myRunCancelledReplacementPending from "../fixtures/myRun.cancelledReplacementPending.json" with { type: "json" };
+import myRunCompleted from "../fixtures/myRun.completed.json" with { type: "json" };
+import myRunLateStart from "../fixtures/myRun.lateStart.json" with { type: "json" };
 import myRunNoActiveRun from "../fixtures/myRun.noActiveRun.json" with { type: "json" };
+import myRunNoService from "../fixtures/myRun.noService.json" with { type: "json" };
 import myRunReady from "../fixtures/myRun.ready.json" with { type: "json" };
 import myRunReadyNoPosition from "../fixtures/myRun.readyNoPosition.json" with { type: "json" };
 import myRunStale from "../fixtures/myRun.stale.json" with { type: "json" };
@@ -12,6 +17,7 @@ import serverTime from "../fixtures/serverTime.json" with { type: "json" };
 import { ROUTE_GAP_WARNING_M } from "./staff.js";
 import { MAX_ROUTE_PATH_POINTS, POSITION_STALE_AFTER_MS } from "./tracking.js";
 import { trackingFixtureFiles } from "./trackingFixtures.js";
+import { endOfLocalDayMs, localDate } from "./tripEvents.js";
 
 const json: Record<keyof typeof trackingFixtureFiles, unknown> = {
   "myAssignments.ready": myAssignmentsReady,
@@ -19,6 +25,11 @@ const json: Record<keyof typeof trackingFixtureFiles, unknown> = {
   "myRun.readyNoPosition": myRunReadyNoPosition,
   "myRun.stale": myRunStale,
   "myRun.noActiveRun": myRunNoActiveRun,
+  "myRun.cancelled": myRunCancelled,
+  "myRun.cancelledReplacementPending": myRunCancelledReplacementPending,
+  "myRun.completed": myRunCompleted,
+  "myRun.noService": myRunNoService,
+  "myRun.lateStart": myRunLateStart,
   "myRun.accessUnavailable": myRunAccessUnavailable,
   "myRoute.ready": myRouteReady,
   "myRoute.accessUnavailable": myRouteAccessUnavailable,
@@ -46,6 +57,18 @@ describe("tracking fixtures", () => {
   it("access_unavailable carries no protected route fields", () => {
     for (const r of [myRunAccessUnavailable, myRouteAccessUnavailable]) {
       expect(Object.keys(r).toSorted()).toEqual(["reason", "schemaVersion", "serverNowMs", "status"]);
+    }
+  });
+
+  it("ended-run and notice fixtures expire at the end of their New York service day", () => {
+    for (const name of ["myRun.cancelled", "myRun.cancelledReplacementPending", "myRun.completed", "myRun.noService", "myRun.lateStart"] as const) {
+      const r = trackingFixtureFiles[name];
+      if (r.status !== "no_active_run") throw new Error("expected no_active_run");
+      for (const item of [r.endedRun, r.serviceNotice]) {
+        if (!item) continue;
+        expect(localDate(r.serverNowMs, "America/New_York")).toBe(item.serviceDate);
+        expect(item.validUntilMs).toBe(endOfLocalDayMs(item.serviceDate, "America/New_York"));
+      }
     }
   });
 

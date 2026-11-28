@@ -153,7 +153,7 @@ final class ConvexLiveRunSourceTests: XCTestCase {
                                                "tracking:myRoute": "myRoute.ready",
                                                "tracking:myAssignments": "myAssignments.ready"]),
             now: { received })
-        guard case let .ready(_, _, run, clock)? = try await first(source.run(assignmentId: "x")) else {
+        guard case let .ready(_, _, run, clock, _)? = try await first(source.run(assignmentId: "x")) else {
             return XCTFail("expected ready")
         }
         XCTAssertEqual(run.liveRevision, 27)
@@ -169,7 +169,7 @@ final class ConvexLiveRunSourceTests: XCTestCase {
     private func clocks(_ client: FixtureQuerying) async throws -> [ServerClock] {
         var result: [ServerClock] = []
         for try await snapshot in ConvexLiveRunSource(client: client).run(assignmentId: "x") {
-            if case let .ready(_, _, _, clock) = snapshot { result.append(clock) }
+            if case let .ready(_, _, _, clock, _) = snapshot { result.append(clock) }
         }
         return result
     }
@@ -179,7 +179,7 @@ final class ConvexLiveRunSourceTests: XCTestCase {
         var iterator = ConvexLiveRunSource(client: client).run(assignmentId: "x").makeAsyncIterator()
         var seen: [ServerClock] = []
         while seen.last?.isVerified != true, seen.count < 2,
-              case let .ready(_, _, _, clock)? = try await iterator.next() {
+              case let .ready(_, _, _, clock, _)? = try await iterator.next() {
             seen.append(clock)
         }
         XCTAssertEqual(seen.last?.isVerified, true, "the latest snapshot carries verified time: \(seen)")
@@ -201,7 +201,7 @@ final class ConvexLiveRunSourceTests: XCTestCase {
         let second = source.run(assignmentId: "b")
         var iterator = second.makeAsyncIterator()
         let unverified = try await iterator.next()
-        guard case let .ready(_, _, _, clock)? = unverified else { return XCTFail("expected ready") }
+        guard case let .ready(_, _, _, clock, _)? = unverified else { return XCTFail("expected ready") }
         XCTAssertFalse(clock.isVerified)
 
         first.cancel()
@@ -211,7 +211,9 @@ final class ConvexLiveRunSourceTests: XCTestCase {
         XCTAssertEqual(requests, 1, "two subscriptions share one pending request")
 
         gate.release()
-        guard case let .ready(_, _, _, verified)? = try await iterator.next() else { return XCTFail("expected ready") }
+        guard case let .ready(_, _, _, verified, _)? = try await iterator.next() else {
+            return XCTFail("expected ready")
+        }
         XCTAssertTrue(verified.isVerified)
         let waiters = await source.serverTime.waiterCount
         XCTAssertEqual(waiters, 0)
@@ -238,7 +240,7 @@ final class ConvexLiveRunSourceTests: XCTestCase {
         var iterator = source.run(assignmentId: "x").makeAsyncIterator()
         var seen: [ServerClock] = []
         while seen.last?.isVerified != true, seen.count < 2,
-              case let .ready(_, _, _, clock)? = try await iterator.next() {
+              case let .ready(_, _, _, clock, _)? = try await iterator.next() {
             seen.append(clock)
         }
         XCTAssertEqual(seen.last?.isVerified, true)

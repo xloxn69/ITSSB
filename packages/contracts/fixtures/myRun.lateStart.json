@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "status": "no_active_run",
+  "serverNowMs": 1795609085500,
+  "assignmentId": "demo_assignment_001",
+  "routeVersionId": "demo_route_version_003",
+  "run": null,
+  "endedRun": null,
+  "serviceNotice": {
+    "serviceDate": "2026-11-25",
+    "status": "late_start",
+    "lateStartMinutes": 20,
+    "notice": "Buses run 20 minutes late this morning because of fog.",
+    "validUntilMs": 1795669200000
+  }
+}

@@ -72,6 +72,7 @@ export const myRunReady: MyRunResult = {
       sourceEventId: "5fe2a60d-7c11-45b9-995d-f50192adea42",
     },
   },
+  serviceNotice: null,
 };
 
 /** Active run, but the bus has not reported a position yet. */
@@ -98,6 +99,7 @@ export const myRunReadyNoPosition: MyRunResult = {
     },
     eta: null,
   },
+  serviceNotice: null,
 };
 
 /** The last position is five minutes older than the server clock. */
@@ -132,6 +134,7 @@ export const myRunStale: MyRunResult = {
     },
     eta: null,
   },
+  serviceNotice: null,
 };
 
 export const myRunNoActiveRun: MyRunResult = {
@@ -141,6 +144,80 @@ export const myRunNoActiveRun: MyRunResult = {
   assignmentId: "demo_assignment_001",
   routeVersionId: "demo_route_version_003",
   run: null,
+  endedRun: null,
+  serviceNotice: null,
+};
+
+/** Local service date of the fixtures' server time, and when it ends in New York. */
+const SERVICE_DATE = "2026-11-25";
+const SERVICE_DATE_ENDS_MS = 1795669200000;
+
+/** Staff cancelled today's trip; no replacement was sent. */
+export const myRunCancelled: MyRunResult = {
+  ...myRunNoActiveRun,
+  endedRun: {
+    runId: "demo_run_001",
+    state: "cancelled",
+    serviceDate: SERVICE_DATE,
+    endedAtMs: 1795608600000,
+    replacement: null,
+    validUntilMs: SERVICE_DATE_ENDS_MS,
+  },
+  serviceNotice: null,
+};
+
+/** Staff cancelled today's trip and sent a replacement bus that has not started yet. */
+export const myRunCancelledReplacementPending: MyRunResult = {
+  ...myRunNoActiveRun,
+  endedRun: {
+    runId: "demo_run_001",
+    state: "cancelled",
+    serviceDate: SERVICE_DATE,
+    endedAtMs: 1795608600000,
+    replacement: "pending",
+    validUntilMs: SERVICE_DATE_ENDS_MS,
+  },
+  serviceNotice: null,
+};
+
+/** Today's trip finished normally. */
+export const myRunCompleted: MyRunResult = {
+  ...myRunNoActiveRun,
+  endedRun: {
+    runId: "demo_run_001",
+    state: "completed",
+    serviceDate: SERVICE_DATE,
+    endedAtMs: 1795607400000,
+    replacement: null,
+    validUntilMs: SERVICE_DATE_ENDS_MS,
+  },
+  serviceNotice: null,
+};
+
+/** The school calendar says there is no service today. */
+export const myRunNoService: MyRunResult = {
+  ...myRunNoActiveRun,
+  endedRun: null,
+  serviceNotice: {
+    serviceDate: SERVICE_DATE,
+    status: "no_service",
+    lateStartMinutes: null,
+    notice: "No buses today: the school is closed for a teacher workday.",
+    validUntilMs: SERVICE_DATE_ENDS_MS,
+  },
+};
+
+/** The school calendar says buses start late today; the trip hasn't started yet. */
+export const myRunLateStart: MyRunResult = {
+  ...myRunNoActiveRun,
+  endedRun: null,
+  serviceNotice: {
+    serviceDate: SERVICE_DATE,
+    status: "late_start",
+    lateStartMinutes: 20,
+    notice: "Buses run 20 minutes late this morning because of fog.",
+    validUntilMs: SERVICE_DATE_ENDS_MS,
+  },
 };
 
 export const myRunAccessUnavailable: MyRunResult = {
@@ -188,6 +265,11 @@ export const trackingFixtureFiles = {
   "myRun.readyNoPosition": myRunReadyNoPosition,
   "myRun.stale": myRunStale,
   "myRun.noActiveRun": myRunNoActiveRun,
+  "myRun.cancelled": myRunCancelled,
+  "myRun.cancelledReplacementPending": myRunCancelledReplacementPending,
+  "myRun.completed": myRunCompleted,
+  "myRun.noService": myRunNoService,
+  "myRun.lateStart": myRunLateStart,
   "myRun.accessUnavailable": myRunAccessUnavailable,
   "myRoute.ready": myRouteReady,
   "myRoute.accessUnavailable": myRouteAccessUnavailable,

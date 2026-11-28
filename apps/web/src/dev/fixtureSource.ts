@@ -14,6 +14,11 @@ import {
   myPreferenceDefault,
   myPreferenceReady,
   myRouteReady,
+  myRunCancelled,
+  myRunCancelledReplacementPending,
+  myRunCompleted,
+  myRunLateStart,
+  myRunNoService,
   myRunReady,
 } from "@itssb/contracts/fixtures";
 import { SessionExpiredError, type TrackingSource } from "../tracking/store";
@@ -31,6 +36,12 @@ export const FIXTURE_SCENARIOS = [
   "completed",
   "cancelled",
   "no-run",
+  "trip-cancelled",
+  "replacement-pending",
+  "trip-completed",
+  "no-service",
+  "late-start",
+  "late-start-live",
   "no-access",
   "signed-out",
   "error",
@@ -50,13 +61,34 @@ const AGE_MS: Partial<Record<FixtureScenario, number>> = {
   "at-stop": 3_000,
   passed: 3_000,
   "two-students": 3_000,
+  "late-start-live": 3_000,
   aging: 45_000,
   stale: 6 * 60_000,
   "no-fix": 20_000,
 };
 
+/** Today's ended trip or calendar notice (docs/08 §8), shifted to now and valid until tomorrow. */
+const NOTICE_FIXTURES: Partial<Record<FixtureScenario, MyRunResult>> = {
+  "trip-cancelled": myRunCancelled,
+  "replacement-pending": myRunCancelledReplacementPending,
+  "trip-completed": myRunCompleted,
+  "no-service": myRunNoService,
+  "late-start": myRunLateStart,
+};
+
+function shiftedNotices(fixture: MyRunResult, now: number) {
+  if (fixture.status !== "no_active_run") throw new Error("fixture");
+  const validUntilMs = now + 24 * 60 * 60_000;
+  return {
+    endedRun: fixture.endedRun && { ...fixture.endedRun, endedAtMs: now - 25 * 60_000, validUntilMs },
+    serviceNotice: fixture.serviceNotice && { ...fixture.serviceNotice, validUntilMs },
+  };
+}
+
 function runFor(scenario: FixtureScenario, assignmentId: string): unknown {
   const now = Date.now();
+  const notice = NOTICE_FIXTURES[scenario];
+  if (notice) return { ...notice, serverNowMs: now, assignmentId, ...shiftedNotices(notice, now) };
   if (scenario === "no-run" || scenario === "offline-no-run") {
     return { schemaVersion: 1, status: "no_active_run", serverNowMs: now, assignmentId, routeVersionId: readyRun.routeVersionId, run: null };
   }
@@ -103,7 +135,8 @@ function runFor(scenario: FixtureScenario, assignmentId: string): unknown {
       Object.assign(run, { state: scenario });
       break;
   }
-  return { ...readyRun, serverNowMs: now, assignmentId, run };
+  const serviceNotice = scenario === "late-start-live" ? shiftedNotices(myRunLateStart, now).serviceNotice : null;
+  return { ...readyRun, serverNowMs: now, assignmentId, run, serviceNotice };
 }
 
 const never = () => () => {};

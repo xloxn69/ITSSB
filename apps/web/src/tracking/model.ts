@@ -82,9 +82,42 @@ export interface TrackedRun {
   eta: RunEta | null;
 }
 
+/** Today's finished trip on this route (docs/08 §8). Never has a position. */
+export interface EndedRun {
+  runId: string;
+  state: "completed" | "cancelled";
+  serviceDate: string;
+  endedAtMs: number | null;
+  /** `pending`: the school sent a replacement bus that hasn't started yet. */
+  replacement: "pending" | null;
+  /** Hidden from the end of its service day; a query isn't re-run as time passes. */
+  validUntilMs: number;
+}
+
+/** Today's service-calendar entry, district-wide (docs/12 §3). */
+export interface ServiceNotice {
+  serviceDate: string;
+  status: "no_service" | "late_start";
+  lateStartMinutes: number | null;
+  notice: string;
+  validUntilMs: number;
+}
+
+export interface TripNotices {
+  endedRun: EndedRun | null;
+  serviceNotice: ServiceNotice | null;
+}
+
 export type RunSnapshot =
-  | { kind: "ready"; assignmentId: string; routeVersionId: string; run: TrackedRun; serverNowMs: number }
-  | { kind: "no_active_run"; assignmentId: string; routeVersionId: string }
+  | {
+      kind: "ready";
+      assignmentId: string;
+      routeVersionId: string;
+      run: TrackedRun;
+      serverNowMs: number;
+      notices: TripNotices;
+    }
+  | { kind: "no_active_run"; assignmentId: string; routeVersionId: string; serverNowMs: number; notices: TripNotices }
   | { kind: "access_unavailable"; reason: AccessUnavailableReason };
 
 export interface RouteGeometry {

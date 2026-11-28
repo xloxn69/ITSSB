@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "status": "no_active_run",
+  "serverNowMs": 1795609085500,
+  "assignmentId": "demo_assignment_001",
+  "routeVersionId": "demo_route_version_003",
+  "run": null,
+  "endedRun": {
+    "runId": "demo_run_001",
+    "state": "cancelled",
+    "serviceDate": "2026-11-25",
+    "endedAtMs": 1795608600000,
+    "replacement": "pending",
+    "validUntilMs": 1795669200000
+  },
+  "serviceNotice": null
+}

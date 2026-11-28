@@ -43,8 +43,8 @@ struct TrackView: View {
         case let .tracking(context, run, clock):
             TrackingScreen(context: context, run: run, clock: clock, picker: picker,
                            connectionLost: model.connectionLost)
-        case .noActiveRun(let context):
-            NoActiveRunScreen(context: context, picker: picker)
+        case let .noActiveRun(context, clock):
+            NoActiveRunScreen(context: context, clock: clock, picker: picker)
         case .accessUnavailable:
             StateMessage(title: "Tracking not available", systemImage: "lock.fill",
                          detail: "This account isn't linked to an approved route, or that access was removed. "
@@ -90,14 +90,19 @@ private struct TrackingScreen: View {
                                                          connectionLost: connectionLost),
                                    stopLabel: run.assignedStop.label,
                                    eta: EtaPresentation.make(run: run, clock: clock, now: timeline.date),
-                                   progress: EtaPresentation.stopProgress(run))
+                                   progress: EtaPresentation.stopProgress(run),
+                                   notice: context.notices.current(at: clock.ageClock(at: timeline.date))
+                                       .serviceNotice)
                 }
         }
     }
 }
 
+/// I19/I27: today's cancelled or completed trip, a calendar notice, or no
+/// trip. There is never a bus marker.
 private struct NoActiveRunScreen: View {
     let context: TrackContext
+    let clock: ServerClock
     let picker: AssignmentPicker
 
     var body: some View {
@@ -111,11 +116,13 @@ private struct NoActiveRunScreen: View {
         }
         .safeAreaInset(edge: .top) { TripHeader(context: context, picker: picker) }
         .safeAreaInset(edge: .bottom) {
-            TripStatusCard(copy: StatusCopy(title: "No trip right now",
-                                            detail: "Your bus isn't running this route at the moment. "
-                                                + "The live location appears when the trip starts.",
-                                            age: nil, systemImage: "bus", tone: .unknown),
-                           stopLabel: context.assignment.stopLabel)
+            // Re-derived so yesterday's status leaves the screen when its day ends.
+            TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                let notices = context.notices.current(at: clock.ageClock(at: timeline.date))
+                TripStatusCard(copy: StatusCopy.noTrip(notices), stopLabel: context.assignment.stopLabel,
+                               // The notice is the title when nothing ended; otherwise it sits below.
+                               notice: notices.endedRun == nil ? nil : notices.serviceNotice)
+            }
         }
     }
 }
@@ -170,6 +177,8 @@ struct TripStatusCard: View {
     let stopLabel: String
     var eta: EtaPresentation?
     var progress: String?
+    /// Today's service-calendar notice from the school, when it isn't the title.
+    var notice: ServiceNotice?
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
@@ -207,6 +216,20 @@ struct TripStatusCard: View {
                     Text("\(eta.madeText). Estimates can change.")
                         .font(AppFonts.caption)
                         .foregroundStyle(AppColors.textSecondary)
+                }
+            }
+            if let notice {
+                VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                    Text("From your school")
+                        .font(AppFonts.caption)
+                        .foregroundStyle(AppColors.textSecondary)
+                    Text(StatusCopy.noticeTitle(notice))
+                        .font(AppFonts.headline)
+                        .foregroundStyle(AppColors.textPrimary)
+                    Text(notice.notice)
+                        .font(AppFonts.callout)
+                        .foregroundStyle(AppColors.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             Label("Your stop: \(stopLabel)", systemImage: "figure.wave")
@@ -266,6 +289,11 @@ private struct StateMessage: View {
 #Preview("Awaiting position") { TrackView(source: PreviewLiveRunSource(scenario: .awaitingPosition)) }
 #Preview("GPS unavailable") { TrackView(source: PreviewLiveRunSource(scenario: .gpsUnavailable)) }
 #Preview("No active run") { TrackView(source: PreviewLiveRunSource(scenario: .noActiveRun)) }
+#Preview("Cancelled") { TrackView(source: PreviewLiveRunSource(scenario: .cancelled)) }
+#Preview("Replacement pending") { TrackView(source: PreviewLiveRunSource(scenario: .replacementPending)) }
+#Preview("Completed") { TrackView(source: PreviewLiveRunSource(scenario: .completed)) }
+#Preview("No service") { TrackView(source: PreviewLiveRunSource(scenario: .noService)) }
+#Preview("Late start") { TrackView(source: PreviewLiveRunSource(scenario: .lateStart)) }
 #Preview("Loading") { TrackView(source: PreviewLiveRunSource(scenario: .loading)) }
 #Preview("Access unavailable") { TrackView(source: PreviewLiveRunSource(scenario: .accessUnavailable)) }
 #Preview("Session expired") { TrackView(source: PreviewLiveRunSource(scenario: .sessionExpired)) }

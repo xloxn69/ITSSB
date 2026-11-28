@@ -21,7 +21,7 @@ const result = staffActionResult(RUN_OP_REFUSAL_CODES);
 const ok = okResult<RunOpRefusalCode>;
 const refused = refusedResult<RunOpRefusalCode>;
 const REASON_REQUIRED = () =>
-  refused("reason_required", `Say why, in 1 to ${MAX_STAFF_REASON_LENGTH} characters. Families and drivers rely on it.`);
+  refused("reason_required", `Say why, in 1 to ${MAX_STAFF_REASON_LENGTH} characters. Staff and drivers see it; families see only that the trip was cancelled.`);
 
 async function activeRun(ctx: MutationCtx, runId: string): Promise<Doc<"runs"> | RunOpResult> {
   const id = ctx.db.normalizeId("runs", runId);
