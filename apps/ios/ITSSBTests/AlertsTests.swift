@@ -239,6 +239,8 @@ final class AlertsTests: XCTestCase {
 @MainActor
 private final class ScriptedNotificationSource: NotificationSource, @unchecked Sendable {
     private(set) var inbox: AsyncThrowingStream<[AlertItem]?, Error>.Continuation?
+    /// How many times the inbox was subscribed; `inbox` is the latest.
+    private(set) var inboxSubscriptions = 0
     private(set) var preferences: [String: AsyncThrowingStream<NotificationPreference?, Error>.Continuation] = [:]
     private(set) var released: [String] = []
     private var pendingSave: CheckedContinuation<NotificationPreference, Error>?
@@ -246,7 +248,10 @@ private final class ScriptedNotificationSource: NotificationSource, @unchecked S
     nonisolated func alerts() -> AsyncThrowingStream<[AlertItem]?, Error> {
         let (stream, continuation) = AsyncThrowingStream<[AlertItem]?, Error>.makeStream()
         continuation.onTermination = { [weak self] _ in Task { @MainActor in self?.released.append("alerts") } }
-        Task { @MainActor in self.inbox = continuation }
+        Task { @MainActor in
+            self.inbox = continuation
+            self.inboxSubscriptions += 1
+        }
         return stream
     }
 
@@ -319,7 +324,7 @@ extension AlertsTests {
 
         // Account B signs in; A's save answers late.
         model.start()
-        await reach { tracking.assignmentSubscriptionCount == 2 }
+        await reach { tracking.assignmentSubscriptionCount == 2 && notifications.inboxSubscriptions == 2 }
         tracking.assignmentsContinuation?.yield(.ready([Self.jordan]))
         await reach { notifications.preferences["a_jordan"] != nil }
         notifications.preferences["a_jordan"]?.yield(Self.preference("a_jordan", minutes: 10))
