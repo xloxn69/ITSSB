@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "drafts": [
+    {
+      "draftId": "demo_draft_001",
+      "deviceDraftId": "9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d",
+      "status": "approved",
+      "submittedAtMs": 1795612001000,
+      "reviewedAtMs": 1795615600000,
+      "decisionReason": null,
+      "routeVersionId": "demo_route_version_002"
+    },
+    {
+      "draftId": "demo_draft_002",
+      "deviceDraftId": "1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e",
+      "status": "rejected",
+      "submittedAtMs": 1795612101000,
+      "reviewedAtMs": 1795615700000,
+      "decisionReason": "Stop 2 is on the wrong side of the road.",
+      "routeVersionId": null
+    },
+    {
+      "draftId": "demo_draft_404",
+      "status": "not_found"
+    }
+  ],
+  "serverNowMs": 1795615800000
+}

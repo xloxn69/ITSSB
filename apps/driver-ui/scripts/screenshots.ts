@@ -1,5 +1,5 @@
 /**
- * Captures every driver-screen student state from the development gallery
+ * Captures every driver-screen student and route-review state from the development gallery
  * (`gallery.html`), light and dark, at the Pi touchscreen size, with
  * fictional data only. Usage: `bun run screenshots [outDir]`. Images are
  * never committed. SCREENSHOT_PORT picks the dev server port; CHROMIUM_PATH
@@ -26,6 +26,13 @@ const STATES = [
   "dashboard-changes",
   "storage-warning",
   "storage-critical",
+  "review-library",
+  "review-draft",
+  "review-pending",
+  "review-refused",
+  "review-awaiting",
+  "review-approved",
+  "review-rejected",
 ];
 
 const outDir = process.argv[2] ?? "build/screenshots";

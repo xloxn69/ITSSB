@@ -196,6 +196,7 @@ export const getDraft = query({
       draft: v.object({
         ...draftSummaryFields,
         path: v.array(point),
+        gapBeforeIndexes: v.optional(v.array(v.number())),
         stops: v.array(
           v.object({
             sequence: v.number(),
@@ -214,6 +215,7 @@ export const getDraft = query({
               v.literal("no_stops"),
               v.literal("path_gap"),
               v.literal("stop_off_path"),
+              v.literal("gap_in_recording"),
             ),
             severity: v.union(v.literal("blocking"), v.literal("warning")),
             message: v.string(),
@@ -233,6 +235,7 @@ export const getDraft = query({
     const detail: DraftDetail = {
       ...summarize(draft, await userName(ctx, draft.reviewedByUserId)),
       path: draft.path,
+      gapBeforeIndexes: draft.gapBeforeIndexes ?? [],
       stops: draft.stops.map((s, sequence) => ({
         sequence,
         label: s.label,
@@ -240,7 +243,7 @@ export const getDraft = query({
         longitude: s.longitude,
         instructions: s.instructions ?? null,
       })),
-      checks: routeChecks(draft.path, draft.stops),
+      checks: routeChecks(draft.path, draft.stops, draft.gapBeforeIndexes),
     };
     return { schemaVersion: SCHEMA_VERSION, status: "ready", serverNowMs: Date.now(), draft: detail };
   },
@@ -394,10 +397,18 @@ export const rejectDraft = mutation({
 });
 
 /**
- * Stores a recorded draft as submitted. Internal: the authorized driver
- * upload path (docs/08 §6, driver operating grant) calls it; there is no
- * public create-draft.
+ * Stores a recorded draft as submitted, never approved. The driver upload
+ * path (`POST /device/v1/route-drafts`, deviceDrafts.ts) and tests use it;
+ * there is no public create-draft.
  */
+export async function insertDraft(
+  ctx: MutationCtx,
+  fields: Omit<Doc<"routeDrafts">, "_id" | "_creationTime" | "status" | "submittedAtMs">,
+  nowMs: number,
+): Promise<Id<"routeDrafts">> {
+  return await ctx.db.insert("routeDrafts", { ...fields, status: "submitted", submittedAtMs: nowMs });
+}
+
 export const recordDraft = internalMutation({
   args: {
     routeId: v.optional(v.id("routes")),
@@ -408,9 +419,7 @@ export const recordDraft = internalMutation({
     recordedByDeviceId: v.optional(v.id("devices")),
   },
   returns: v.id("routeDrafts"),
-  handler: async (ctx, args) => {
-    return await ctx.db.insert("routeDrafts", { ...args, status: "submitted", submittedAtMs: Date.now() });
-  },
+  handler: async (ctx, args) => await insertDraft(ctx, args, Date.now()),
 });
 
 /**

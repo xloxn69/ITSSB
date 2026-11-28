@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "requestId": "4f1e2d3c-5b6a-4978-8a6b-5c4d3e2f1a0b",
+  "status": "accepted",
+  "draft": {
+    "draftId": "demo_draft_001",
+    "deviceDraftId": "9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d",
+    "status": "submitted",
+    "submittedAtMs": 1795612001000,
+    "reviewedAtMs": null,
+    "decisionReason": null,
+    "routeVersionId": null
+  },
+  "serverNowMs": 1795612001000
+}

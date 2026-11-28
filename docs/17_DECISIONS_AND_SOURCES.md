@@ -182,4 +182,23 @@ For a material implementation decision, add a short record with: date, decision,
 - **Affected:** docs/08 §9, `packages/contracts/src/enrollment.ts`, `apps/backend/convex/{enrollment,guardianLinks,students,audit}.ts`.
 - **Verification:** backend tests with fictional identities. Live sign-in now works (identity record above), but enrollment and guardian linking have not been run against a deployment.
 
+### Record: route-draft upload (28 November 2026)
+
+- **Decision:** the Pi submits a finished route draft in one bounded request (`POST /device/v1/route-drafts`, at most 384 KiB). It does not use chunks or an upload object.
+- **Reason:**
+  - A draft is already capped at 2,000 points and 100 stops, so the largest is about 280 KB, well within Convex's HTTP-action and mutation limits.
+  - One request is one idempotent unit, keyed by `requestId` and `deviceDraftId` plus a content hash. There is no chunk order to preserve and no half-uploaded state to recover after a restart.
+- **Alternatives considered:**
+  - Chunked upload with a commit command: more states to keep honest offline, for no size benefit at these limits.
+  - Convex file storage as an upload object: needs a second credentialed step and cleanup of orphans.
+- **Also decided:**
+  - A submitted draft's stops are frozen on the Pi, so every retry and every "Submit again" carries the same recording and the server keeps one draft.
+  - Revising a draft after submission means recording again.
+- **Affected:** docs/08 §7.1, docs/05 §6, `packages/contracts/src/routeDrafts.ts`, `apps/backend/convex/deviceDrafts.ts`, `apps/device/src/itssb_device/draft_submit.py`, the driver screen (D10, D11).
+- **Migration:** additive optional fields and two indexes on `routeDrafts`. Pi SQLite migration 6 adds `route_draft_submissions`.
+- **Verification:**
+  - convex-test: auth denials, idempotent retry, conflicts, size limits including a full-size draft, no auto-approval, and submit → approve → a new run pins it.
+  - Device pytest against the fake backend: queue, retry, restart, refusal, frozen edits.
+  - Not run against a deployment or on the Pi.
+
 Keep documented plans, executed checks, and measured outcomes separate. A finished Markdown guide is useful implementation work; it is not a substitute for the application and pilot evidence defined in [13_TESTING_AND_ACCEPTANCE.md](13_TESTING_AND_ACCEPTANCE.md).

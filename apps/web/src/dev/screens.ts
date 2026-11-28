@@ -102,7 +102,7 @@ export const FIXTURE_SCREENS: {
   { name: "family-checkin-loading", path: "?fixture=family-flows&v=loading#/checkin", ready: "[aria-busy=true]" },
   { name: "staff-routes", path: "?fixture=staff#/staff/routes", ready: "table" },
   { name: "staff-review", path: "?fixture=staff#/staff/review", ready: "table" },
-  { name: "staff-draft-clean", path: "?fixture=staff#/staff/review/demo_draft_009", ready: "#decision" },
+  { name: "staff-draft-gps-lost", path: "?fixture=staff#/staff/review/demo_draft_009", ready: "#decision" },
   { name: "staff-draft-warning", path: "?fixture=staff#/staff/review/demo_draft_017", ready: "#decision" },
   { name: "staff-draft-blocked", path: "?fixture=staff#/staff/review/demo_draft_021", ready: "#decision" },
   { name: "staff-draft-rejected", path: "?fixture=staff#/staff/review/demo_draft_004", ready: "main h2" },

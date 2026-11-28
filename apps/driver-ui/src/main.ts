@@ -1,5 +1,6 @@
 import { ApiError, api, currentSession, fetchSession, fetchSnapshot, noAnswer, RequestIds } from "./api.js";
 import {
+  awaitingView,
   type Controller,
   editStopsView,
   endConfirmView,
@@ -8,6 +9,7 @@ import {
   recordingView,
   reviewView,
   parkedControl,
+  SENT_STATES,
   preflightView,
   summaryView,
   type UiState,
@@ -28,7 +30,9 @@ import { dashboardView, diagnosticsView, drivingView, type Nav, offlineView, sta
  */
 
 const POLL_MS = 1_000;
-const DETAIL_SCREENS: ReadonlySet<ScreenId> = new Set(["D08", "D09", "D10"]);
+const DETAIL_SCREENS: ReadonlySet<ScreenId> = new Set(["D08", "D09", "D10", "D11"]);
+/** Screens that show review status; it is re-read from the school server while open. */
+const REVIEW_SCREENS: ReadonlySet<ScreenId> = new Set(["D06", "D11"]);
 
 const style = document.createElement("style");
 style.textContent = css;
@@ -96,6 +100,22 @@ async function refreshDrafts(): Promise<void> {
 }
 
 /**
+ * Asks the device to re-read review status from the school server (the
+ * device rate-limits it). Quiet unless the driver asked: the stored status
+ * keeps its own "checked N ago", so a failed check never reads as current.
+ */
+async function refreshReview(asked = false): Promise<void> {
+  try {
+    const r = await api.reviewStatus();
+    ui.drafts = r.drafts;
+    if (ui.draftId) await refreshDetail();
+    if (asked) ui.message = r.problem ? { kind: "problem", text: `Couldn't check now: ${r.problem}` } : null;
+  } catch (err) {
+    if (asked) ui.message = { kind: "problem", text: err instanceof ApiError ? err.message : "Could not check the review status." };
+  }
+}
+
+/**
  * Runs one command. `action` names the logical action for requestId reuse:
  * after a timeout, the next tap resends the same id; after any answer, the
  * next tap is new.
@@ -145,8 +165,12 @@ const ctl: Controller & Nav = {
     }
     if (screen === "D06") {
       ui.drafts = null;
-      void refreshDrafts().then(render);
+      void refreshDrafts()
+        .then(render)
+        .then(() => refreshReview())
+        .then(render);
     }
+    if (screen === "D11") void refreshReview().then(render);
     if (screen === "D07") ui.name = "";
     if (screen !== null && DETAIL_SCREENS.has(screen)) void refreshDetail().then(render);
     render();
@@ -200,7 +224,27 @@ const ctl: Controller & Nav = {
   openDraft(d: DraftSummary) {
     ui.draftId = d.draftId;
     ui.detail = null;
-    this.go(d.status === "recording" ? "D08" : "D10");
+    this.go(d.status === "recording" ? "D08" : SENT_STATES.has(d.submission) ? "D11" : "D10");
+  },
+  submitDraft() {
+    const id = ui.draftId;
+    if (!id) return;
+    // Saved on the device first; "submitted" only once the school server accepts it.
+    void run("submitDraft", () => api.submitDraft(id, ids.for("submitDraft")), "Saved on this device. Sending to the school server for review.").then(
+      async () => {
+        await refreshDetail();
+        render();
+      },
+    );
+  },
+  refreshReview() {
+    if (ui.busy) return;
+    ui.busy = true;
+    render();
+    void refreshReview(true).finally(() => {
+      ui.busy = false;
+      render();
+    });
   },
   startRecording() {
     const name = ui.name.trim();
@@ -505,7 +549,9 @@ function render(): void {
       case "D09":
         return editStopsView(o, ui, ctl);
       case "D10":
-        return reviewView(o, ui, ctl);
+        return reviewView(o, ui, ctl, deviceNowMs(o));
+      case "D11":
+        return awaitingView(o, ui, ctl, deviceNowMs(o));
       case "D12":
         return preflightView(o, currentSession(), ui, ctl);
       case "D13":
@@ -548,6 +594,7 @@ function swap(app: HTMLElement, index: number, next: HTMLElement): void {
 
 let polling = false;
 let polls = 0;
+let reviewPolls = 0;
 
 async function poll(): Promise<void> {
   if (polling) return;
@@ -558,6 +605,8 @@ async function poll(): Promise<void> {
     pollFailed = false;
     // Keep the open draft current while recording (every few seconds).
     if (DETAIL_SCREENS.has(shown) && ++polls % 3 === 0) await refreshDetail();
+    // Review decisions take minutes; ask about every half minute while shown.
+    if (REVIEW_SCREENS.has(shown) && ++reviewPolls % 30 === 0) await refreshReview();
     // The roster and its queued changes, every few seconds while it is open.
     if (STUDENT_SCREENS.has(shown) && shown !== "D15" && shown !== "D16" && ++polls % 3 === 0) await loadRoster();
     if ((shown === "D15" || shown === "D16") && qrDue(performance.now())) void loadQr();

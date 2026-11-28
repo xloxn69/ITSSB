@@ -261,22 +261,46 @@ The answer is `200 { "schemaVersion": 1, "status": "accepted", "receivedAtMs", "
 
 The backend keeps the latest report per device and assigns `receivedAtMs`. A report older than the stored one from the same `bootId` (a delayed report, or the Pi clock stepping back) still counts as contact but does not replace the stored status. If no later report arrives within `POSITION_STALE_AFTER_MS`, the stored status becomes `unknown`. A missed heartbeat does not prove whether the cause is cellular service, device power, or software failure.
 
-### Configuration, route drafts, and displayed QR codes
+### Configuration and driver sign-in
 
-The full driver workflow also needs the following proposed device operations. They use the same device authentication, request identity, and explicit result rules; implement them after the first tracking milestone.
+The full driver workflow also needs the following proposed device operations. They use the same device authentication, request identity, and explicit result rules. Route drafts (§7.1) and displayed QR codes (§9.2) are implemented.
 
 | Proposed operation | Required behavior |
 | --- | --- |
 | `GET /device/v1/config` | Return the current permitted bus/device settings, approved route versions, cache revisions, and expiry metadata. Roster fields require the applicable authorized driver context. |
 | `POST /device/v1/driver-session` | Exchange independently verified driver authentication for a limited operating grant tied to device/scope. A local PIN alone is not a cloud identity proof. |
-| `POST /device/v1/route-drafts` | Create or update an authorized draft with ordered stops and bounded geometry uploads; return draft/review status rather than automatic approval. |
-| `POST /device/v1/qr-codes` | Request an enrollment invitation or active-run check-in challenge under an explicit `purpose`; return a bounded display payload and `expiresAtMs`. |
 
 Keep credentials and driver grants in protected headers or bodies, never query strings. Initial driver-session establishment depends on the selected authentication/provisioning workflow; do not ship an endpoint that trusts an arbitrary `driverId` or a common PIN.
 
-Large recorded paths need bounded chunks or an authorized upload object, followed by validation and a submit-for-review command. Preserve recording identity, chunk order, quality gaps, and idempotency. Approved publication creates a route version; it does not overwrite the version of an active run. Config refreshes identify revisions so the Pi can avoid downloading unchanged route geometry.
+Approved publication creates a route version; it does not overwrite the version of an active run. Config refreshes identify revisions so the Pi can avoid downloading unchanged route geometry.
 
 Both QR purposes require current authorization and expiration checks. A backend outage does not authorize the Pi to invent unlimited replacement tokens. Cached information must retain its original expiry and scope.
+
+### 7.1 Route-draft submission (implemented)
+
+Types, limits and the shared validator: `packages/contracts/src/routeDrafts.ts`; fixtures `routeDraft.*.json`; device models `apps/device/src/itssb_device/route_draft_contracts.py`. Only the Pi and the backend use these. No iOS client decodes them, so there is no Swift DTO.
+
+**One bounded upload.** A draft holds at most 2,000 points (`MAX_ROUTE_PATH_POINTS`) and 100 stops (`MAX_ROUTE_DRAFT_STOPS`). The largest one is about 280 KB, within `MAX_ROUTE_DRAFT_BODY_BYTES` (384 KiB). So one request carries a whole recording, with no chunks and no upload object (docs/17). Submitting creates a draft; it never updates one. To change a submitted route, the driver records it again.
+
+| Endpoint | Who | Body | Result |
+| --- | --- | --- | --- |
+| `POST /device/v1/route-drafts` | device + grant current on arrival | `{ schemaVersion, requestId, driverOperatingGrant, deviceDraftId, capturedAtMs, label, direction, startedAtMs, finishedAtMs, path, stops }`. `path` holds 2–2,000 `{ latitude, longitude, capturedAtMs, gapBefore }` in travel order, with capture times strictly increasing. `stops` holds 1–100 `{ label, latitude, longitude, capturedAtMs }` in travel order. | `200` `{ requestId, status, draft, serverNowMs }` with `status` `accepted` (stored now) or `already_submitted` (stored before), and `draft` (`draftId`, `deviceDraftId`, `status`, `submittedAtMs`, `reviewedAtMs`, `decisionReason`, `routeVersionId`). Or `{ status: "rejected", code, message }` with `code` `grant_not_authorized`, `request_id_conflict` or `draft_conflict`. |
+| `POST /device/v1/route-drafts/status` | device + current grant | `{ schemaVersion, driverOperatingGrant, draftIds }` (1–20 server draft ids) | `200` `{ drafts, serverNowMs }`: one review per distinct id, or `{ draftId, status: "not_found" }`. Another device's draft reads as `not_found`. |
+
+**Rules.**
+- **Never approved here.** A stored draft is always `submitted` with no route version. Only staff approval (`routes:approveDraft`, §11) creates a route version, and new runs pin it.
+- **Credential rechecked at commit.** The submit and status functions recheck, in their own transaction, that the device is not revoked and its credential is still the one presented. A rotation or revocation landing mid-request refuses it with `401`.
+- **GPS gaps kept.** The indexes of points with `gapBefore: true` are stored with the draft. Staff review shows them as the `gap_in_recording` warning and a dashed, labelled segment (§11), whatever the distance.
+- **Idempotent.** The content is the recording itself, without the grant, `requestId` or `capturedAtMs`, compared by its SHA-256. The same `requestId`, or the same `deviceDraftId` with the same content, returns the stored draft (`already_submitted`). Different content under either one is rejected and never merged. Each device has its own drafts.
+- **Validated.** Coordinates must be on the globe. Point and stop times must fall within the recording (start and finish allow `MAX_FUTURE_SKEW_MS` for GPS-versus-wall-clock difference), the finish may not be in the future, and labels are 1–60 characters. Stops are not time-ordered: the driver may reorder them.
+- **Audited.** An accepted draft records the driver (from the grant), the carrying device and the capture time. A grant refusal is audited as denied.
+- **Errors (§5).**
+  - `400` `INVALID_REQUEST`, `MALFORMED_JSON` or `UNSUPPORTED_SCHEMA_VERSION`.
+  - `401` `UNAUTHENTICATED`, including a revoked device.
+  - `403` `GRANT_NOT_AUTHORIZED` (status read only).
+  - `413` `BODY_TOO_LARGE`, `TOO_MANY_POINTS` or `TOO_MANY_STOPS`. The limits are explicit refusals, never truncation.
+
+**On the Pi.** Submit saves the exact body in SQLite with its `requestId` before sending. Retries resend the same bytes until the server answers. The draft shows "pending" until the server accepts it, and its stops are frozen once Submit is pressed. Review status is read with the unlocked driver's grant and shown with the time it was read (docs/05 D10–D11). Each read asks about at most 20 awaiting drafts, least recently checked first, so successive reads reach every draft.
 
 ## 8. Authorized live snapshot
 
@@ -483,7 +507,7 @@ The staff web calls these Convex functions. The Pi and the iOS app never do, so 
 | --- | --- | --- |
 | `routes:list` (query) | `{}` | `ready` with `routes` (`routeId`, `label`, `direction: "to_school" \| "from_school"`, `currentVersion` or `null`: `routeVersionId`, `versionNumber`, `approvedAtMs`, `approvedByName`, `effectiveFromMs`, `stopCount`). |
 | `routes:listDrafts` (query) | `{}` | `ready` with `drafts`: waiting drafts first, then recent decisions. Each has `draftId`, `routeId` (null for a new route), `label`, `direction`, `status: "submitted" \| "approved" \| "rejected"`, `submittedAtMs`, `pointCount`, `stopCount`, `reviewedAtMs`, `reviewerName`, `decisionReason`, `approvedVersionId`. |
-| `routes:getDraft` (query) | `{ draftId }` | `ready` with the draft summary plus `path`, ordered `stops` (`sequence`, `label`, `latitude`, `longitude`, `instructions`) and `checks`; or `not_found`. |
+| `routes:getDraft` (query) | `{ draftId }` | `ready` with the draft summary plus `path`, ordered `stops` (`sequence`, `label`, `latitude`, `longitude`, `instructions`), `gapBeforeIndexes` (indexes into `path` of points recorded after a GPS loss; the segment ending at each is not measured travel; empty when none or unknown) and `checks`; or `not_found`. |
 | `routes:approveDraft` (mutation) | `{ draftId }` | `approved` with `routeId`, `routeVersionId`, `versionNumber`; or `refused` with a `code` and `message`. |
 | `routes:rejectDraft` (mutation) | `{ draftId, reason }` | `rejected`, or `refused`. |
 | `fleet:listDevices` (query) | `{}` | `ready` with `devices` (`deviceId`, `label`, `busLabel`, `revoked`, `activeRun` or `null`: `runId`, `routeLabel`, `startedAtMs`; and `lastContactAtMs`). No credential or hash is ever returned. |
@@ -515,7 +539,7 @@ For a signed-in caller, every change writes an audit row: `allowed` when applied
 
 **Checks.** `checks` entries have a `code`, a `severity` (`blocking` or `warning`) and a `message`.
 - Blocking, which prevents approval: `too_few_points` (under 2), `too_many_points` (over 2000, `MAX_ROUTE_PATH_POINTS`), `invalid_coordinate`, `no_stops`.
-- Warnings, which the reviewer decides on: `path_gap` (consecutive points over 100 m apart, `ROUTE_GAP_WARNING_M`; maps draw straight lines between points, so a longer gap cuts across blocks) and `stop_off_path` (a stop over 150 m from every path point).
+- Warnings, which the reviewer decides on: `path_gap` (consecutive points over 100 m apart, `ROUTE_GAP_WARNING_M`; maps draw straight lines between points, so a longer gap cuts across blocks), `stop_off_path` (a stop over 150 m from every path point) and `gap_in_recording` (the Pi lost GPS while recording, with the count; the line across each loss is drawn dashed and is not measured travel, however short).
 
 **Approval and version pinning.**
 - Approval copies the draft into a new immutable `routeVersions` row and its ordered `stops`, and sets `routes.currentVersionId`.
@@ -532,7 +556,7 @@ For a signed-in caller, every change writes an audit row: `allowed` when applied
 
 **Audit.** Each allowed staff mutation appends an `auditLog` row. Mutations return typed results instead of throwing, so a denied attempt by a signed-in person is recorded too.
 
-Route drafts are created only by the internal `routes:recordDraft`, for the authorized driver upload path (§6); there is no public create-draft.
+Route drafts are created only by the driver upload path (`POST /device/v1/route-drafts`, §7.1) and the internal `routes:recordDraft` used by tests and tools; there is no public create-draft.
 
 ## Sources
 

@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "requestId": "4f1e2d3c-5b6a-4978-8a6b-5c4d3e2f1a0b",
+  "driverOperatingGrant": "EXAMPLE_ONLY_NOT_A_REAL_GRANT_0000000",
+  "deviceDraftId": "9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d",
+  "capturedAtMs": 1795612000000,
+  "label": "Maple Loop Morning",
+  "direction": "to_school",
+  "startedAtMs": 1795610000000,
+  "finishedAtMs": 1795611800000,
+  "path": [
+    {
+      "latitude": 34.1,
+      "longitude": -83.98,
+      "capturedAtMs": 1795610001000,
+      "gapBefore": false
+    },
+    {
+      "latitude": 34.1002,
+      "longitude": -83.9797,
+      "capturedAtMs": 1795610004000,
+      "gapBefore": false
+    },
+    {
+      "latitude": 34.1006,
+      "longitude": -83.979,
+      "capturedAtMs": 1795610020000,
+      "gapBefore": true
+    }
+  ],
+  "stops": [
+    {
+      "label": "Example Oak Corner",
+      "latitude": 34.1002,
+      "longitude": -83.9797,
+      "capturedAtMs": 1795610004000
+    },
+    {
+      "label": "Example School Gate",
+      "latitude": 34.1006,
+      "longitude": -83.979,
+      "capturedAtMs": 1795610020000
+    }
+  ]
+}

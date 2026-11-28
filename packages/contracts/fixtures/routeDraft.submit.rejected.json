@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "requestId": "4f1e2d3c-5b6a-4978-8a6b-5c4d3e2f1a0b",
+  "status": "rejected",
+  "code": "grant_not_authorized",
+  "message": "The driver operating grant does not allow this.",
+  "serverNowMs": 1795612001000
+}

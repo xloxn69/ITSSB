@@ -22,14 +22,16 @@ Python service that runs on the bus Raspberry Pi. Spec:
 | `motion.py` | Moving / stopped / unknown from fresh fixes; the driver-confirmed **Parked** state |
 | `drafts.py` | Route recording into a local draft: a point every ≤ 25 m and at every turn over 20°, none while stopped, gap flags, ≤ 2,000 points (straight runs thinned, corners kept), service-ordered stops |
 | `route_geometry.py` | Distance, bearing, and corner-preserving Douglas-Peucker thinning |
+| `draft_submit.py` | Submitting a finished draft for review: built and size-checked locally, queued in SQLite with its `requestId`, resent unchanged until the server answers (`/device/v1/route-drafts`); review status read back with its age (`/route-drafts/status`) |
+| `route_draft_contracts.py` | Route-draft wire models, checked against `packages/contracts/fixtures/routeDraft.*.json` |
 | `students.py` | QR codes, the cached roster, and driver roster actions queued in SQLite and resent with the same `requestId` until the backend answers (`/device/v1/qr-codes`, `/roster`, `/roster-actions`) |
 | `service.py` | One process, one writer per thread, SIGTERM/SIGINT clean shutdown, bounded logs |
 | `devtools/fake_gpsd.py` | Fake GPSD with **fictional** data for tests and indoor demos |
-| `devtools/fake_backend.py` | Local fake of the telemetry, trip-event, QR, roster and roster-action endpoints with outage modes (`down`, `drop_response`, `partial`, ...) and fictional students |
+| `devtools/fake_backend.py` | Local fake of the telemetry, trip-event, QR, roster, roster-action and route-draft endpoints with outage modes (`down`, `drop_response`, `partial`, ...) and fictional students |
 
 Still to build (see [roadmap](../../docs/15_BUILD_ROADMAP.md)): driver
 sign-in through `/device/v1/driver-session` (grants are provisioned by an
-administrator until then) and route-draft submission.
+administrator until then).
 
 ## Driver touchscreen
 
@@ -51,7 +53,9 @@ Local API (all on `127.0.0.1:8765`, same origin as the UI):
 | `POST /api/recordings` `{requestId, name, direction}` | driver + parked + fix, no active run | Starts recording; same `requestId` returns the same draft |
 | `POST /api/recordings/{id}/stops` `{requestId, name?}` | driver + parked + fix | Marks a stop at the device's own fix (request coordinates are ignored) |
 | `POST /api/recordings/{id}/stops/{stopId}` `{name}` / `{position}` / `{remove: true}` | driver + parked | Renames, reorders, or removes a stop |
-| `POST /api/recordings/{id}/finish` | driver + parked | Saves the draft on this device. It is **not submitted**: the backend has no route-draft endpoint yet |
+| `POST /api/recordings/{id}/finish` | driver + parked | Saves the draft on this device. It is **not submitted** until the driver submits it |
+| `POST /api/recordings/{id}/submit` `{requestId}` | driver + parked, grant, server configured, finished draft with ≥ 2 points and ≥ 1 stop | Saves the submission and answers `submission: "pending"`; the sync thread sends it. `submitted` once the server accepts it, `refused` (with `problem`) if it refuses. Stops are frozen from here on |
+| `POST /api/recordings/review-status` | driver, grant | Re-reads `submitted`/`approved`/`rejected` (with staff's reason) from the server at most every 30 s; each draft carries `reviewCheckedAtMs` |
 | `POST /api/runs/start` `{requestId, routeVersionId}` | driver + parked, grant, server configured, service time zone | Online start; a start with no answer is resent with its first `requestId` |
 | `POST /api/runs/{runId}/end` `{requestId}` | driver + parked, grant | Completes the run on this device, then sends `endRun` (retried every 15 s until answered) |
 | `POST /api/qr-codes` `{purpose}` | driver + parked, grant, active run | `trip_check_in` (the run) or `route_enrollment` (the run's route version): token, `expiresAtMs`, `remainingMs`. Reused until 2 min before expiry, then refreshed; offline, only an unexpired code; refused or expired, none |

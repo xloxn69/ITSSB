@@ -136,6 +136,10 @@ export const api = {
   removeStop: (draftId: string, stopId: string) =>
     post<{ stops: DraftStop[] }>(`/api/recordings/${draftId}/stops/${stopId}`, { remove: true }),
   finish: (draftId: string) => post<DraftSummary>(`/api/recordings/${draftId}/finish`),
+  submitDraft: (draftId: string, requestId: string) =>
+    post<DraftSummary>(`/api/recordings/${draftId}/submit`, { requestId }),
+  reviewStatus: () =>
+    post<{ checked: boolean; problem: string | null; drafts: DraftSummary[] }>("/api/recordings/review-status"),
   startRun: (requestId: string, routeVersionId: string) =>
     post<{ status: "accepted" | "unknown"; runId?: string; message?: string }>("/api/runs/start", {
       requestId,

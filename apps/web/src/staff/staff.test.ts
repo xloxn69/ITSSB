@@ -13,6 +13,7 @@ import {
   sweepSummary,
 } from "./format";
 import { credentialOutcome, grantOutcome, mutationOutcome, queryState } from "./source";
+import { pathSegments } from "./DraftDiagram";
 
 describe("queryState", () => {
   it("separates ready, not found, denial, and malformed answers", () => {
@@ -267,5 +268,23 @@ describe("invitationState", () => {
     expect(invitationState({ revoked: false, usedAtMs: null, expiresAtMs: now }, now)).toEqual({ text: "Expired", pending: false });
     expect(invitationState({ revoked: true, usedAtMs: null, expiresAtMs: now + 1 }, now)).toEqual({ text: "Revoked", pending: false });
     expect(invitationState({ revoked: true, usedAtMs: now - 5, expiresAtMs: now + 1 }, now).text).toMatch(/^Joined/);
+  });
+});
+
+describe("pathSegments", () => {
+  it("draws the segment across a GPS loss on its own, so it can be dashed", () => {
+    expect(pathSegments(["a", "b", "c", "d", "e"], [2])).toEqual([
+      { points: ["a", "b"], gap: false },
+      { points: ["b", "c"], gap: true },
+      { points: ["c", "d", "e"], gap: false },
+    ]);
+  });
+  it("handles a gap at the end, adjacent gaps, and ignores impossible indexes", () => {
+    expect(pathSegments(["a", "b", "c"], [1, 2])).toEqual([
+      { points: ["a", "b"], gap: true },
+      { points: ["b", "c"], gap: true },
+    ]);
+    expect(pathSegments(["a", "b", "c"], [0, 9, 1.5])).toEqual([{ points: ["a", "b", "c"], gap: false }]);
+    expect(pathSegments(["a", "b"])).toEqual([{ points: ["a", "b"], gap: false }]);
   });
 });

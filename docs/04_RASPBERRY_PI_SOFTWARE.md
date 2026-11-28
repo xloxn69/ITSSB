@@ -312,6 +312,8 @@ Local endpoints. Built ones are marked; the rest are still proposals:
 | `POST /api/recordings/{id}/stops` | Built. Mark a draft stop at the device's own fix while parked. |
 | `POST /api/recordings/{id}/stops/{stopId}` | Built. Rename, reorder, or remove a draft stop while parked. |
 | `POST /api/recordings/{id}/finish` | Built. Save the draft on the device (not a submission). |
+| `POST /api/recordings/{id}/submit` | Built. Queue the finished draft for staff review with the unlocked driver's grant; sent and retried with the same `requestId`; "submitted" only once the server accepts it. |
+| `POST /api/recordings/review-status` | Built. Re-read review status (awaiting approval, approved, rejected with reason) from the server, at most every 30 s. |
 | `POST /api/runs/start` | Built. Submit an idempotent online trip start with the unlocked driver's grant; a start with no answer is resent with its original `requestId`. |
 | `POST /api/runs/{runId}/end` | Built. Complete the run locally with its final sequence boundary, then send `endRun`; retried until the server answers. |
 | `POST /api/commands` | Submit a typed, validated driver operation. |

@@ -1,4 +1,4 @@
-"""A local fake of `POST /device/v1/telemetry` and `/device/v1/trip-events`.
+"""A local fake of the device endpoints (`POST /device/v1/telemetry`, `/trip-events`, …).
 
     python -m itssb_device.devtools.fake_backend --port 8790 --token fake-dev-token
 
@@ -28,6 +28,12 @@ apps/backend/convex/deviceRoster.ts, and every raw body is kept in
 `action_bodies` so tests can check a retry resends the same bytes.
 `reject_actions` forces a rejection code for every new action.
 
+Route drafts follow docs/08 §7.1: a known grant, one stored draft per
+`deviceDraftId` and content (a resend returns `already_submitted`, other
+content is a conflict), always stored `submitted`. `decide_draft()` stands in
+for staff approval or rejection; every raw submit body is kept in
+`draft_bodies`.
+
 `GET /_stats` lists stored eventIds and every request's eventIds (test-only).
 Binds to 127.0.0.1 only. Never use it as a real backend.
 """
@@ -43,7 +49,13 @@ from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-GRANT_PATHS = ("/device/v1/qr-codes", "/device/v1/roster", "/device/v1/roster-actions")
+GRANT_PATHS = (
+    "/device/v1/qr-codes",
+    "/device/v1/roster",
+    "/device/v1/roster-actions",
+    "/device/v1/route-drafts",
+    "/device/v1/route-drafts/status",
+)
 
 IDENTITY_FIELDS = (
     "bootId",
@@ -79,6 +91,9 @@ class FakeBackend(ThreadingHTTPServer):
         self.removed: set[str] = set()
         self.reject_actions: str | None = None
         self.qr_ttl_ms = 600_000
+        # Route drafts (docs/08 §7.1): server draft id -> stored draft.
+        self.route_drafts: dict[str, dict[str, Any]] = {}
+        self.draft_bodies: list[bytes] = []  # every submit body that arrived
         super().__init__(("127.0.0.1", port), _Handler)
 
     @property
@@ -314,6 +329,94 @@ class FakeBackend(ThreadingHTTPServer):
         rows.append(row)
         return result("accepted", row)
 
+    def route_draft(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        """Stores a submitted draft as `submitted`; never approves it."""
+        now = int(time.time() * 1000)
+        rid = str(body.get("requestId"))
+        content = {
+            k: v
+            for k, v in body.items()
+            if k not in ("driverOperatingGrant", "requestId", "capturedAtMs")
+        }
+        fingerprint = json.dumps(content, sort_keys=True)
+
+        def reject(code: str) -> tuple[int, dict[str, Any]]:
+            return 200, {
+                "schemaVersion": 1,
+                "requestId": rid,
+                "status": "rejected",
+                "code": code,
+                "message": code,
+                "serverNowMs": now,
+            }
+
+        def ok(status: str, d: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+            return 200, {
+                "schemaVersion": 1,
+                "requestId": rid,
+                "status": status,
+                "draft": self._review(d),
+                "serverNowMs": now,
+            }
+
+        if len(body.get("path", [])) > 2000:
+            return _err(413, "TOO_MANY_POINTS")
+        with self.lock:
+            if body.get("driverOperatingGrant") not in self.grants:
+                return reject("grant_not_authorized")
+            for d in self.route_drafts.values():
+                if rid in d["requestIds"] and d["fingerprint"] != fingerprint:
+                    return reject("request_id_conflict")
+                if d["deviceDraftId"] == body.get("deviceDraftId"):
+                    if d["fingerprint"] != fingerprint:
+                        return reject("draft_conflict")
+                    d["requestIds"].add(rid)
+                    return ok("already_submitted", d)
+            draft_id = f"fake_draft_{len(self.route_drafts) + 1:03d}"
+            d = {
+                "draftId": draft_id,
+                "deviceDraftId": body.get("deviceDraftId"),
+                "fingerprint": fingerprint,
+                "requestIds": {rid},
+                "body": body,
+                "status": "submitted",
+                "submittedAtMs": now,
+                "reviewedAtMs": None,
+                "decisionReason": None,
+                "routeVersionId": None,
+            }
+            self.route_drafts[draft_id] = d
+            return ok("accepted", d)
+
+    @staticmethod
+    def _review(d: dict[str, Any]) -> dict[str, Any]:
+        keys = ("draftId", "deviceDraftId", "status", "submittedAtMs", "reviewedAtMs")
+        return {
+            **{k: d[k] for k in keys},
+            "decisionReason": d["decisionReason"],
+            "routeVersionId": d["routeVersionId"],
+        }
+
+    def decide_draft(self, draft_id: str, status: str, reason: str | None = None) -> None:
+        """Test hook: staff approve or reject a draft."""
+        with self.lock:
+            d = self.route_drafts[draft_id]
+            d.update(status=status, reviewedAtMs=int(time.time() * 1000), decisionReason=reason)
+            if status == "approved":
+                d["routeVersionId"] = f"fake_version_for_{draft_id}"
+
+    def route_draft_status(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        with self.lock:
+            if body.get("driverOperatingGrant") not in self.grants:
+                return _err(403, "GRANT_NOT_AUTHORIZED")
+            drafts = [
+                self._review(self.route_drafts[i])
+                if i in self.route_drafts
+                else {"draftId": i, "status": "not_found"}
+                for i in body.get("draftIds", [])
+            ]
+        return 200, {"schemaVersion": 1, "drafts": drafts, "serverNowMs": int(time.time() * 1000)}
+
 
 def _err(status: int, code: str) -> tuple[int, dict[str, Any]]:
     return status, {"schemaVersion": 1, "error": {"code": code, "message": code}}
@@ -364,6 +467,9 @@ class _Handler(BaseHTTPRequestHandler):
                     rid = ""
                 srv.action_bodies.setdefault(rid, []).append(raw)
                 srv.action_log.append(rid)
+        if self.path == "/device/v1/route-drafts":
+            with srv.lock:
+                srv.draft_bodies.append(raw)
         if srv.mode == "down":
             self._error(503, "TEMPORARILY_UNAVAILABLE")
             return
@@ -380,6 +486,10 @@ class _Handler(BaseHTTPRequestHandler):
             status, result = srv.qr_code(body)
         elif self.path == "/device/v1/roster":
             status, result = srv.roster(body)
+        elif self.path == "/device/v1/route-drafts":
+            status, result = srv.route_draft(body)
+        elif self.path == "/device/v1/route-drafts/status":
+            status, result = srv.route_draft_status(body)
         else:
             status, result = 200, srv.roster_action(body)
         if srv.mode == "drop_response":

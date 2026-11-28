@@ -3,7 +3,12 @@ import {
   MAX_EVENTS_PER_TELEMETRY_REQUEST,
   MAX_HEALTH_BODY_BYTES,
   MAX_ROSTER_BODY_BYTES,
+  MAX_ROUTE_DRAFT_BODY_BYTES,
+  MAX_ROUTE_DRAFT_STATUS_BODY_BYTES,
+  routeDraftContent,
   validateRosterAction,
+  validateRouteDraftStatusRequest,
+  validateRouteDraftSubmission,
   MAX_TRIP_EVENT_BODY_BYTES,
   MAX_TELEMETRY_BODY_BYTES,
   SCHEMA_VERSION,
@@ -185,16 +190,18 @@ http.route({
 async function deviceGrantRequest(
   ctx: ActionCtx,
   req: Request,
+  maxBytes: number = MAX_ROSTER_BODY_BYTES,
 ): Promise<
-  | { ok: true; deviceId: Id<"devices">; body: Record<string, unknown>; grantHash: string }
+  | { ok: true; deviceId: Id<"devices">; credentialHash: string; body: Record<string, unknown>; grantHash: string }
   | { ok: false; response: Response }
 > {
   const secret = parseBearer(req.headers.get("Authorization"));
   if (!secret) return { ok: false, response: requestError(401, "UNAUTHENTICATED", "Device credential required.", false) };
-  const deviceId = await ctx.runQuery(internal.devices.byCredentialHash, { credentialHash: await sha256Hex(secret) });
+  const credentialHash = await sha256Hex(secret);
+  const deviceId = await ctx.runQuery(internal.devices.byCredentialHash, { credentialHash });
   if (!deviceId) return { ok: false, response: requestError(401, "UNAUTHENTICATED", "Device credential rejected.", false) };
   const text = await req.text();
-  if (new TextEncoder().encode(text).length > MAX_ROSTER_BODY_BYTES) {
+  if (new TextEncoder().encode(text).length > maxBytes) {
     return { ok: false, response: requestError(413, "BODY_TOO_LARGE", "Body is too large.", false) };
   }
   let body: unknown;
@@ -211,7 +218,7 @@ async function deviceGrantRequest(
     return { ok: false, response: requestError(400, "UNSUPPORTED_SCHEMA_VERSION", "Unsupported protocol version.", false) };
   }
   const grant = b.driverOperatingGrant;
-  return { ok: true, deviceId, body: b, grantHash: await sha256Hex(typeof grant === "string" ? grant : "") };
+  return { ok: true, deviceId, credentialHash, body: b, grantHash: await sha256Hex(typeof grant === "string" ? grant : "") };
 }
 
 async function guarded(run: () => Promise<Response>): Promise<Response> {
@@ -295,6 +302,59 @@ http.route({
         }),
       ),
     );
+  }),
+});
+
+/**
+ * POST /device/v1/route-drafts — submit one finished recording for staff
+ * review (docs/08 §7.1). Stored as `submitted`; never approved here.
+ */
+http.route({
+  path: "/device/v1/route-drafts",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    const parsed = await deviceGrantRequest(ctx, req, MAX_ROUTE_DRAFT_BODY_BYTES);
+    if (!parsed.ok) return parsed.response;
+    const nowMs = Date.now();
+    const checked = validateRouteDraftSubmission(parsed.body, nowMs);
+    if (!checked.ok) return requestError(checked.code === "INVALID_REQUEST" ? 400 : 413, checked.code, checked.message, false);
+    // Hashed here, where WebCrypto is available; only the hash is compared.
+    const contentHash = await sha256Hex(routeDraftContent(checked.value));
+    return await guarded(async () =>
+      json(
+        200,
+        await ctx.runMutation(internal.deviceDrafts.submit, {
+          deviceId: parsed.deviceId,
+          credentialHash: parsed.credentialHash,
+          grantHash: parsed.grantHash,
+          contentHash,
+          submission: checked.value,
+          nowMs,
+        }),
+      ),
+    );
+  }),
+});
+
+/** POST /device/v1/route-drafts/status — review state of this device's drafts (docs/08 §7.1). */
+http.route({
+  path: "/device/v1/route-drafts/status",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    const parsed = await deviceGrantRequest(ctx, req, MAX_ROUTE_DRAFT_STATUS_BODY_BYTES);
+    if (!parsed.ok) return parsed.response;
+    const checked = validateRouteDraftStatusRequest(parsed.body);
+    if (!checked.ok) return requestError(400, "INVALID_REQUEST", checked.message, false);
+    return await guarded(async () => {
+      const outcome = await ctx.runQuery(internal.deviceDrafts.status, {
+        deviceId: parsed.deviceId,
+        credentialHash: parsed.credentialHash,
+        grantHash: parsed.grantHash,
+        draftIds: checked.value.draftIds,
+        nowMs: Date.now(),
+      });
+      return outcome.ok ? json(200, outcome.body) : requestError(outcome.status, outcome.code, outcome.message, false);
+    });
   }),
 });
 

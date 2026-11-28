@@ -11,6 +11,8 @@ Rules enforced here, not in the browser:
 - anything that changes a draft needs the bus confirmed parked; recording
   itself keeps sampling while driving
 - stop coordinates come from this device's own fresh fix, never the request
+- submitting a draft for review queues it (draft_submit.py); it reads as
+  submitted only after the server accepted it
 - static files are served only from the built UI directory
 """
 
@@ -33,6 +35,7 @@ from urllib.parse import unquote
 from zoneinfo import ZoneInfo
 
 from .database import Database, GuardRefused, RunNotActive
+from .draft_submit import DraftDesk
 from .drafts import DraftError, Drafts
 from .gps_reader import LatestFixHolder
 from .local_auth import (
@@ -86,6 +89,7 @@ SERVER_WORDS = {
 NOT_YET = {
     "showQr": "QR codes come from the school server, and this device has none set up.",
     "showStudents": "The roster comes from the school server, and this device has none set up.",
+    "submitRoute": "Route review is on the school server, and this device has none set up.",
 }
 
 
@@ -112,6 +116,7 @@ _DRAFT = re.compile(rf"^/api/recordings/({_UUID})$")
 _DRAFT_STOPS = re.compile(rf"^/api/recordings/({_UUID})/stops$")
 _DRAFT_STOP = re.compile(rf"^/api/recordings/({_UUID})/stops/({_UUID})$")
 _DRAFT_FINISH = re.compile(rf"^/api/recordings/({_UUID})/finish$")
+_DRAFT_SUBMIT = re.compile(rf"^/api/recordings/({_UUID})/submit$")
 _RUN_END = re.compile(r"^/api/runs/([A-Za-z0-9_-]{1,128})/end$")
 
 
@@ -130,7 +135,10 @@ class DriverApi:
         trip_events: HttpTripEvents | None = None,
         service_timezone: str | None = None,
         students: StudentDesk | None = None,
+        draft_desk: DraftDesk | None = None,
     ) -> None:
+        # Submitting drafts for review (draft_submit.py); None without a server.
+        self.draft_desk = draft_desk
         # QR codes, roster and driver actions (students.py); None without a server.
         self.students = students
         self.trip_events = trip_events
@@ -290,6 +298,9 @@ class DriverApi:
                     "startRoute": self._start_capability(session),
                     "showQr": self._students_capability(session, run, "showQr"),
                     "showStudents": self._students_capability(session, run, "showStudents"),
+                    "submitRoute": self.draft_desk.capability(session)
+                    if self.draft_desk is not None
+                    else {"available": False, "reason": NOT_YET["submitRoute"]},
                 },
                 # Only for an unlocked driver: route drafts are protected.
                 "recording": recording,
@@ -410,6 +421,14 @@ class DriverApi:
                 return _json(*self.students.qr(session, data))
             return _json(*self.students.action(session, data, guard=self._require_parked))
 
+        if path == "/api/recordings/review-status":
+            # A read from the server with the driver's grant; no draft changes.
+            if self.draft_desk is None:
+                return _error(HTTPStatus.CONFLICT, "NO_SERVER", NOT_YET["submitRoute"])
+            with self._db() as db:
+                refreshed = self.draft_desk.refresh(db, session)
+                return _json(HTTPStatus.OK, {**refreshed, "drafts": Drafts(db).list()})
+
         if path == "/api/runs/start" or _RUN_END.match(path):
             if not self.judge.parked():
                 return _error(
@@ -473,6 +492,14 @@ class DriverApi:
             m = _DRAFT_FINISH.match(path)
             if m:
                 return _json(HTTPStatus.OK, drafts.finish(m.group(1), self.now_ms()))
+            m = _DRAFT_SUBMIT.match(path)
+            if m:
+                if self.draft_desk is None:
+                    return _error(HTTPStatus.CONFLICT, "NO_SERVER", NOT_YET["submitRoute"])
+                code, body = self.draft_desk.submit(db, session, m.group(1), data)
+                if code != HTTPStatus.OK:
+                    return _json(code, body)
+                return _json(HTTPStatus.OK, drafts.summary(m.group(1)))
         return _error(HTTPStatus.NOT_FOUND, "NOT_FOUND", "Not found.")
 
     def _require_parked(self) -> None:

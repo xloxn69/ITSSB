@@ -15,7 +15,8 @@ export type ScreenId =
   | "D07" // record a new route
   | "D08" // recording a route
   | "D09" // add or edit a stop
-  | "D10" // review recorded route
+  | "D10" // review recorded route (submit for review)
+  | "D11" // route awaiting approval (and the decision)
   | "D12" // start-trip preflight
   | "D13" // driving view (read-only)
   | "D15" // route enrollment QR ("Join this route")
@@ -49,7 +50,7 @@ const MOVING_ALLOWED: ReadonlySet<ScreenId> = new Set(["D08", "D13", "D22"]);
 /** Screens that need an unlocked driver. */
 /** QR codes and the roster: an unlocked driver, parked, during the active run. */
 export const STUDENT_SCREENS: ReadonlySet<ScreenId> = new Set(["D15", "D16", "D17", "D18", "D19"]);
-const NEEDS_DRIVER: ReadonlySet<ScreenId> = new Set(["D06", "D07", "D08", "D09", "D10", "D12", "D23", "D24", ...STUDENT_SCREENS]);
+const NEEDS_DRIVER: ReadonlySet<ScreenId> = new Set(["D06", "D07", "D08", "D09", "D10", "D11", "D12", "D23", "D24", ...STUDENT_SCREENS]);
 /** Screens that change a draft: parked only. D08 itself is fine while moving (read-only). */
 const NEEDS_PARKED: ReadonlySet<ScreenId> = new Set(["D07", "D09", "D12", "D23", ...STUDENT_SCREENS]);
 
