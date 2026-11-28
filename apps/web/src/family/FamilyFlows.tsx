@@ -15,7 +15,7 @@ import {
 } from "@itssb/contracts";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { DIRECTION_LABEL, dateTime } from "../staff/format";
-import { type CommandView, checkInLine, commandView, TOKEN_PROBLEM_TEXT } from "./enrollmentModel";
+import { type CommandView, checkInLine, clearsOnEdit, commandView, enrollmentRequestArgs, TOKEN_PROBLEM_TEXT } from "./enrollmentModel";
 import type { FamilyArgs, FamilyQueryName, FamilySource } from "./familySource";
 
 /**
@@ -202,14 +202,7 @@ function RequestForm({
   const { busy, view, send, reset } = useCommand(source);
   const valid = name.trim() && address.trim() && stopId !== "";
   const submit = () =>
-    void send("enrollment:request", {
-      requestId,
-      token,
-      studentName: name,
-      address,
-      stopId: stopId === "none" ? null : stopId,
-      note: note.trim() ? note : null,
-    });
+    void send("enrollment:request", enrollmentRequestArgs({ requestId, token, studentName: name, address, stopId, note }));
 
   if (view?.kind === "sent") {
     return (
@@ -233,7 +226,7 @@ function RequestForm({
         // Clear an old refusal while editing. The request identity stays: the
         // server stores only accepted requests, and an unconfirmed one must
         // be resent unchanged (a changed resend is refused as a conflict).
-        if (view && view.kind !== "unconfirmed") reset();
+        if (clearsOnEdit(view)) reset();
       }}
     >
       <h2>

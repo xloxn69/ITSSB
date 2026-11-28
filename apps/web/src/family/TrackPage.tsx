@@ -19,6 +19,7 @@ import type { ServerClock } from "../tracking/clock";
 import { reportedDelayLine } from "../tracking/delay";
 import { AlertsPanel } from "./AlertsPanel";
 import { RouteDiagram } from "./RouteDiagram";
+import { RouteDetails } from "./RouteDetails";
 
 /** Re-renders every second so the age advances without a new update (docs/06 §9). */
 function useTick(): ReturnType<typeof readInstant> {
@@ -129,7 +130,18 @@ export function TrackPage({ store, onSignIn }: { store: TrackStore; onSignIn: ()
         }
       })()}
       {(state.kind === "tracking" || state.kind === "no_active_run") && (
-        <AlertsPanel source={store.source} assignmentId={state.context.assignment.assignmentId} />
+        <>
+          <AlertsPanel
+            source={store.source}
+            assignmentId={state.context.assignment.assignmentId}
+            trip={
+              state.kind === "tracking"
+                ? { kind: "run", assignmentId: state.context.assignment.assignmentId, run: state.run }
+                : { kind: "no_active_run", assignmentId: state.context.assignment.assignmentId }
+            }
+          />
+          <RouteDetails context={state.context} />
+        </>
       )}
     </div>
   );
