@@ -200,6 +200,7 @@ class UnlockResult:
     LOCKED_OUT = "locked_out"
     UNKNOWN_DRIVER = "unknown_driver"
     BAD_INPUT = "bad_input"
+    NOT_ALLOWED_NOW = "not_allowed_now"
 
 
 class SessionManager:
@@ -251,11 +252,26 @@ class SessionManager:
                 return 0.0
             return max(0.0, self._locked_until - self._mono())
 
-    def unlock(self, session: KioskSession, driver_id: object, pin: object) -> str:
+    def unlock(
+        self,
+        session: KioskSession,
+        driver_id: object,
+        pin: object,
+        still_allowed: Callable[[], bool] | None = None,
+    ) -> str:
+        """`still_allowed` is re-evaluated at the moment of granting, after the
+        PIN check, so a condition checked earlier (a run starting meanwhile)
+        cannot be bypassed by timing."""
         with self._attempt_lock:
-            return self._unlock(session, driver_id, pin)
+            return self._unlock(session, driver_id, pin, still_allowed)
 
-    def _unlock(self, session: KioskSession, driver_id: object, pin: object) -> str:
+    def _unlock(
+        self,
+        session: KioskSession,
+        driver_id: object,
+        pin: object,
+        still_allowed: Callable[[], bool] | None = None,
+    ) -> str:
         if not isinstance(driver_id, str) or not valid_pin_format(pin):
             return UnlockResult.BAD_INPUT
         if self.lockout_remaining_s() > 0:
@@ -267,6 +283,8 @@ class SessionManager:
             if ok and driver:
                 self._failures = 0
                 self._locked_until = None
+                if still_allowed is not None and not still_allowed():
+                    return UnlockResult.NOT_ALLOWED_NOW
                 session.driver, session.unlocked_mono = driver, self._mono()
                 log.info("driver %s unlocked", driver.driver_id)
                 return UnlockResult.OK

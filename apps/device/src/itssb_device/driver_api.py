@@ -101,6 +101,14 @@ class Response:
     headers: list[tuple[str, str]] = field(default_factory=list)
 
 
+def _motion_unknown() -> Response:
+    return _error(
+        HTTPStatus.CONFLICT,
+        "MOTION_UNKNOWN",
+        "Unlock when the bus is stopped and GPS has a current fix.",
+    )
+
+
 def _json(status: int, payload: Any, headers: list[tuple[str, str]] | None = None) -> Response:
     return Response(
         status, json.dumps(payload, separators=(",", ":")).encode(), headers=headers or []
@@ -372,23 +380,31 @@ class DriverApi:
             return None
         return lf.fix
 
+    def _unlock_motion_ok(self) -> bool:
+        """During a run, unknown motion (no fix, or a stale one) is not a stop:
+        the bus may be moving. Before a run, unknown is allowed so a driver can
+        unlock indoors without a fix."""
+        state = self.judge.state()
+        if state == "moving":
+            return False
+        if state == "stopped":
+            return True
+        with self._db() as db:
+            return db.active_run_id() is None
+
     def _post(self, path: str, session: KioskSession, data: dict[str, Any]) -> Response:
         if path == "/api/session/unlock":
-            state = self.judge.state()
-            if state == "moving":
+            if self.judge.state() == "moving":
                 return _error(HTTPStatus.CONFLICT, "MOVING", "Unlock when the bus is stopped.")
-            # During a run, unknown motion (no fix, or a stale one) is not a
-            # stop: the bus may be moving. Before a run, unknown is allowed so
-            # a driver can unlock indoors without a fix.
-            if state != "stopped":
-                with self._db() as db:
-                    if db.active_run_id() is not None:
-                        return _error(
-                            HTTPStatus.CONFLICT,
-                            "MOTION_UNKNOWN",
-                            "Unlock when the bus is stopped and GPS has a current fix.",
-                        )
-            result = self.sessions.unlock(session, data.get("driverId"), data.get("pin"))
+            if not self._unlock_motion_ok():
+                return _motion_unknown()
+            # Checked again at the moment of granting: a run may have started
+            # (from another page) while the PIN was being verified.
+            result = self.sessions.unlock(
+                session, data.get("driverId"), data.get("pin"), self._unlock_motion_ok
+            )
+            if result == UnlockResult.NOT_ALLOWED_NOW:
+                return _motion_unknown()
             if result == UnlockResult.OK:
                 return _json(HTTPStatus.OK, {"driver": self._driver_public(session)})
             if result == UnlockResult.BAD_INPUT:
