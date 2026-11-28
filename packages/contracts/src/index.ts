@@ -53,6 +53,7 @@ export type EventErrorCode =
   | "INVALID_FIELD"
   | "CLOCK_OUT_OF_RANGE"
   | "RUN_NOT_AUTHORIZED"
+  | "RUN_CANCELLED"
   | "EVENT_CONTENT_CONFLICT"
   | "TEMPORARILY_UNAVAILABLE";
 
@@ -69,6 +70,14 @@ export type EventResult =
       code: EventErrorCode;
       message: string;
       retryAfterMs?: number;
+      /**
+       * Only with `RUN_CANCELLED`, which is only ever sent for the device's
+       * own run: staff cancelled it (or sent a replacement bus). The Pi ends
+       * the run locally as cancelled. Absent from older backends.
+       */
+      runState?: "cancelled";
+      /** When staff cancelled it, or `null` if the server has no time. */
+      cancelledAtMs?: number | null;
     };
 
 export interface TelemetryResponse {

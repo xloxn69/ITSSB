@@ -5,8 +5,8 @@
  * `bun run screenshots`; never part of the device build (vite builds
  * index.html only). `gallery.html?state=<name>`.
  */
-import { awaitingView, type Controller, libraryView, reviewView, type UiState } from "../flows.js";
-import type { DraftDetail, DraftSummary, SubmissionDetail } from "../snapshot.js";
+import { awaitingView, cancelledBanner, type Controller, libraryView, reviewView, summaryView, type UiState } from "../flows.js";
+import type { DraftDetail, DraftSummary, EndedRun, SubmissionDetail } from "../snapshot.js";
 import { css } from "../styles.js";
 import type { ScreenId } from "../screens.js";
 import { correctionView, detailView, emptyStudentUi, qrView, rosterView, type StudentController, type StudentUi } from "../studentViews.js";
@@ -169,6 +169,26 @@ const dashboard = () => {
   const lines = studentChangeLines(ended.snapshot?.studentChanges).map((l) => h("div", { class: `banner lv-${l.level}` }, l.text));
   return dashboardView(ended, { go: () => {}, action: () => {} }, lines);
 };
+// D14: staff cancelled this bus's run (GPS was lost, the driver couldn't end it).
+const cancelledRun: EndedRun = {
+  runId: RUN,
+  endedBy: "school",
+  cancelledAtMs: at(4),
+  cancelNotedAtMs: at(3),
+  endedAtMs: at(4),
+  endSync: "not_needed",
+  endError: null,
+  endAttempts: 0,
+  positionsRecorded: 412,
+  positionsWaiting: 0,
+  positionsAccepted: 409,
+  positionsRejected: 3,
+};
+const cancelledO = observed(snapshot({ run: null, session: { unlocked: true, driverName: "Dana Driver" }, lastEndedRun: cancelledRun, generatedAtMs: NOW }));
+const cancelledDashboard = () => {
+  const line = cancelledBanner(cancelledO);
+  return dashboardView(cancelledO, { go: () => {}, action: () => {} }, line ? [h("div", { class: `banner lv-${line.level}` }, line.text)] : []);
+};
 // D12: low space (warning) and nearly full (critical, recording reduced), during a run.
 const MB = 1_000_000;
 const storageFor = (level: "warning" | "critical"): StoragePart => ({
@@ -326,6 +346,10 @@ const view = name.startsWith("diagnostics")
   ? reviewState()
   : name === "dashboard-changes"
   ? dashboard()
+  : name === "dashboard-cancelled"
+  ? cancelledDashboard()
+  : name === "summary-cancelled"
+  ? summaryView(cancelledO, draftUi(null), draftCtl)
   : name === "storage-warning" || name === "storage-critical"
   ? storageScreen(name === "storage-warning" ? "warning" : "critical")
   : name.startsWith("qr")
@@ -344,4 +368,6 @@ export const GALLERY_STATES = [
   "review-library",
   "diagnostics-measured",
   "diagnostics-unavailable",
+  "dashboard-cancelled",
+  "summary-cancelled",
 ];

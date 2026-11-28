@@ -24,6 +24,8 @@ const STATES = [
   "detail-confirm-remove",
   "correction",
   "dashboard-changes",
+  "dashboard-cancelled",
+  "summary-cancelled",
   "storage-warning",
   "storage-critical",
   "review-library",

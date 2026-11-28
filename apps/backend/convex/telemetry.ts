@@ -41,6 +41,11 @@ function isLateHistory(run: Doc<"runs">, e: TelemetryEvent, nowMs: number): bool
   );
 }
 
+/** When staff cancelled the run; runs cancelled before `cancelledAtMs` existed fall back to the end. */
+export function cancelledAt(run: Doc<"runs">): number | null {
+  return run.cancelledAtMs ?? run.endedAtMs ?? null;
+}
+
 /**
  * Ingests one batch from an authenticated device and returns one result per
  * submitted event (docs/08 §4). Runs as a single transaction.
@@ -129,6 +134,19 @@ async function ingestOne(
   const runId = ctx.db.normalizeId("runs", e.runId);
   const run = runId ? await ctx.db.get(runId) : null;
   const historyOnly = run?.state === "completed" && isLateHistory(run, e, nowMs);
+  // Staff cancelled this device's own run (or sent a replacement bus): say
+  // so, so the Pi ends the run instead of recording into it (docs/13 D14).
+  // Another device's run still reads as RUN_NOT_AUTHORIZED.
+  if (run?.state === "cancelled" && run.deviceId === deviceId) {
+    return {
+      eventId,
+      status: "rejected",
+      code: "RUN_CANCELLED",
+      message: "The school cancelled this run.",
+      runState: "cancelled",
+      cancelledAtMs: cancelledAt(run),
+    };
+  }
   if (!run || run.deviceId !== deviceId || (run.state !== "active" && !historyOnly)) {
     return {
       eventId,

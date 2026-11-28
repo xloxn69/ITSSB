@@ -1,3 +1,4 @@
+import type { RunState } from "./index.js";
 import { MAX_FUTURE_SKEW_MS } from "./validate.js";
 
 /**
@@ -75,12 +76,27 @@ export const MAX_CPU_TEMPERATURE_C = 150;
 /** An exception class name or `http_NNN`: never a message, host or path. */
 const ERROR_CLASS = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
 
+/**
+ * The server's state of the run the report named, sent only when that run
+ * belongs to the reporting device (another device's run, or an unknown one,
+ * gets no `run`). This is how a Pi with no GPS fix, which uploads no
+ * telemetry, still learns that staff cancelled its run (docs/13 D14).
+ */
+export interface DeviceRunStatus {
+  runId: string;
+  state: RunState;
+  /** When staff cancelled the run; `null` unless `state` is `cancelled`. */
+  cancelledAtMs: number | null;
+}
+
 /** HTTP 200 body. The backend assigns `receivedAtMs`. */
 export interface DeviceHealthAccepted {
   schemaVersion: 1;
   status: "accepted";
   receivedAtMs: number;
   serverNowMs: number;
+  /** Absent when the report named no run of this device, and from older backends. */
+  run?: DeviceRunStatus;
 }
 
 export type DeviceHealthValidation =

@@ -286,6 +286,12 @@ Keep cloud synchronization status separate from local completion. A crash betwee
 
 Ending a digital run does not certify that the bus is physically empty.
 
+### Cancelled by the school
+
+Staff can cancel a run, or send a replacement bus, from the console. The Pi learns it from the server: every health answer for a report that named this device's run carries that run's state (`run.state: "cancelled"`), and a position sent for it is rejected with `RUN_CANCELLED` ([08 §4, §7](08_DATA_CONTRACTS_AND_API.md#4-telemetry-upload)). Health goes out every 30 seconds even with no GPS fix, so a Pi that lost GPS mid-run still hears within about half a minute.
+
+On hearing it, the Pi ends the run locally as `cancelled` in one transaction, with the cancellation time and when it heard. It sends no end request, and it needs no driver unlock and no GPS fix. Recording stops, because telemetry insertion requires an active run. Rows already queued keep their own outcome: rows the server already accepted stay accepted, and rows still waiting are decided by the server when they upload (they come back rejected `RUN_CANCELLED` and stay as rejected records with that reason). The cancellation survives a restart. Only the run the answer names is ended, and only while it is active on this Pi.
+
 ## 11. Driver commands and permissions
 
 The browser submits commands to the local API. The Python service checks the current driver, assigned scope, motion/stopped context, input, and command identity.

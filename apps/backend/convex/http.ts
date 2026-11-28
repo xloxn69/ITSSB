@@ -171,6 +171,7 @@ http.route({
         status: "accepted",
         receivedAtMs: outcome.receivedAtMs,
         serverNowMs: nowMs,
+        ...(outcome.run ? { run: outcome.run } : {}),
       };
       return json(200, accepted);
     } catch (error) {

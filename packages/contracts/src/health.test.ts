@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import accepted from "../fixtures/health.accepted.json" with { type: "json" };
+import acceptedRunCancelled from "../fixtures/health.accepted.runCancelled.json" with { type: "json" };
 import noFix from "../fixtures/health.report.noFix.json" with { type: "json" };
 import withMetrics from "../fixtures/health.report.withMetrics.json" with { type: "json" };
+import telemetryRunCancelled from "../fixtures/telemetry.response.runCancelled.json" with { type: "json" };
 import { validateDeviceHealthReport } from "./health.js";
 import { healthFixtureFiles } from "./healthFixtures.js";
 
@@ -11,6 +13,8 @@ describe("health fixtures", () => {
   it("fixtures/*.json match the typed fixtures (run `bun run fixtures` if not)", () => {
     expect(noFix).toEqual(healthFixtureFiles["health.report.noFix"]);
     expect(accepted).toEqual(healthFixtureFiles["health.accepted"]);
+    expect(acceptedRunCancelled).toEqual(healthFixtureFiles["health.accepted.runCancelled"]);
+    expect(telemetryRunCancelled).toEqual(healthFixtureFiles["telemetry.response.runCancelled"]);
     expect(withMetrics).toEqual(healthFixtureFiles["health.report.withMetrics"]);
   });
 

@@ -225,8 +225,14 @@ export interface DeviceSnapshot {
 
 export interface EndedRun {
   runId: string;
+  /** `school`: staff cancelled the run and the Pi ended it (docs/13 D14). Absent on older device software: the driver ended it. */
+  endedBy?: "driver" | "school";
+  /** For `school`: when staff cancelled it (null if the server gave no time), and when this bus heard. */
+  cancelledAtMs?: number | null;
+  cancelNotedAtMs?: number;
   endedAtMs: number;
-  endSync: "pending" | "accepted" | "rejected";
+  /** `not_needed`: cancelled by the school, so there is no end to send. */
+  endSync: "pending" | "accepted" | "rejected" | "not_needed";
   endError: string | null;
   endAttempts: number;
   positionsRecorded: number;

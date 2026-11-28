@@ -1,4 +1,5 @@
 import type { DeviceHealthAccepted, DeviceHealthReport } from "./health.js";
+import type { TelemetryResponse } from "./index.js";
 
 /**
  * Canonical fictional health fixtures (docs/08 §7). `noFix` is the body a
@@ -38,8 +39,32 @@ export const deviceHealthAccepted: DeviceHealthAccepted = {
   serverNowMs: 1795609085400,
 };
 
+/** Staff cancelled the run the report named (docs/13 D14). */
+export const deviceHealthAcceptedRunCancelled: DeviceHealthAccepted = {
+  ...deviceHealthAccepted,
+  run: { runId: "demo_run_001", state: "cancelled", cancelledAtMs: 1795609000000 },
+};
+
+/** A position for the device's own cancelled run (docs/08 §4). */
+export const telemetryResponseRunCancelled: TelemetryResponse = {
+  schemaVersion: 1,
+  serverNowMs: 1795609085400,
+  results: [
+    {
+      eventId: "5fe2a60d-7c11-45b9-995d-f50192adea42",
+      status: "rejected",
+      code: "RUN_CANCELLED",
+      message: "The school cancelled this run.",
+      runState: "cancelled",
+      cancelledAtMs: 1795609000000,
+    },
+  ],
+};
+
 export const healthFixtureFiles = {
   "health.report.noFix": deviceHealthNoFix,
   "health.report.withMetrics": deviceHealthWithMetrics,
   "health.accepted": deviceHealthAccepted,
+  "health.accepted.runCancelled": deviceHealthAcceptedRunCancelled,
+  "telemetry.response.runCancelled": telemetryResponseRunCancelled,
 } as const;

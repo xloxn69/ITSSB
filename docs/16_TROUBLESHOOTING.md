@@ -236,6 +236,10 @@ Old samples received after an outage belong in history. A backend that uses rece
 
 Prioritize a fresh observation, then drain bounded historical batches. Never discard the queue solely to stop a warning. The exact response handling is defined in the data contract.
 
+### GPS lost mid-run and the driver can't end the run
+
+Ending a run needs the bus confirmed parked, which needs a GPS fix. If GPS is lost mid-run, ask the transport office to cancel the run in the staff console (or send a replacement bus). The bus screen shows "Run cancelled by the school" with the time within about 30 seconds of the Pi reaching the school server, and recording stops. The Pi needs internet for this, not GPS or a driver unlock. Positions it still had queued are kept on the Pi; the trip summary shows how many the server accepted and rejected. Then troubleshoot the receiver (§4–§7).
+
 ## 12. Disk almost full or database problems
 
 **Possible boundary:** unbounded retention, logs, stalled uploads, or storage failure.

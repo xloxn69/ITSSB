@@ -36,6 +36,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from . import __version__
+from .cancellation import note_health_answer, note_telemetry_results
 from .config import Config
 from .database import Database
 from .metrics import SYSTEM_KEYS
@@ -299,6 +300,7 @@ class Uploader:
                 self._fail(sent, now)
                 return "bad_response"
             summary = apply_results(self.db, sent, results, now, jitter=self._jitter)
+            note_telemetry_results(self.db, results, now)
             self.board.upload_attempt(None)
             self.failures = 0
             self.pause_reason = None
@@ -376,6 +378,8 @@ class Uploader:
             log.warning("health: measurements refused; sending the base report")
             self.health_base_only_until_ms = self._now_ms() + HEALTH_BASE_ONLY_MS
             outcome, resp = self._post_health({k: report[k] for k in BASE_HEALTH_KEYS})
+        if outcome == "ok" and resp is not None:
+            note_health_answer(self.db, report["runId"], resp.body, self._now_ms())
         if outcome == "rejected" and resp is not None:
             log.warning("health: HTTP %s (%s)", resp.status, _error_code(resp))
         return outcome
