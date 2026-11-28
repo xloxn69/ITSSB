@@ -78,12 +78,14 @@ const megabytes = (bytes: number | null) =>
  * start" means since the device software last started; it resets on restart.
  */
 export function deviceMetricFacts(
-  m: DeviceMetrics | null,
+  // Undefined from a backend deployed before measurements existed.
+  m: DeviceMetrics | null | undefined,
   serverNowMs: number,
   receivedAtWallMs: number,
   wallNowMs: number,
   heartbeatSeen = true,
 ): [string, string][] {
+  if (m === undefined) return [["Measurements", "Not reported by this backend"]];
   if (m === null) return [["Measurements", heartbeatSeen ? METRICS_NOT_REPORTED : "No heartbeat received"]];
   const age = alignedAge(m.receivedAtMs, serverNowMs, receivedAtWallMs, wallNowMs);
   const failures =
@@ -119,11 +121,13 @@ const JOB_STATE_LABEL: Record<NotificationJobState, string> = {
 
 /** Push outbox age and recent outcomes, for staff (docs/10 §9). */
 export function notificationJobFacts(
-  n: NotificationJobAge,
+  // Undefined from a backend deployed before job age existed.
+  n: NotificationJobAge | undefined,
   serverNowMs: number,
   receivedAtWallMs: number,
   wallNowMs: number,
 ): [string, string][] {
+  if (n === undefined) return [["Push jobs", "Not reported by this backend"]];
   const atLeast = n.truncated ? "at least " : "";
   const oldest =
     n.oldestWaitingCreatedAtMs === null

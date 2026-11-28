@@ -311,6 +311,8 @@ describe("deviceMetricFacts", () => {
     expect(facts).toEqual([["Measurements", METRICS_NOT_REPORTED]]);
     expect(JSON.stringify(facts)).not.toMatch(/\b0\b/);
     expect(deviceMetricFacts(null, now, now, now, false)).toEqual([["Measurements", "No heartbeat received"]]);
+    // The page may be live before the backend that returns measurements.
+    expect(deviceMetricFacts(undefined, now, now, now)).toEqual([["Measurements", "Not reported by this backend"]]);
   });
 
   it("a value the device cannot measure says so", () => {
@@ -350,6 +352,10 @@ describe("notificationJobFacts", () => {
     cancelled: 0,
   };
   const base = { oldestWaitingCreatedAtMs: null, waitingCount: 0, windowMs: 86_400_000, countsByState: zero, truncated: false };
+
+  it("a backend from before job age reads as not reported, not as nothing waiting", () => {
+    expect(notificationJobFacts(undefined, now, now, now)).toEqual([["Push jobs", "Not reported by this backend"]]);
+  });
 
   it("says nothing is waiting when nothing is", () => {
     expect(notificationJobFacts(base, now, now, now)).toEqual([

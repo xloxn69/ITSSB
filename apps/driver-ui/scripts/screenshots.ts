@@ -48,6 +48,8 @@ try {
     // The seven-inch Touch Display 2 in landscape.
     const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, colorScheme });
     for (const state of STATES) {
+      // D21's measurement rows run below the 720 px screen (it scrolls there).
+      await page.setViewportSize({ width: 1280, height: state.startsWith("diagnostics") ? 1080 : 720 });
       await page.goto(`http://localhost:${port}/gallery.html?state=${state}`);
       await page.waitForSelector("body[data-ready=true]");
       await page.waitForTimeout(100);
