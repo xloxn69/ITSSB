@@ -2,7 +2,7 @@ import type { SessionInfo } from "./api.js";
 import { formatAge, formatDuration } from "./format.js";
 import { cloudIndicator, gpsIndicator, type Indicator, networkIndicator, storageIndicator } from "./indicators.js";
 import { routeSvg } from "./routeMap.js";
-import { editBlocked, parked, type ScreenId } from "./screens.js";
+import { editBlocked, parked, type ScreenId, unlockOfferedWhileStopped } from "./screens.js";
 import type { DraftDetail, DraftSummary, EndedRun, Observed } from "./snapshot.js";
 import { h } from "./views.js";
 
@@ -138,7 +138,9 @@ function button(text: string, onclick: () => void, opts: { primary?: boolean; di
 
 /** Confirm parked: offered only to an unlocked driver; the service still checks the fix. */
 export function parkedControl(o: Observed, c: Controller, ui: UiState): HTMLElement | null {
-  if (o.snapshot?.session?.unlocked !== true) return null;
+  if (o.snapshot?.session?.unlocked !== true) {
+    return unlockOfferedWhileStopped(o) ? button("Unlock driver", () => c.go("D04"), { primary: true }) : null;
+  }
   if (parked(o)) return h("span", { class: "pill lv-ok" }, "Parked");
   const motion = o.snapshot.motion?.state ?? "unknown";
   if (motion === "stopped") return button("Confirm parked", () => c.confirmParked(), { primary: true, disabled: ui.busy });

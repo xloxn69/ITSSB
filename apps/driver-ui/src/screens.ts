@@ -71,9 +71,26 @@ export function driverUnlocked(o: Observed): boolean {
   return o.snapshot?.session?.unlocked === true;
 }
 
+/**
+ * A locked driver on a stopped (not moving) bus during an active run may
+ * unlock. Without this, a lock or a service restart mid-run left the bus
+ * stuck on the driving view: parking needs an unlocked driver, and unlocking
+ * was only offered once parked. Never while moving or with motion unknown.
+ */
+export function unlockOfferedWhileStopped(o: Observed): boolean {
+  return (
+    serviceAnswering(o) &&
+    runActive(o) &&
+    !parked(o) &&
+    !driverUnlocked(o) &&
+    o.snapshot?.motion?.state === "stopped"
+  );
+}
+
 export function selectScreen(o: Observed, requested: ScreenId | null): ScreenId {
   if (!serviceAnswering(o)) return "D01";
   if (runActive(o) && !parked(o)) {
+    if (requested === "D04" && unlockOfferedWhileStopped(o)) return "D04";
     return requested !== null && MOVING_ALLOWED.has(requested) && requested !== "D08" ? requested : "D13";
   }
   if (recordingActive(o) && !parked(o)) {

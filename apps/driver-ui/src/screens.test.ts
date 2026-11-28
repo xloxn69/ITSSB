@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ACTIONS, type ActionId, actionAvailability, editBlocked, selectScreen } from "./screens.js";
+import { ACTIONS, type ActionId, actionAvailability, editBlocked, selectScreen, unlockOfferedWhileStopped } from "./screens.js";
 import type { CapabilitiesPart, DeviceSnapshot } from "./snapshot.js";
 import { observed, snapshot } from "./testing.js";
 
@@ -78,6 +78,27 @@ describe("moving-view lockout", () => {
   it("a low speed without the driver's confirmed stop is not parked", () => {
     const o = observed(ready({ motion: { state: "stopped", parked: false } }));
     for (const id of ids) expect(actionAvailability(o, id).reason).toBe("Stop safely and confirm the bus is parked.");
+  });
+
+  it("a locked driver on a stopped bus mid-run can unlock, so the run can be parked and ended", () => {
+    // After a lock or a service restart mid-run the session is locked; parking
+    // needs an unlocked driver, so without this the bus was stuck on D13.
+    const locked = { unlocked: false, driverName: null };
+    const stopped = observed(ready({ run: activeRun, session: locked, motion: { state: "stopped", parked: false } }));
+    expect(unlockOfferedWhileStopped(stopped)).toBe(true);
+    expect(selectScreen(stopped, "D04")).toBe("D04");
+    expect(selectScreen(stopped, "D05")).toBe("D13");
+
+    for (const state of ["moving", "unknown"] as const) {
+      const o = observed(ready({ run: activeRun, session: locked, motion: { state, parked: false } }));
+      expect(unlockOfferedWhileStopped(o)).toBe(false);
+      expect(selectScreen(o, "D04")).toBe("D13");
+    }
+    // Already unlocked: the driver confirms parked instead.
+    const open = observed(ready({ run: activeRun, motion: { state: "stopped", parked: false } }));
+    expect(unlockOfferedWhileStopped(open)).toBe(false);
+    // A stale snapshot is never trusted.
+    expect(unlockOfferedWhileStopped(observed(ready({ run: activeRun, session: locked, motion: { state: "stopped", parked: false } }), 10_000))).toBe(false);
   });
 
   it("parked with an active run opens the dashboard", () => {
