@@ -94,6 +94,7 @@ class GuardRefused(Exception):
 
 class Database:
     def __init__(self, path: Path | str) -> None:
+        self.path = Path(path)
         self.conn = sqlite3.connect(path, isolation_level=None, timeout=5.0)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
@@ -415,6 +416,31 @@ class Database:
             rest = [r for r in rows if r["rowid"] != newest["rowid"]]
             rows = [newest, *rest[: limit - 1]]
         return [json.loads(r["payload"]) for r in rows]
+
+    def prune_acknowledged(self, captured_before_ms: int, limit: int) -> int:
+        """Removes up to `limit` acknowledged events captured before the cutoff,
+        with their outbox rows. Never touches a pending or rejected row, the
+        active (or scheduled) run, or the most recently ended run, whose trip
+        summary counts its rows. Returns how many events were removed."""
+        with self.transaction() as tx:
+            ids = [
+                (r["event_id"],)
+                for r in tx.execute(
+                    "SELECT o.event_id FROM outbox o JOIN telemetry_events t "
+                    "ON t.event_id = o.event_id WHERE o.status='acknowledged' "
+                    "AND t.captured_at_ms < ? "
+                    "AND t.run_id NOT IN (SELECT run_id FROM local_runs "
+                    "  WHERE state IN ('active','scheduled')) "
+                    "AND t.run_id NOT IN (SELECT run_id FROM run_end_requests "
+                    "  ORDER BY rowid DESC LIMIT 1) "
+                    "ORDER BY o.rowid LIMIT ?",
+                    (captured_before_ms, limit),
+                )
+            ]
+            # Outbox first: it references the event (foreign keys are on).
+            tx.executemany("DELETE FROM outbox WHERE event_id=? AND status='acknowledged'", ids)
+            tx.executemany("DELETE FROM telemetry_events WHERE event_id=?", ids)
+        return len(ids)
 
     def outbox_counts(self) -> dict:
         counts = {"pending": 0, "acknowledged": 0, "rejected": 0}

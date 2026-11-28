@@ -54,6 +54,18 @@ export interface RunPart {
   nextRunSequence?: number;
 }
 
+export type StorageLevel = "unknown" | "ok" | "warning" | "critical";
+
+/** Free space and queue depth against their limits (device storage.py, docs/04 §8). */
+export interface StoragePart {
+  level: StorageLevel;
+  /** "reduced" while critical: one position per `reducedIntervalS`. */
+  recording: "normal" | "reduced";
+  reducedIntervalS: number;
+  disk: { level: StorageLevel; freeBytes: number | null; totalBytes?: number | null; warnFreeBytes: number; criticalFreeBytes: number; error?: string | null };
+  queue: { level: StorageLevel; pending: number | null; warnPending: number; criticalPending: number };
+}
+
 export interface RecorderPart {
   lastRecordedAtMs?: number | null;
   observationsThisBoot?: number;
@@ -145,6 +157,8 @@ export interface DeviceSnapshot {
   outbox: OutboxPart;
   run: RunPart | null;
   recorder?: RecorderPart;
+  /** Absent on older device software: no claim about space is made. */
+  storage?: StoragePart;
   /** Absent on device software that does not report motion: treated as unknown. */
   motion?: MotionPart;
   /** Absent on device software without driver unlock: treated as locked. */

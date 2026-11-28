@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from .storage import MB, StorageLimits
+
 log = logging.getLogger(__name__)
 
 DEFAULT_ENV_FILE = Path("/etc/itssb/device.env")
@@ -57,6 +59,9 @@ class Config:
     # unless "production". Missing means development, never production.
     environment: str = "development"
     driver_ui_dir: Path = DEFAULT_DRIVER_UI_DIR
+    # docs/04 §8 storage budget: warning and critical thresholds, the reduced
+    # cadence while critical, and how long acknowledged rows are kept.
+    storage_limits: StorageLimits = field(default_factory=StorageLimits)
 
     @property
     def upload_enabled(self) -> bool:
@@ -77,6 +82,15 @@ class Config:
             "serviceTimezone": self.service_timezone,
             "environment": self.environment,
             "driverUiDir": str(self.driver_ui_dir),
+            "storage": {
+                "warnFreeMb": self.storage_limits.warn_free_bytes // MB,
+                "criticalFreeMb": self.storage_limits.critical_free_bytes // MB,
+                "warnPending": self.storage_limits.warn_pending,
+                "criticalPending": self.storage_limits.critical_pending,
+                "reducedIntervalS": self.storage_limits.reduced_interval_s,
+                "acknowledgedRetentionHours": self.storage_limits.acknowledged_retention_ms
+                // 3_600_000,
+            },
         }
 
 
@@ -206,6 +220,37 @@ def _timezone(raw: str | None) -> str | None:
     return raw
 
 
+def _storage_limits(env: Mapping[str, str], publish_interval_s: float) -> StorageLimits:
+    d = StorageLimits()
+    warn_mb = _int(env, "ITSSB_STORAGE_WARN_FREE_MB", d.warn_free_bytes // MB, 1, 1_000_000)
+    crit_mb = _int(env, "ITSSB_STORAGE_CRITICAL_FREE_MB", d.critical_free_bytes // MB, 1, 1_000_000)
+    if crit_mb >= warn_mb:
+        raise ConfigError("ITSSB_STORAGE_CRITICAL_FREE_MB must be below ITSSB_STORAGE_WARN_FREE_MB")
+    warn_q = _int(env, "ITSSB_OUTBOX_WARN_PENDING", d.warn_pending, 1, 10_000_000)
+    crit_q = _int(env, "ITSSB_OUTBOX_CRITICAL_PENDING", d.critical_pending, 1, 10_000_000)
+    if crit_q <= warn_q:
+        raise ConfigError("ITSSB_OUTBOX_CRITICAL_PENDING must be above ITSSB_OUTBOX_WARN_PENDING")
+    reduced = _float(
+        env, "ITSSB_REDUCED_PUBLISH_INTERVAL_SECONDS", d.reduced_interval_s, 1.0, 3600.0
+    )
+    if reduced <= publish_interval_s:
+        raise ConfigError(
+            "ITSSB_REDUCED_PUBLISH_INTERVAL_SECONDS must be longer than "
+            "ITSSB_PUBLISH_INTERVAL_SECONDS"
+        )
+    hours = _int(
+        env, "ITSSB_ACKNOWLEDGED_RETENTION_HOURS", d.acknowledged_retention_ms // 3_600_000, 1, 8760
+    )
+    return StorageLimits(
+        warn_free_bytes=warn_mb * MB,
+        critical_free_bytes=crit_mb * MB,
+        warn_pending=warn_q,
+        critical_pending=crit_q,
+        reduced_interval_s=reduced,
+        acknowledged_retention_ms=hours * 3_600_000,
+    )
+
+
 def load_config(environ: Mapping[str, str] | None = None, env_file: Path | None = None) -> Config:
     """Builds and validates a Config. Process environment overrides the file."""
     environ = os.environ if environ is None else environ
@@ -227,13 +272,14 @@ def load_config(environ: Mapping[str, str] | None = None, env_file: Path | None 
     db_path = env.get("ITSSB_DATABASE_PATH") or "/var/lib/itssb/device.sqlite3"
     log_file = env.get("ITSSB_LOG_FILE") or None
 
+    publish_interval_s = _float(env, "ITSSB_PUBLISH_INTERVAL_SECONDS", 5.0, 1.0, 3600.0)
     return Config(
         database_path=Path(db_path),
         gpsd_host=env.get("ITSSB_GPSD_HOST") or "127.0.0.1",
         gpsd_port=_int(env, "ITSSB_GPSD_PORT", 2947, 1, 65535),
         local_api_host=local_host,
         local_api_port=_int(env, "ITSSB_LOCAL_API_PORT", 8765, 1, 65535),
-        publish_interval_s=_float(env, "ITSSB_PUBLISH_INTERVAL_SECONDS", 5.0, 1.0, 3600.0),
+        publish_interval_s=publish_interval_s,
         upload_interval_s=_float(env, "ITSSB_UPLOAD_INTERVAL_SECONDS", 5.0, 1.0, 3600.0),
         max_batch_events=_int(env, "ITSSB_MAX_BATCH_EVENTS", 50, 1, 50),
         max_batch_bytes=_int(env, "ITSSB_MAX_BATCH_BYTES", 128 * 1024, 1024, 128 * 1024),
@@ -246,4 +292,5 @@ def load_config(environ: Mapping[str, str] | None = None, env_file: Path | None 
         service_timezone=_timezone(env.get("ITSSB_SERVICE_TIMEZONE")),
         environment=_environment(env.get("ITSSB_ENVIRONMENT")),
         driver_ui_dir=Path(env.get("ITSSB_DRIVER_UI_DIR") or DEFAULT_DRIVER_UI_DIR),
+        storage_limits=_storage_limits(env, publish_interval_s),
     )

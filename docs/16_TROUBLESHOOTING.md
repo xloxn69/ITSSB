@@ -252,7 +252,19 @@ sudo du -sh /var/lib/itssb
 journalctl --disk-usage
 ~~~
 
-Pause nonessential logging/recording according to the operational policy and diagnose what is growing. Clean only acknowledged or expired data using the application retention rules. Do not delete the active SQLite database, its WAL file, or pending records as routine cleanup.
+First read what the device measured. The driver screen's **Recording** chip shows "Space low" or "Queue long" at warning and "Saving less" at critical, and the local health has the numbers:
+
+~~~bash
+curl -s http://127.0.0.1:8765/health | python3 -m json.tool | sed -n '/"storage"/,$p'
+~~~
+
+`storage.disk.freeBytes` against `warnFreeBytes`/`criticalFreeBytes`, `storage.queue.pending` against its limits, `storage.recording` (`normal` or `reduced`), and `storage.lastCleanup` (when acknowledged rows were last removed and how many).
+
+- **Queue long, disk fine:** uploads are not getting through. Fix the network or server problem (sections on the school server and internet); the queue drains on its own, newest first. Do not delete pending rows.
+- **Disk low:** the service already drops acknowledged rows outside the active and last-ended runs, which stops the database from growing but does not raise free space. Find what else is growing with the commands above (journald and other logs are the usual cause), and free that.
+- **Recording reduced:** the bus saves one position per `ITSSB_REDUCED_PUBLISH_INTERVAL_SECONDS` (60 s by default) until space returns or the queue drops below critical. It returns to normal by itself; no restart is needed.
+
+The thresholds and the full policy are in [04_RASPBERRY_PI_SOFTWARE.md §8](04_RASPBERRY_PI_SOFTWARE.md#8-database-durability-and-bounded-storage). Clean only acknowledged or expired data using the application retention rules. Do not delete the active SQLite database, its WAL file, or pending records as routine cleanup, and do not run `VACUUM` on a nearly full disk.
 
 If corruption is suspected, preserve the affected files and use the recovery procedure on a copy. Supported SQLite backup methods are preferable to copying only the live main database file. [SQLite backup documentation](https://www.sqlite.org/backup.html)
 

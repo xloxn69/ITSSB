@@ -7,6 +7,10 @@ row in one transaction. A silent receiver therefore produces no new
 observations: we never re-save an old fix as if it were new.
 
 With no active run nothing is recorded (no off-duty tracking).
+
+Storage is measured first on every tick (storage.py). While it is critical,
+a fix is saved only if it was captured at least `reduced_interval_s` after the
+run's newest saved one; already-queued rows are never touched.
 """
 
 from __future__ import annotations
@@ -19,6 +23,7 @@ from collections.abc import Callable
 from .database import Database, RunNotActive
 from .gps_reader import LatestFixHolder
 from .status import GPS_FRESH_S, MAX_FUTURE_SKEW_MS, StatusBoard, wall_ms
+from .storage import StorageGuard
 
 log = logging.getLogger(__name__)
 
@@ -32,8 +37,10 @@ class Recorder:
         boot_id: str,
         monotonic: Callable[[], float] = time.monotonic,
         now_ms: Callable[[], int] = wall_ms,
+        storage: StorageGuard | None = None,
     ) -> None:
         self.db, self.board, self.latest, self.boot_id = db, board, latest, boot_id
+        self.storage = storage
         self._mono = monotonic
         self._now_ms = now_ms
         self.sequence = 0  # per bootId; resets only with a new bootId
@@ -48,13 +55,22 @@ class Recorder:
             log.info("no active run; recording paused")
         self._last_run = run["runId"] if run else None
 
+        # Measured before saving, so health shows the cause even when the
+        # save itself then fails on a full disk.
+        reduced_ms: int | None = None
+        if self.storage is not None:
+            state = self.storage.check(self.db, self._now_ms())
+            self.board.storage(state)
+            if state["recording"] == "reduced":
+                reduced_ms = int(state["reducedIntervalS"] * 1000)
+
         saved = False
         if run:
-            saved = self._maybe_record(run["runId"])
+            saved = self._maybe_record(run["runId"], reduced_ms)
         self.refresh_status()
         return saved
 
-    def _maybe_record(self, run_id: str) -> bool:
+    def _maybe_record(self, run_id: str, reduced_ms: int | None = None) -> bool:
         latest = self.latest.get()
         if latest is None or self._mono() - latest.received_mono > GPS_FRESH_S:
             return False
@@ -64,6 +80,12 @@ class Recorder:
         last = self.db.last_captured_at_ms(run_id, at_most=now + MAX_FUTURE_SKEW_MS)
         if last is not None and latest.fix.captured_at_ms <= last:
             return False  # same measurement epoch (or older) already saved
+        if (
+            reduced_ms is not None
+            and last is not None
+            and latest.fix.captured_at_ms - last < reduced_ms
+        ):
+            return False  # storage critical: slower cadence, nothing queued is dropped
         try:
             event = self.db.record_observation(run_id, latest.fix, self.boot_id, self.sequence)
         except RunNotActive:
