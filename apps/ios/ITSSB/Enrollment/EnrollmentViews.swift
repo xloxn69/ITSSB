@@ -3,25 +3,40 @@ import SwiftUI
 
 /// Screens reachable from My Route. Raw values double as DEBUG screenshot launch names.
 enum FamilyScreen: String, Hashable, Sendable {
-    case join, link, checkIn, requests
+    case myRoute, join, link, checkIn, requests
     #if DEBUG
     case joinForm, joinSent, joinRefused, joinUnconfirmed, joinExpired, linkSent, checkInRoute, checkInAccepted
     #endif
 }
 
-/// My Route: join a route, link a student, check in, and request status (docs/06 I05–I08, I11, I17–I18).
+/// My Route: the approved route and stop (I13–I14), join a route, link a student, check in,
+/// and request status (docs/06 I05–I08, I11, I17–I18).
 struct FamilyActionsView: View {
     let source: any EnrollmentSource
+    /// Route geometry for I13. Nil only in previews that don't need it.
+    var tracking: (any LiveRunSource)?
     @State private var path: [FamilyScreen]
 
-    init(source: any EnrollmentSource, initialScreen: FamilyScreen? = nil) {
+    init(source: any EnrollmentSource, tracking: (any LiveRunSource)? = nil, initialScreen: FamilyScreen? = nil) {
         self.source = source
-        _path = State(initialValue: initialScreen.map { [$0] } ?? [])
+        self.tracking = tracking
+        var initial = initialScreen.map { [$0] } ?? []
+        #if DEBUG
+        if ["myRoute", "stop"].contains(DebugLaunch.opens) { initial = [.myRoute] }
+        #endif
+        _path = State(initialValue: initial)
     }
 
     var body: some View {
         NavigationStack(path: $path) {
             List {
+                if tracking != nil {
+                    Section {
+                        NavigationLink(value: FamilyScreen.myRoute) {
+                            Label("My route and stop", systemImage: "map")
+                        }
+                    }
+                }
                 Section {
                     NavigationLink(value: FamilyScreen.join) { Label("Join a route", systemImage: "bus.doubledecker") }
                     NavigationLink(value: FamilyScreen.link) { Label("Link a student", systemImage: "person.2") }
@@ -39,6 +54,8 @@ struct FamilyActionsView: View {
 
     @ViewBuilder private func destination(_ screen: FamilyScreen) -> some View {
         switch screen {
+        case .myRoute:
+            if let tracking { MyRouteView(source: tracking) }
         case .join: JoinRouteView(model: JoinRouteViewModel(source: source))
         case .link: LinkStudentView(model: LinkStudentViewModel(source: source))
         case .checkIn: CheckInListView(source: source)

@@ -10,6 +10,8 @@ struct TrackView: View {
     /// Called once the requested assignment has been handed to the model.
     var onOpened: () -> Void = {}
     let onSignIn: () -> Void
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var foreground = ForegroundRefresh()
 
     init(source: any LiveRunSource, openAssignmentId: String? = nil, onOpened: @escaping () -> Void = {},
          onSignIn: @escaping () -> Void = {}) {
@@ -25,6 +27,9 @@ struct TrackView: View {
             .background(AppColors.background)
             .onAppear { model.start() }
             .onDisappear { model.stop() }
+            .onChange(of: scenePhase) { _, phase in
+                if foreground.shouldRefresh(on: phase) { Task { await model.resumeFromBackground() } }
+            }
             // Also runs on first appearance, so a tap that cold-launched the app is kept.
             .task(id: openAssignmentId) {
                 guard let id = openAssignmentId else { return }

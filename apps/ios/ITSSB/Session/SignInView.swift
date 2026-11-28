@@ -174,18 +174,28 @@ private struct AppleSignInButton: UIViewRepresentable {
     }
 }
 
-/// I22 (first part): who is signed in, and sign out.
+/// I22 (first part): who is signed in, display settings (I24), and sign out.
+/// Delete account is not built yet (docs/06 §13).
 struct AccountView: View {
     let session: SessionStore
     @State private var confirmingSignOut = false
+    @State private var path: [AccountScreen] = AccountView.initialPath
+
+    enum AccountScreen: Hashable { case display }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 Section("Signed in as") {
                     Text(session.accountLabel ?? "Your account")
                         .font(AppFonts.body)
                         .foregroundStyle(AppColors.textPrimary)
+                }
+                Section {
+                    NavigationLink(value: AccountScreen.display) {
+                        Label("Display and accessibility", systemImage: "textformat.size")
+                    }
+                    .font(AppFonts.body)
                 }
                 Section("This build") {
                     EnvironmentBadge()
@@ -203,10 +213,22 @@ struct AccountView: View {
                 }
             }
             .navigationTitle("Account")
+            .navigationDestination(for: AccountScreen.self) { _ in DisplaySettingsView() }
             .confirmationDialog("Sign out of ITSSB?", isPresented: $confirmingSignOut, titleVisibility: .visible) {
                 Button("Sign out", role: .destructive) { Task { await session.signOut() } }
             }
         }
+    }
+}
+
+extension AccountView {
+    /// `-ITSSBOpen display` opens I24 directly, for screenshots.
+    static var initialPath: [AccountScreen] {
+        #if DEBUG
+        DebugLaunch.opens == "display" ? [.display] : []
+        #else
+        []
+        #endif
     }
 }
 
@@ -216,9 +238,11 @@ private func authPreview(_ scenario: PreviewAuthScenario) -> some View {
     let session = SessionStore(auth: PreviewAuthSession(configured: scenario != .notConfigured))
     scenario.apply(to: session)
     return AppRootView(session: session, source: PreviewLiveRunSource(scenario: .live),
-                       notifications: PreviewNotificationSource(), initialTab: scenario == .account ? .account : .track)
+                       notifications: PreviewNotificationSource(), initialTab: scenario == .account ? .account : .track,
+                       showsWelcome: scenario == .welcome)
 }
 
+#Preview("Welcome") { authPreview(.welcome) }
 #Preview("Email") { authPreview(.email) }
 #Preview("Email invalid") { authPreview(.emailInvalid) }
 #Preview("Sending") { authPreview(.sending) }

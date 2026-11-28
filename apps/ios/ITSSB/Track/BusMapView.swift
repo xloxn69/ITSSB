@@ -17,6 +17,8 @@ struct BusMapView: View {
     /// Transient camera state belongs to the map (docs/06 §6).
     @State private var camera: MapCameraPosition = .automatic
     @State private var following = false
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @AppStorage(DisplayPreferenceKey.reduceMapMotion) private var appReduceMotion = false
 
     var body: some View {
         Map(position: $camera) {
@@ -45,7 +47,11 @@ struct BusMapView: View {
             if let bus, !following {
                 Button {
                     following = true
-                    withAnimation { camera = .camera(MapCamera(centerCoordinate: bus.location, distance: 1500)) }
+                    let motion = MapMotion.followTransaction(systemReduceMotion: systemReduceMotion,
+                                                             appReduceMotion: appReduceMotion)
+                    withTransaction(motion) {
+                        camera = .camera(MapCamera(centerCoordinate: bus.location, distance: 1500))
+                    }
                 } label: {
                     Label("Follow bus", systemImage: "location.north.line.fill")
                         .font(AppFonts.callout)

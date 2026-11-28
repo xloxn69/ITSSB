@@ -42,10 +42,49 @@ struct CheckInListView: View {
     }
 }
 
+/// What the scan button can do, from the camera's authorization (docs/13 §7).
+/// A denied camera never leads to a blank scanner sheet.
+enum CameraAccess: Equatable {
+    case ready
+    /// iOS hasn't asked yet; the scan button asks first.
+    case needsRequest
+    /// Denied by the person or restricted on this iPhone: explain, link to Settings.
+    case denied
+    /// No camera (for example the simulator): typed code only.
+    case unavailable
+
+    static func from(_ status: AVAuthorizationStatus, hasCamera: Bool) -> CameraAccess {
+        switch status {
+        case .denied, .restricted: return .denied
+        case _ where !hasCamera: return .unavailable
+        case .authorized: return .ready
+        case .notDetermined: return .needsRequest
+        @unknown default: return .denied
+        }
+    }
+}
+
+/// The camera's permission, injectable so previews and tests never touch the real one.
+struct CameraPermission: Sendable {
+    var status: @Sendable () -> AVAuthorizationStatus
+    var hasCamera: @Sendable () -> Bool
+    var request: @Sendable () async -> Bool
+
+    static let system = CameraPermission(
+        status: { AVCaptureDevice.authorizationStatus(for: .video) },
+        hasCamera: { AVCaptureDevice.default(for: .video) != nil },
+        request: { await AVCaptureDevice.requestAccess(for: .video) })
+
+    var access: CameraAccess { CameraAccess.from(status(), hasCamera: hasCamera()) }
+}
+
 /// I17 → I18 for one route.
 struct CheckInView: View {
     @State var model: CheckInViewModel
+    var camera: CameraPermission = .system
     @State private var scanning = false
+    @State private var cameraAccess: CameraAccess?
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Form {
@@ -66,6 +105,16 @@ struct CheckInView: View {
         }
         .navigationTitle(model.assignment.routeLabel)
         .task { await model.watch() }
+        .onAppear { cameraAccess = camera.access }
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            // Leaving the app stops the camera (docs/06 §10).
+            case .background: scanning = false
+            // Back from Settings: the camera choice may have changed.
+            case .active: cameraAccess = camera.access
+            default: break
+            }
+        }
         .sheet(isPresented: $scanning) {
             QRScannerView { text in
                 scanning = false
@@ -73,6 +122,15 @@ struct CheckInView: View {
             }
             .ignoresSafeArea()
         }
+    }
+
+    /// Asks iOS first if it hasn't asked yet; opens the scanner only with access.
+    private func openScanner() async {
+        if cameraAccess == .needsRequest {
+            _ = await camera.request()
+            cameraAccess = camera.access
+        }
+        if cameraAccess == .ready { scanning = true }
     }
 
     private func recordedSection(_ record: CheckInRecord) -> some View {
@@ -94,12 +152,26 @@ struct CheckInView: View {
 
     @ViewBuilder private var scanSection: some View {
         Section {
-            if QRScannerView.isAvailable {
-                Button("Scan the code on the bus") { scanning = true }
+            switch cameraAccess {
+            case .ready, .needsRequest:
+                Button("Scan the code on the bus") { Task { await openScanner() } }
                     .buttonStyle(.borderedProminent)
                     .tint(AppColors.brand)
                     .foregroundStyle(AppColors.onBrand)
                     .disabled(model.sending)
+            case .denied:
+                VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                    Text("Camera access is off for ITSSB, so the code can't be scanned. "
+                         + "Type the code below, or turn on the camera in Settings.")
+                        .font(AppFonts.callout)
+                        .foregroundStyle(AppColors.textPrimary)
+                    Button("Open Settings") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                    }
+                    .font(AppFonts.callout)
+                }
+            case .unavailable, nil:
+                EmptyView()
             }
             TextField("Or type the check-in code", text: $model.codeText)
                 .textInputAutocapitalization(.characters)
@@ -124,8 +196,6 @@ struct CheckInView: View {
 /// repeated submits from repeated frames).
 struct QRScannerView: UIViewControllerRepresentable {
     let onCode: (String) -> Void
-
-    static var isAvailable: Bool { AVCaptureDevice.default(for: .video) != nil }
 
     func makeUIViewController(context: Context) -> ScannerController {
         let controller = ScannerController()
@@ -156,6 +226,14 @@ struct QRScannerView: UIViewControllerRepresentable {
             view.layer.addSublayer(preview)
             let session = session
             DispatchQueue.global(qos: .userInitiated).async { session.startRunning() }
+            // Never keep the camera running behind a backgrounded app (docs/06 §10).
+            NotificationCenter.default.addObserver(self, selector: #selector(stopCapture),
+                                                   name: UIApplication.didEnterBackgroundNotification, object: nil)
+        }
+
+        @objc private func stopCapture() {
+            let session = session
+            DispatchQueue.global(qos: .userInitiated).async { session.stopRunning() }
         }
 
         override func viewWillDisappear(_ animated: Bool) {

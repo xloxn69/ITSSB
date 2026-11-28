@@ -314,3 +314,71 @@ extension TrackViewModelTests {
         XCTAssertEqual(model.selectedAssignmentId, "a_jordan")
     }
 }
+
+/// docs/13 §7 foreground refresh.
+extension TrackViewModelTests {
+    /// docs/13 §7 foreground refresh: server time is re-measured, then tracking
+    /// resubscribes, and a guardian's selected student stays selected.
+    func testResumeFromBackgroundReverifiesAndResubscribesKeepingSelection() async {
+        let source = MockLiveRunSource()
+        let model = await started(source)
+        source.assignmentsContinuation?.yield(.ready([alex, jordan]))
+        _ = await eventually { source.runContinuation("a_alex") != nil }
+        model.select(assignmentId: "a_jordan")
+        _ = await eventually { source.runContinuation("a_jordan") != nil }
+
+        await model.resumeFromBackground()
+        XCTAssertEqual(source.reverifyCount, 1)
+        let resubscribed = await eventually { source.assignmentSubscriptionCount == 2 }
+        XCTAssertTrue(resubscribed, "assignments are subscribed again")
+        source.assignmentsContinuation?.yield(.ready([alex, jordan]))
+        let kept = await eventually { model.selectedAssignmentId == "a_jordan" }
+        XCTAssertTrue(kept, "the selected student survives the refresh")
+    }
+
+    /// Review P2: a notification tap during the refresh's wait wins over the saved selection.
+    func testResumeKeepsASelectionMadeWhileItWaited() async {
+        let source = MockLiveRunSource()
+        source.holdsReverify = true
+        let model = await started(source)
+        source.assignmentsContinuation?.yield(.ready([alex, jordan]))
+        _ = await eventually { model.selectedAssignmentId == "a_alex" }
+
+        let resume = Task { await model.resumeFromBackground() }
+        _ = await eventually { source.heldReverifies == 1 }
+        model.open(assignmentId: "a_jordan")
+        XCTAssertEqual(model.selectedAssignmentId, "a_jordan")
+        source.releaseReverify()
+        await resume.value
+
+        _ = await eventually { source.assignmentSubscriptionCount == 2 }
+        source.assignmentsContinuation?.yield(.ready([alex, jordan]))
+        let kept = await eventually { model.selectedAssignmentId == "a_jordan" }
+        XCTAssertTrue(kept, "the refresh doesn't switch back to the earlier student")
+    }
+
+    func testAnObsoleteRefreshDoesNotRestart() async {
+        let source = MockLiveRunSource()
+        source.holdsReverify = true
+        let model = await started(source)
+        let resume = Task { await model.resumeFromBackground() }
+        _ = await eventually { source.heldReverifies == 1 }
+        model.retry()
+        let retried = await eventually { source.assignmentSubscriptionCount == 2 }
+        XCTAssertTrue(retried)
+        source.releaseReverify()
+        await resume.value
+        // start() subscribes from a task, so give an unwanted restart time to show up.
+        let restartedAgain = await eventually(timeout: 0.3) { source.assignmentSubscriptionCount > 2 }
+        XCTAssertFalse(restartedAgain, "the refresh started before the retry is dropped")
+    }
+
+    func testResumeWhileStoppedDoesNothing() async {
+        let source = MockLiveRunSource()
+        let model = await started(source)
+        model.stop()
+        await model.resumeFromBackground()
+        XCTAssertEqual(source.reverifyCount, 0)
+        XCTAssertEqual(source.assignmentSubscriptionCount, 1, "a hidden Track tab isn't restarted")
+    }
+}

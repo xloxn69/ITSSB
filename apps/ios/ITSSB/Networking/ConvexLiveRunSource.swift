@@ -51,6 +51,10 @@ struct ConvexLiveRunSource: LiveRunSource {
         client.connectionStates()
     }
 
+    func reverifyServerTime() async {
+        await serverTime.reverify()
+    }
+
     func assignments() -> AsyncThrowingStream<AssignmentsSnapshot, Error> {
         mapErrors(client.subscribe("tracking:myAssignments", args: [:], as: MyAssignmentsDTO.self) {
             try DomainMapping.assignments(from: $0)
@@ -138,6 +142,8 @@ actor ServerTimeService {
     private let now: @Sendable () -> Date
     private var clock: ServerClock?
     private var inFlight = false
+    /// Bumped by `reverify()`, so a request sent before it can't restore an old measurement.
+    private var epoch = 0
     private var waiters: [UUID: @Sendable (ServerClock) -> Void] = [:]
     /// Streams that ended before their registration arrived; their late `register` is refused.
     private var ended: Set<UUID> = []
@@ -162,6 +168,13 @@ actor ServerTimeService {
         return nil
     }
 
+    /// Forgets the verified time (the app came back from the background, where the
+    /// phone may have slept or its clock changed). The next registration measures again.
+    func reverify() {
+        clock = nil
+        epoch += 1
+    }
+
     func setRetryDelay(_ delay: Duration) {
         retryDelay = delay
     }
@@ -172,13 +185,14 @@ actor ServerTimeService {
         requestCount += 1
         let client = client
         let now = now
+        let sentEpoch = epoch
         Task { [weak self] in
             if let delay { try? await Task.sleep(for: delay) }
             let sentAt = ContinuousClock.now
             let clock = try? await client.mutation("tracking:serverTime", as: ServerTimeDTO.self) {
                 try DomainMapping.verifiedClock(from: $0, sentAt: sentAt, receivedAt: .now, receivedWallTime: now())
             }
-            await self?.finish(clock)
+            await self?.finish(clock, epoch: sentEpoch)
         }
     }
 
@@ -186,8 +200,13 @@ actor ServerTimeService {
         if waiters.removeValue(forKey: id) == nil { ended.insert(id) }
     }
 
-    private func finish(_ result: ServerClock?) {
+    private func finish(_ result: ServerClock?, epoch sentEpoch: Int) {
         inFlight = false
+        guard sentEpoch == epoch else {
+            // Measured before `reverify()`: discard it and measure again for anyone waiting.
+            if !waiters.isEmpty { request(after: nil) }
+            return
+        }
         guard let result else {
             // Failed: waiters stay unverified (never fresh). Retry while anyone still needs it.
             if !waiters.isEmpty { request(after: retryDelay) }

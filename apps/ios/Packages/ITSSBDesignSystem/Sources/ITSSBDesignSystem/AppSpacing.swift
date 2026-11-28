@@ -16,6 +16,8 @@ public enum AppSpacing {
     public static let routeLine: CGFloat = 5
     /// Minimum tappable size (Apple HIG).
     public static let touchTarget: CGFloat = 44
+    /// Height of a small, non-interactive map inside a list (My route, stop details).
+    public static let mapPreview: CGFloat = 240
 }
 
 /// Corner radius scale. Use these instead of numeric radii (lint-enforced).

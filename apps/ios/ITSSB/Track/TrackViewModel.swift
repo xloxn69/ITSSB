@@ -55,6 +55,7 @@ final class TrackViewModel {
 
     /// Starts (or restarts) the assignment and tracking subscriptions.
     func start() {
+        lifecycleCount += 1
         cancelSubscriptions()
         state = .loading
         assignmentsTask = Task { await observeAssignments() }
@@ -65,6 +66,7 @@ final class TrackViewModel {
     /// starting state: after sign-out nothing of this account (assignments, run,
     /// route, a pending notification tap) is left for the next (docs/13 §5 A10).
     func stop() {
+        lifecycleCount += 1
         cancelSubscriptions()
         pendingAssignmentId = nil
         state = .loading
@@ -84,6 +86,23 @@ final class TrackViewModel {
     func retry() {
         start()
     }
+
+    /// Back from the background (docs/06 §12): measure server time again, then
+    /// resubscribe, keeping the selected student. Does nothing while Track is stopped.
+    func resumeFromBackground() async {
+        guard assignmentsTask != nil else { return }
+        let lifecycle = lifecycleCount
+        await source.reverifyServerTime()
+        // Stopped, restarted, or another refresh won while this one waited: it is obsolete.
+        guard assignmentsTask != nil, lifecycle == lifecycleCount else { return }
+        // Read after the wait, so a notification tap made meanwhile isn't undone.
+        let keep = pendingAssignmentId ?? selectedAssignmentId
+        start()
+        pendingAssignmentId = keep
+    }
+
+    /// Bumped by every start and stop.
+    private var lifecycleCount = 0
 
     /// An assignment a tapped notification asked for, kept until assignments load.
     private(set) var pendingAssignmentId: String?

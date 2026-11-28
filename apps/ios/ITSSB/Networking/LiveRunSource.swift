@@ -16,6 +16,9 @@ protocol LiveRunSource: Sendable {
     /// quiet, so this is the only way to tell "my phone is offline" from
     /// "the bus stopped reporting" (docs/06 I25).
     func connection() -> AsyncStream<Bool>
+    /// Drops the verified server time so the next run subscription measures it
+    /// again (docs/06 §12: foreground refresh). Await it before resubscribing.
+    func reverifyServerTime() async
 }
 
 extension LiveRunSource {
@@ -23,6 +26,9 @@ extension LiveRunSource {
     func connection() -> AsyncStream<Bool> {
         AsyncStream { $0.yield(true) }
     }
+
+    /// Sources without a server clock have nothing to re-measure.
+    func reverifyServerTime() async {}
 }
 
 /// Failures a source reports. Each maps to a distinct screen: an expired

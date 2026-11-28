@@ -12,6 +12,8 @@ struct AppEnvironment {
     /// Nil without sign-in and in fixture mode: screenshots never touch OS notification settings.
     var registrar: PushRegistrar?
     var initialTab: AppTab = .track
+    /// I01 Welcome before sign-in. Off only for sign-in screenshot scenarios.
+    var showsWelcome = true
     /// Join a route, link a student, check in (docs/09). Nil only in previews that don't need it.
     var enrollment: (any EnrollmentSource)?
     #if DEBUG
@@ -91,7 +93,7 @@ struct AppEnvironment {
             auth.apply(to: session)
             return AppEnvironment(session: session, source: PreviewLiveRunSource(scenario: .live),
                                   notifications: PreviewNotificationSource(scenario: .live),
-                                  initialTab: auth == .account ? .account : .track)
+                                  initialTab: auth == .account ? .account : .track, showsWelcome: auth == .welcome)
         }
         if let scenario = scenario(from: arguments) {
             // `-ITSSBTab alerts` opens on the Alerts tab, for screenshots.
@@ -152,6 +154,7 @@ final class PreviewAuthSession: AuthSession {
 
 /// Each sign-in screen state, for previews and `-ITSSBAuthScenario` screenshots.
 enum PreviewAuthScenario: String, CaseIterable {
+    case welcome
     case notConfigured
     case restoring
     case restoreFailed
@@ -170,7 +173,7 @@ enum PreviewAuthScenario: String, CaseIterable {
         case .notConfigured: session.preset(state: .signedOut(.signInUnavailable))
         case .restoring: session.preset(state: .restoring)
         case .restoreFailed: session.preset(state: .restoreFailed)
-        case .email: session.preset(state: .signedOut(.notSignedIn))
+        case .welcome, .email: session.preset(state: .signedOut(.notSignedIn))
         case .emailInvalid: session.preset(state: .signedOut(.notSignedIn), message: .invalidEmail)
         case .sending: session.preset(state: .signedOut(.notSignedIn), isWorking: true)
         case .code: session.preset(state: .signedOut(.notSignedIn), step: code, resendIn: 24)

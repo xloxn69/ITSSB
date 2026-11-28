@@ -51,7 +51,12 @@ for APPEARANCE in ${ITSSB_APPEARANCES:-light dark}; do
   # The Alerts tab: preference on with one inbox entry, and the default (off, empty).
   shoot alertsTab -ITSSBScenario alerts -ITSSBTab alerts
   shoot alertsTabEmpty -ITSSBScenario live -ITSSBTab alerts
-  for auth in notConfigured restoring restoreFailed email emailInvalid sending code codeWrong \
+  # I21 alert details (a newer estimate exists), I13 route, I14 stop, I24 display.
+  shoot alertDetail -ITSSBScenario alerts -ITSSBTab alerts -ITSSBOpen alert
+  shoot myRoute -ITSSBEnrollmentScreen home -ITSSBOpen myRoute
+  shoot stopDetails -ITSSBEnrollmentScreen home -ITSSBOpen stop
+  shoot display -ITSSBAuthScenario account -ITSSBOpen display
+  for auth in welcome notConfigured restoring restoreFailed email emailInvalid sending code codeWrong \
               trackingRejected account; do
     shoot "auth-$auth" -ITSSBAuthScenario "$auth"
   done
@@ -62,6 +67,7 @@ for APPEARANCE in ${ITSSB_APPEARANCES:-light dark}; do
   shoot enroll-joinUnconfirmed -ITSSBEnrollmentScreen joinUnconfirmed -ITSSBEnrollmentVariant offline
   shoot enroll-checkInDone -ITSSBEnrollmentScreen checkInRoute -ITSSBEnrollmentVariant recorded
   shoot enroll-checkInNoTrip -ITSSBEnrollmentScreen checkInRoute -ITSSBEnrollmentVariant noTrip
+  shoot enroll-checkInCameraDenied -ITSSBEnrollmentScreen checkInRoute -ITSSBEnrollmentVariant cameraDenied
   shoot enroll-checkInGuardian -ITSSBEnrollmentScreen checkIn -ITSSBEnrollmentVariant guardian
   shoot enroll-requestsEmpty -ITSSBEnrollmentScreen requests -ITSSBEnrollmentVariant empty
   shoot enroll-home -ITSSBEnrollmentScreen home
