@@ -124,7 +124,8 @@ The page grouping and school workflow above are recommended product design choic
 - **Service calendar (`#/staff/calendar`).** No-service days and late starts (1 to 240 minutes) with a notice for families, one entry per date, today and later only. Family apps show today's notice on the trip screen (docs/08 §8 `serviceNotice`) until that day ends. The calendar applies to every route.
 - **Cancellation and replacement.** On an active run: cancel with a required reason, or cancel and send a free, non-revoked bus. The replacement driver starts the same approved route normally; that start is linked to the cancelled run (`replacesRunId` / `replacedByRunId`). A cancelled run stops accepting positions, and the old bus's Pi ends it locally and shows the driver "Run cancelled by the school" ([04 §10](04_RASPBERRY_PI_SOFTWARE.md#10-trip-lifecycle)). Family apps show "Trip cancelled" for the rest of that service day, with fixed wording and never the staff reason; with a replacement sent, they add that the school is sending a replacement bus, and they track it once it starts (docs/08 §8 `endedRun`).
 - **Maintenance windows.** Per device, at most 12 hours, no overlaps, not starting now on a bus that is running. The Pi update tool independently refuses to switch during an active run.
-- **Not built yet:** enrollment, guardian linking, alerts, check-in, and organization scoping.
+- **Also built:** staff enrollment, guardian links, invitations, students, attendance and audit pages (#39), and the family pages to join a route, link a student, check in and see request status (#42); the alerts inbox and arrival estimate (#45).
+- **Not built:** organization scoping. V1 serves one organization by decision (`lib/staff.ts`), so staff see every run.
 
 Every page shows a **Development** or **Staging** badge unless built with `VITE_ITSSB_ENVIRONMENT=production`; hovering it shows the release and commit ([release runbook](runbooks/release.md)).
 
