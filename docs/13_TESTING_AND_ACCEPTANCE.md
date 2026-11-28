@@ -123,13 +123,13 @@ Avoid invented universal pass limits. Agree on pilot targets from the actual ser
 
 ## 11. Evidence and release gates
 
-| Gate | Minimum evidence |
-|---|---|
-| Bench demo | Hardware checks, real GPS-to-phone path, correct account access, visible freshness |
-| Resilient prototype | Retry/outage/restart cases, independent GPS/network failures, stable run identity |
-| Feature-complete V1 | Enrollment, guardian, roster, QR, removal, correction, all named states, alert handling |
-| Authorized pilot | Approved installation/power/connectivity and data process, recovery/support ownership, measured behavior |
-| Broader deployment | Representative pilot evidence, capacity evaluation, restore/rollback rehearsal, supported device matrix |
+| Gate | Minimum evidence | Status (2026-11-28) |
+|---|---|---|
+| Bench demo | Hardware checks, real GPS-to-phone path, correct account access, visible freshness | **Not met (field).** Access and freshness are met: tests and the development rehearsal (#59). Still needed: H01–H06 on the real Pi and a real GPS fix to a real iPhone |
+| Resilient prototype | Retry/outage/restart cases, independent GPS/network failures, stable run identity | **Met in code and simulated drills** (§12). Owner runbook: real network pull, real GPSD stop, OS reboot |
+| Feature-complete V1 | Enrollment, guardian, roster, QR, removal, correction, all named states, alert handling | **Met in code except one owner decision.** Named states: iOS (#68, #71), driver (#74; D02 and D03 need the privileged installer). Delete account waits for the owner's record-retention decision. Camera, push and permissions still need a real iPhone |
+| Authorized pilot | Approved installation/power/connectivity and data process, recovery/support ownership, measured behavior | **Not started (owner, field).** Measurement fields exist (#73) |
+| Broader deployment | Representative pilot evidence, capacity evaluation, restore/rollback rehearsal, supported device matrix | **Not started.** Development restore rehearsed (Convex runbook) |
 
 For each executed case, record build versions, backend environment, fixture/run ID, date, expected result, observed result, and a concise evidence link. Mark blocked or unexecuted cases honestly. Keep screenshots/logs free of unnecessary real student information.
 
