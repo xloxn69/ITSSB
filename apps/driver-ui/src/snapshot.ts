@@ -118,6 +118,7 @@ export interface CapabilitiesPart {
   showQr?: Capability;
   showStudents?: Capability;
   submitRoute?: Capability;
+  reportDelay?: Capability;
 }
 
 /**
@@ -221,6 +222,8 @@ export interface DeviceSnapshot {
   lastEndedRun?: EndedRun | null;
   /** Waiting and recently rejected student changes; null while locked. Absent on older software. */
   studentChanges?: import("./students.js").StudentChanges | null;
+  /** This driver's recent delay reports and their sync state; null while locked. Absent on older software. */
+  runReports?: import("./stopViews.js").RunReport[] | null;
 }
 
 export interface EndedRun {

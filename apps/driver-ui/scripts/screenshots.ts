@@ -38,6 +38,12 @@ const STATES = [
   "review-rejected",
   "diagnostics-measured",
   "diagnostics-unavailable",
+  "stop-near",
+  "stop-far",
+  "stop-unknown",
+  "report-choose",
+  "report-pending",
+  "report-sent-refused",
 ];
 
 const outDir = process.argv[2] ?? "build/screenshots";
