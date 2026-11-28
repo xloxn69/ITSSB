@@ -52,6 +52,11 @@ const gapWarning: RouteCheck = {
   severity: "warning",
   message: "1 gap longer than 100 m in the recording.",
 };
+const gpsLost: RouteCheck = {
+  code: "gap_in_recording",
+  severity: "warning",
+  message: "GPS was lost 1 time while recording. The dashed line is not measured travel; check the road there.",
+};
 const noStops: RouteCheck = { code: "no_stops", severity: "blocking", message: "The route has no stops." };
 
 function stops(label: string, i: number) {
@@ -100,8 +105,9 @@ function initialState(variant: StaffVariant) {
       draftId: "demo_draft_009",
       label: "Route 9 Morning",
       path: shifted(0.004, -0.006),
+      gapBeforeIndexes: [2],
       stops: ["Birch & 2nd", "Cedar Park", "Elm Court"].map(stops).map((s) => ({ ...s, latitude: s.latitude + 0.004, longitude: s.longitude - 0.006 })),
-      checks: [],
+      checks: [gpsLost],
     }),
     draft({
       draftId: "demo_draft_017",

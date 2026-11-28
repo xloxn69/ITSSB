@@ -289,6 +289,8 @@ Types, limits and the shared validator: `packages/contracts/src/routeDrafts.ts`;
 
 **Rules.**
 - **Never approved here.** A stored draft is always `submitted` with no route version. Only staff approval (`routes:approveDraft`, §11) creates a route version, and new runs pin it.
+- **Credential rechecked at commit.** The submit and status functions recheck, in their own transaction, that the device is not revoked and its credential is still the one presented. A rotation or revocation landing mid-request refuses it with `401`.
+- **GPS gaps kept.** The indexes of points with `gapBefore: true` are stored with the draft. Staff review shows them as the `gap_in_recording` warning and a dashed, labelled segment (§11), whatever the distance.
 - **Idempotent.** The content is the recording itself, without the grant, `requestId` or `capturedAtMs`, compared by its SHA-256. The same `requestId`, or the same `deviceDraftId` with the same content, returns the stored draft (`already_submitted`). Different content under either one is rejected and never merged. Each device has its own drafts.
 - **Validated.** Coordinates must be on the globe. Point and stop times must fall within the recording (start and finish allow `MAX_FUTURE_SKEW_MS` for GPS-versus-wall-clock difference), the finish may not be in the future, and labels are 1–60 characters. Stops are not time-ordered: the driver may reorder them.
 - **Audited.** An accepted draft records the driver (from the grant), the carrying device and the capture time. A grant refusal is audited as denied.
@@ -298,7 +300,7 @@ Types, limits and the shared validator: `packages/contracts/src/routeDrafts.ts`;
   - `403` `GRANT_NOT_AUTHORIZED` (status read only).
   - `413` `BODY_TOO_LARGE`, `TOO_MANY_POINTS` or `TOO_MANY_STOPS`. The limits are explicit refusals, never truncation.
 
-**On the Pi.** Submit saves the exact body in SQLite with its `requestId` before sending. Retries resend the same bytes until the server answers. The draft shows "pending" until the server accepts it, and its stops are frozen once Submit is pressed. Review status is read with the unlocked driver's grant and shown with the time it was read (docs/05 D10–D11).
+**On the Pi.** Submit saves the exact body in SQLite with its `requestId` before sending. Retries resend the same bytes until the server answers. The draft shows "pending" until the server accepts it, and its stops are frozen once Submit is pressed. Review status is read with the unlocked driver's grant and shown with the time it was read (docs/05 D10–D11). Each read asks about at most 20 awaiting drafts, least recently checked first, so successive reads reach every draft.
 
 ## 8. Authorized live snapshot
 
@@ -505,7 +507,7 @@ The staff web calls these Convex functions. The Pi and the iOS app never do, so 
 | --- | --- | --- |
 | `routes:list` (query) | `{}` | `ready` with `routes` (`routeId`, `label`, `direction: "to_school" \| "from_school"`, `currentVersion` or `null`: `routeVersionId`, `versionNumber`, `approvedAtMs`, `approvedByName`, `effectiveFromMs`, `stopCount`). |
 | `routes:listDrafts` (query) | `{}` | `ready` with `drafts`: waiting drafts first, then recent decisions. Each has `draftId`, `routeId` (null for a new route), `label`, `direction`, `status: "submitted" \| "approved" \| "rejected"`, `submittedAtMs`, `pointCount`, `stopCount`, `reviewedAtMs`, `reviewerName`, `decisionReason`, `approvedVersionId`. |
-| `routes:getDraft` (query) | `{ draftId }` | `ready` with the draft summary plus `path`, ordered `stops` (`sequence`, `label`, `latitude`, `longitude`, `instructions`) and `checks`; or `not_found`. |
+| `routes:getDraft` (query) | `{ draftId }` | `ready` with the draft summary plus `path`, ordered `stops` (`sequence`, `label`, `latitude`, `longitude`, `instructions`), `gapBeforeIndexes` (indexes into `path` of points recorded after a GPS loss; the segment ending at each is not measured travel; empty when none or unknown) and `checks`; or `not_found`. |
 | `routes:approveDraft` (mutation) | `{ draftId }` | `approved` with `routeId`, `routeVersionId`, `versionNumber`; or `refused` with a `code` and `message`. |
 | `routes:rejectDraft` (mutation) | `{ draftId, reason }` | `rejected`, or `refused`. |
 | `fleet:listDevices` (query) | `{}` | `ready` with `devices` (`deviceId`, `label`, `busLabel`, `revoked`, `activeRun` or `null`: `runId`, `routeLabel`, `startedAtMs`; and `lastContactAtMs`). No credential or hash is ever returned. |
@@ -537,7 +539,7 @@ For a signed-in caller, every change writes an audit row: `allowed` when applied
 
 **Checks.** `checks` entries have a `code`, a `severity` (`blocking` or `warning`) and a `message`.
 - Blocking, which prevents approval: `too_few_points` (under 2), `too_many_points` (over 2000, `MAX_ROUTE_PATH_POINTS`), `invalid_coordinate`, `no_stops`.
-- Warnings, which the reviewer decides on: `path_gap` (consecutive points over 100 m apart, `ROUTE_GAP_WARNING_M`; maps draw straight lines between points, so a longer gap cuts across blocks) and `stop_off_path` (a stop over 150 m from every path point).
+- Warnings, which the reviewer decides on: `path_gap` (consecutive points over 100 m apart, `ROUTE_GAP_WARNING_M`; maps draw straight lines between points, so a longer gap cuts across blocks), `stop_off_path` (a stop over 150 m from every path point) and `gap_in_recording` (the Pi lost GPS while recording, with the count; the line across each loss is drawn dashed and is not measured travel, however short).
 
 **Approval and version pinning.**
 - Approval copies the draft into a new immutable `routeVersions` row and its ordered `stops`, and sets `routes.currentVersionId`.

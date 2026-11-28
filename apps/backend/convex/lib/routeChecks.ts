@@ -31,7 +31,11 @@ function validPoint(p: RoutePoint): boolean {
  * Review checks for a recorded draft (docs/12 §4). `blocking` checks prevent
  * approval; warnings are shown to the reviewer, who decides.
  */
-export function routeChecks(path: RoutePoint[], stops: (RoutePoint & { label: string })[]): RouteCheck[] {
+export function routeChecks(
+  path: RoutePoint[],
+  stops: (RoutePoint & { label: string })[],
+  gapBeforeIndexes: readonly number[] = [],
+): RouteCheck[] {
   const checks: RouteCheck[] = [];
   if (path.length < 2) {
     checks.push({ code: "too_few_points", severity: "blocking", message: "The path needs at least two points." });
@@ -59,6 +63,16 @@ export function routeChecks(path: RoutePoint[], stops: (RoutePoint & { label: st
       code: "path_gap",
       severity: "warning",
       message: `${gaps} gap${gaps === 1 ? "" : "s"} longer than ${ROUTE_GAP_WARNING_M} m in the recording.`,
+    });
+  }
+  // GPS lost while recording (flagged on the Pi), however short: the line
+  // across it is drawn, not measured, and must not pass as driven road.
+  const lost = new Set(gapBeforeIndexes.filter((i) => Number.isInteger(i) && i > 0 && i < path.length)).size;
+  if (lost > 0) {
+    checks.push({
+      code: "gap_in_recording",
+      severity: "warning",
+      message: `GPS was lost ${lost} time${lost === 1 ? "" : "s"} while recording. The dashed line${lost === 1 ? " is" : "s are"} not measured travel; check the road there.`,
     });
   }
   for (const stop of stops) {

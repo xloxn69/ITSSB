@@ -69,6 +69,8 @@ export const ROUTE_CHECK_CODES = [
   "no_stops",
   "path_gap",
   "stop_off_path",
+  /** The receiver lost the fix while recording; the line across it is not measured travel. */
+  "gap_in_recording",
 ] as const;
 export type RouteCheckCode = (typeof ROUTE_CHECK_CODES)[number];
 
@@ -88,6 +90,12 @@ export interface DraftStop extends RoutePoint {
 
 export interface DraftDetail extends DraftSummary {
   path: RoutePoint[];
+  /**
+   * Indexes into `path` of points recorded right after the receiver lost the
+   * fix: the segment ending at each is not measured travel. Empty when none
+   * or unknown (drafts recorded before device submission).
+   */
+  gapBeforeIndexes?: number[];
   stops: DraftStop[];
   checks: RouteCheck[];
 }

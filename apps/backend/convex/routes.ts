@@ -196,6 +196,7 @@ export const getDraft = query({
       draft: v.object({
         ...draftSummaryFields,
         path: v.array(point),
+        gapBeforeIndexes: v.optional(v.array(v.number())),
         stops: v.array(
           v.object({
             sequence: v.number(),
@@ -214,6 +215,7 @@ export const getDraft = query({
               v.literal("no_stops"),
               v.literal("path_gap"),
               v.literal("stop_off_path"),
+              v.literal("gap_in_recording"),
             ),
             severity: v.union(v.literal("blocking"), v.literal("warning")),
             message: v.string(),
@@ -233,6 +235,7 @@ export const getDraft = query({
     const detail: DraftDetail = {
       ...summarize(draft, await userName(ctx, draft.reviewedByUserId)),
       path: draft.path,
+      gapBeforeIndexes: draft.gapBeforeIndexes ?? [],
       stops: draft.stops.map((s, sequence) => ({
         sequence,
         label: s.label,
@@ -240,7 +243,7 @@ export const getDraft = query({
         longitude: s.longitude,
         instructions: s.instructions ?? null,
       })),
-      checks: routeChecks(draft.path, draft.stops),
+      checks: routeChecks(draft.path, draft.stops, draft.gapBeforeIndexes),
     };
     return { schemaVersion: SCHEMA_VERSION, status: "ready", serverNowMs: Date.now(), draft: detail };
   },

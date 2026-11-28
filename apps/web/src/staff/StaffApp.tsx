@@ -227,7 +227,10 @@ function DraftReview({ source, draft }: { source: StaffSource; draft: DraftDetai
       </header>
       <div className="track-grid">
         <section className="card">
-          <DraftDiagram path={draft.path} stops={draft.stops} label={draft.label} />
+          <DraftDiagram path={draft.path} stops={draft.stops} label={draft.label} gapBeforeIndexes={draft.gapBeforeIndexes ?? []} />
+          {(draft.gapBeforeIndexes?.length ?? 0) > 0 && (
+            <p className="muted small">Dashed: GPS was lost while recording. That stretch is not measured travel.</p>
+          )}
         </section>
         <div className="stack">
           <section className="card stack" aria-labelledby="checks">

@@ -56,6 +56,7 @@ p { margin: 0; }
   border-radius: var(--radius-md); }
 .route-line { fill: none; stroke: var(--color-text-secondary); stroke-width: 4; stroke-linecap: round;
   stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.route-line.gap { stroke: var(--color-status-aging); stroke-dasharray: 10 10; }
 .stop-pin { fill: var(--color-surface); stroke: var(--color-text-primary); stroke-width: 3; vector-effect: non-scaling-stroke; }
 .stop-number { fill: var(--color-text-primary); font-size: 22px; font-weight: 700; }
 .bus-pin { fill: var(--color-brand); stroke: var(--color-on-brand); stroke-width: 2; vector-effect: non-scaling-stroke; }
