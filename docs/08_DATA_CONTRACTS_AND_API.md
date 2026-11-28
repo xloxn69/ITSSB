@@ -227,7 +227,7 @@ During an outage, the Pi saves the action with its original grant reference and 
 
 ## 7. Device health
 
-**Endpoint:** `POST /device/v1/health`, with the same bearer device credential as telemetry. Types and validation live in `packages/contracts/src/health.ts`; the canonical fixtures are `fixtures/health.report.noFix.json` and `fixtures/health.accepted.json`.
+**Endpoint:** `POST /device/v1/health`, with the same bearer device credential as telemetry. Types and validation live in `packages/contracts/src/health.ts`; the canonical fixtures are `fixtures/health.report.withMetrics.json` (today's Pi), `fixtures/health.report.noFix.json` (a Pi from before the measurement fields) and `fixtures/health.accepted.json`. The iOS app does not decode this body (it reads `gpsStatus` from §8), so it has no Swift DTO.
 
 Health tells "online without a GPS fix" apart from "no device contact." The Pi sends one report every 30 seconds (`HEALTH_INTERVAL_MS`), independently of the telemetry outbox. A failed report is not retried or queued, and it never changes outbox rows or the upload pause.
 
@@ -241,7 +241,14 @@ Health tells "online without a GPS fix" apart from "no device contact." The Pi s
   "gpsStatus": "no_fix",
   "lastValidFixAtMs": 1795609025000,
   "pendingCount": 3,
-  "oldestPendingCapturedAtMs": 1795609020000
+  "oldestPendingCapturedAtMs": 1795609020000,
+  "uploadConsecutiveFailures": 2,
+  "uploadRetriesSinceStart": 17,
+  "lastUploadErrorClass": "http_503",
+  "processRssBytes": 42225664,
+  "memAvailableBytes": 1232457728,
+  "cpuTemperatureC": 48.3,
+  "databaseBytes": 3158016
 }
 ```
 
@@ -254,12 +261,20 @@ Health tells "online without a GPS fix" apart from "no device contact." The Pi s
 | `gpsStatus` | `valid`, `no_fix`, `receiver_missing`, or `unknown` (GPSD unreachable on the Pi). Never send fake coordinates to signal no fix. |
 | `lastValidFixAtMs` | Capture time of the last valid fix this process saw, or `null`. |
 | `pendingCount`, `oldestPendingCapturedAtMs` | Outbox rows not yet acknowledged, and the oldest one's capture time (or `null`). |
+| `uploadConsecutiveFailures` | Optional. Telemetry requests that failed in a row; `0` after a success. Non-negative integer. |
+| `uploadRetriesSinceStart` | Optional. Failed telemetry requests since the device software started (each is retried with the same `eventId`s). Resets on restart. |
+| `lastUploadErrorClass` | Optional. Class of the last failure, kept after recovery: an exception class name (`OSError`) or `http_NNN`, at most 40 characters of letters, digits and `_`; never a message, host or path. `null` when none since start. |
+| `processRssBytes`, `memAvailableBytes` | Optional. Resident memory of the device service (`/proc/self/status` VmRSS) and memory the kernel reports available (`/proc/meminfo` MemAvailable), in bytes; `null` when the device cannot read them. |
+| `cpuTemperatureC` | Optional. SoC temperature from `/sys/class/thermal/thermal_zone0/temp`, °C with one decimal, between −40 and 150; `null` when absent or unreadable. Never estimated or clamped. |
+| `databaseBytes` | Optional. SQLite database plus its write-ahead log, in bytes; `null` when it cannot be measured. |
+
+The measurement fields are optional and additive: a Pi from before them omits all of them and is still accepted, and a later report without them clears the stored values. Because unknown fields are refused, a Pi that sends them to an older backend gets 400 `INVALID_REQUEST`; it then resends the base report at once and sends only the base keys for 30 minutes before offering the full report again, so contact and GPS status keep landing. Deploy the backend first anyway.
 
 Unknown fields are refused. A health report never carries coordinates, secrets, student names or addresses. Bodies are at most 2 KB (`MAX_HEALTH_BODY_BYTES`).
 
 The answer is `200 { "schemaVersion": 1, "status": "accepted", "receivedAtMs", "serverNowMs" }`. Request errors use the §5 body: 400 `INVALID_REQUEST`, `MALFORMED_JSON` or `UNSUPPORTED_SCHEMA_VERSION`; 401 `UNAUTHENTICATED`, including a device revoked before the commit; 413 `BODY_TOO_LARGE`.
 
-The backend keeps the latest report per device and assigns `receivedAtMs`. A report older than the stored one from the same `bootId` (a delayed report, or the Pi clock stepping back) still counts as contact but does not replace the stored status. If no later report arrives within `POSITION_STALE_AFTER_MS`, the stored status becomes `unknown`. A missed heartbeat does not prove whether the cause is cellular service, device power, or software failure.
+The backend keeps the latest report per device and assigns `receivedAtMs`. The measurements are returned only to staff (`fleet:diagnostics`, §11); family queries read `gpsStatus` and contact time and nothing else from health. A report older than the stored one from the same `bootId` (a delayed report, or the Pi clock stepping back) still counts as contact but does not replace the stored status. If no later report arrives within `POSITION_STALE_AFTER_MS`, the stored status becomes `unknown`. A missed heartbeat does not prove whether the cause is cellular service, device power, or software failure.
 
 ### Configuration and driver sign-in
 
@@ -526,7 +541,7 @@ The staff web calls these Convex functions. The Pi and the iOS app never do, so 
 | `fleet:listDrivers` (query) | `{}` | `ready` with `drivers` (`userId`, `displayName`). |
 | `fleet:provisionDevice` (action) | `{ label, busLabel? }` | `issued` with `deviceId` and `deviceSecret` (shown once; only its SHA-256 is stored), or `refused` (`invalid_label`: device name 1 to 80 characters, bus name at most 40). |
 | `fleet:rotateDeviceCredential` (action) | `{ deviceId }` | `issued` with `deviceId` and a new `deviceSecret`; the old secret stops working at once and the device keeps its identity and runs. Or `refused` (`not_found`, `revoked`: a revoked device is never revived). |
-| `fleet:diagnostics` (query) | `{}` | `ready` with `deployment` (`release`, `environment` from the `ITSSB_RELEASE`/`ITSSB_ENVIRONMENT` deployment variables or `null`, `contractSchemaVersion`), `retention` (`rawGpsDays`, `lastSweepAtMs`, `lastSweepDeleted`), and `devices` (`deviceId`, `label`, `busLabel`, `revoked`, `activeRunId`, `lastContactAtMs` from the latest heartbeat or position receipt, `softwareVersion`, `pendingCount`, `oldestPendingCapturedAtMs` from the heartbeat, `lastRun`). No positions, addresses or credentials. |
+| `fleet:diagnostics` (query) | `{}` | `ready` with `deployment` (`release`, `environment` from the `ITSSB_RELEASE`/`ITSSB_ENVIRONMENT` deployment variables or `null`, `contractSchemaVersion`), `retention` (`rawGpsDays`, `lastSweepAtMs`, `lastSweepDeleted`), and `devices` (`deviceId`, `label`, `busLabel`, `revoked`, `activeRunId`, `lastContactAtMs` from the latest heartbeat or position receipt, `softwareVersion`, `pendingCount`, `oldestPendingCapturedAtMs` from the heartbeat, `lastRun`, and `metrics`: `null` when the latest heartbeat had no measurements, otherwise `receivedAtMs` of the report they came from plus the §7 measurement fields, each `null` when the device cannot measure it), and `notifications`: `oldestWaitingCreatedAtMs` (oldest `pending` or `retryable_failure` push job by creation, read directly from a (state, creation time) index so it is never limited by the scan cap; or `null`), `waitingCount`, `windowMs` (24 h), `countsByState` (jobs created in the window, by current state) and `truncated` (a scan hit its 2000-row cap: `waitingCount` and `countsByState` are lower bounds; the oldest age is exact). No positions, addresses, users or credentials. |
 | `fleet:listMaintenance` (query) | `{}` | `ready` with upcoming, uncancelled `windows` (`windowId`, `deviceId`, `deviceLabel`, `startsAtMs`, `endsAtMs`, `reason`, `scheduledByName`). |
 | `fleet:scheduleMaintenance` (mutation) | `{ deviceId, startsAtMs, endsAtMs, reason }` | `ok`, or `refused` (`device_unavailable`, `reason_required`, `invalid_window`: not in the past, ends after it starts, at most 12 h; `overlaps`; `device_busy`: starts now on a bus with an active run). |
 | `fleet:cancelMaintenance` (mutation) | `{ windowId }` | `ok`, or `refused` (`not_found`). |

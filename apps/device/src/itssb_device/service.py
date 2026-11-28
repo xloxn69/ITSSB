@@ -32,6 +32,7 @@ from .drafts import DraftSamplerThread
 from .driver_api import DriverApi
 from .gps_reader import GpsReader
 from .local_auth import SessionManager, allowed_origins, load_drivers
+from .metrics import SystemProbe
 from .motion import MotionJudge, ObservedFixHolder
 from .recorder import Recorder, RecorderThread
 from .status import StatusBoard
@@ -84,6 +85,7 @@ class Service:
             upload_enabled=config.upload_enabled,
             environment=config.environment,
             storage_limits=config.storage_limits,
+            system=SystemProbe(config.database_path).read,
         )
         self.latest = ObservedFixHolder()
         self.judge = MotionJudge(self.latest)

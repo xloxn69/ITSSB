@@ -302,7 +302,7 @@ Local endpoints. Built ones are marked; the rest are still proposals:
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /health` | Built. Minimal process readiness without secret/roster disclosure, including the `storage` budget (§8). |
+| `GET /health` | Built. Minimal process readiness without secret/roster disclosure, including the `storage` budget (§8), `upload` retry counters (failures in a row, retries since start, last error class and time) and `system` measurements (service memory, memory available, CPU temperature, database size; `null` where the Pi cannot read them). The heartbeat sends the same values (docs/08 §7). |
 | `GET /api/session` | Built. Kiosk session cookie, CSRF token, and provisioned driver names. |
 | `GET /api/status` | Built. Authorized operating snapshot for the kiosk: health plus motion, driver session, capabilities, and the recording. |
 | `POST /api/session/unlock` | Built. Unlock a provisioned driver with a PIN (scrypt hash, device-wide lockout). |

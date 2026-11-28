@@ -12,7 +12,7 @@ import type { ScreenId } from "../screens.js";
 import { correctionView, detailView, emptyStudentUi, qrView, rosterView, type StudentController, type StudentUi } from "../studentViews.js";
 import { type DeviceQrCode, type RosterAction, type RosterResponse, studentChangeLines } from "../students.js";
 import type { StoragePart } from "../snapshot.js";
-import { dashboardView, drivingView, h, statusBar } from "../views.js";
+import { dashboardView, diagnosticsView, drivingView, h, statusBar } from "../views.js";
 import { observed, snapshot } from "../testing.js";
 
 const RUN = "demo_run_001";
@@ -306,7 +306,23 @@ const reviewState = (): HTMLElement => {
   return sent ? awaitingView(parkedO, draftUi(d), draftCtl, NOW) : reviewView(parkedO, draftUi(d), draftCtl, NOW);
 };
 
-const view = name.startsWith("review")
+// D21 with measurements, and on a machine that cannot read them.
+const diagnostics = (): HTMLElement => {
+  const unavailable = name === "diagnostics-unavailable";
+  const s = snapshot({
+    backend: { status: "ok", detail: null, lastOkAtMs: 1_795_608_000_000 - 4_000 },
+    network: { status: "online", detail: null, lastCheckedAtMs: 1_795_608_000_000 - 4_000, lastOnlineAtMs: 1_795_608_000_000 - 4_000 },
+    upload: { consecutiveFailures: 0, retriesSinceStart: 6, lastErrorClass: "http_503", lastErrorAtMs: 1_795_608_000_000 - 1_260_000 },
+    system: unavailable
+      ? { processRssBytes: null, memAvailableBytes: null, cpuTemperatureC: null, databaseBytes: 3_158_016 }
+      : { processRssBytes: 41_236_000, memAvailableBytes: 1_203_572_000, cpuTemperatureC: 48.3, databaseBytes: 3_158_016 },
+  });
+  return diagnosticsView(observed(s), { go: () => {}, action: () => {} });
+};
+
+const view = name.startsWith("diagnostics")
+  ? diagnostics()
+  : name.startsWith("review")
   ? reviewState()
   : name === "dashboard-changes"
   ? dashboard()
@@ -322,4 +338,10 @@ const view = name.startsWith("review")
 document.getElementById("app")?.replaceChildren(view);
 document.body.dataset.ready = "true";
 
-export const GALLERY_STATES = [...Object.keys(states), ...Object.keys(drafts), "review-library"];
+export const GALLERY_STATES = [
+  ...Object.keys(states),
+  ...Object.keys(drafts),
+  "review-library",
+  "diagnostics-measured",
+  "diagnostics-unavailable",
+];

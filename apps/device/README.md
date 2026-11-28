@@ -154,6 +154,8 @@ curl -s http://127.0.0.1:8765/health
 | `backend.status` | `unconfigured`, `unknown`, `ok`, ... | Outcome of the last authenticated backend request |
 | `outbox` | counts + `oldestPendingCapturedAtMs` | Work the backend has not acknowledged |
 | `run` | `{runId, state, nextRunSequence}` or `null` | Recovered from SQLite; never invented |
+| `upload` | `consecutiveFailures`, `retriesSinceStart`, `lastErrorClass`, `lastErrorAtMs` | Telemetry request failures since this process started; the last error is kept after recovery |
+| `system` | `processRssBytes`, `memAvailableBytes`, `cpuTemperatureC`, `databaseBytes` | Read on each snapshot from `/proc`, `/sys` and the database file; `null` when not measurable (macOS dev) |
 | `recorder.fault` | `null` or e.g. `save failed: OperationalError` | Observations are not being saved (disk full, ...); cleared after a successful save |
 
 A fix only counts as `valid` if its GPS time is a new measurement epoch, no

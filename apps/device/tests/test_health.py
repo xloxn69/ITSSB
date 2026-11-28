@@ -10,7 +10,7 @@ from test_uploader import BOOT, TOKEN, Clock, SwitchableTransport, add
 
 from itssb_device.database import Database
 from itssb_device.status import StatusBoard
-from itssb_device.uploader import HttpTransport, Uploader
+from itssb_device.uploader import BASE_HEALTH_KEYS, HttpTransport, Uploader
 
 FIXTURES = Path(__file__).resolve().parents[3] / "packages" / "contracts" / "fixtures"
 
@@ -76,8 +76,11 @@ def test_report_has_exactly_the_contract_fields_and_no_coordinates(db, server):
     board = no_fix_board()
     up = Uploader(db, board, HttpTransport(server.origin, 2.0), TOKEN, now_ms=Clock())
     report = up.health_report()
-    fixture = json.loads((FIXTURES / "health.report.noFix.json").read_text())
+    fixture = json.loads((FIXTURES / "health.report.withMetrics.json").read_text())
     assert set(report) == set(fixture)
+    # The base keys are exactly what a Pi from before the measurements sent.
+    base = json.loads((FIXTURES / "health.report.noFix.json").read_text())
+    assert set(BASE_HEALTH_KEYS) == set(base)
     assert report["bootId"] == BOOT
     assert report["runId"] == "demo_run_001"
     assert report["pendingCount"] == 2

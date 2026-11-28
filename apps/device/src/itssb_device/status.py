@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from . import __version__
+from .metrics import SystemReader
+from .metrics import unmeasured as system_unmeasured
 from .release import load_release
 from .storage import StorageLimits, unmeasured
 
@@ -66,8 +68,12 @@ class StatusBoard:
         now_ms: Callable[[], int] = wall_ms,
         environment: str = "development",
         storage_limits: StorageLimits | None = None,
+        system: SystemReader | None = None,
     ) -> None:
         self.environment = environment
+        # Memory, CPU temperature, database size (metrics.py). Read on each
+        # snapshot; without a probe every value is null, never a default.
+        self._system = system or system_unmeasured
         self._storage: dict[str, Any] = unmeasured(storage_limits or StorageLimits())
         self._lock = threading.Lock()
         self._mono = monotonic
@@ -85,6 +91,13 @@ class StatusBoard:
             "oldestPendingCapturedAtMs": None,
         }
         self._run: dict[str, Any] | None = None
+        # Telemetry upload attempts this process made (docs/13 §10).
+        self._upload: dict[str, Any] = {
+            "consecutiveFailures": 0,
+            "retriesSinceStart": 0,
+            "lastErrorClass": None,
+            "lastErrorAtMs": None,
+        }
         self._recorder: dict[str, Any] = {
             "lastRecordedAtMs": None,
             "observationsThisBoot": 0,
@@ -139,6 +152,20 @@ class StatusBoard:
                 b.last_success_ms = b.last_checked_ms
             b.extra = dict(extra)
 
+    def upload_attempt(self, error_class: str | None) -> None:
+        """One telemetry request's outcome. `None` is success. A failure is
+        counted once per request; its events are retried later with the
+        same eventIds. The last error is kept after recovery, with its time."""
+        with self._lock:
+            u = self._upload
+            if error_class is None:
+                u["consecutiveFailures"] = 0
+                return
+            u["consecutiveFailures"] += 1
+            u["retriesSinceStart"] += 1
+            u["lastErrorClass"] = error_class
+            u["lastErrorAtMs"] = self._now_ms()
+
     def outbox(self, counts: dict[str, Any]) -> None:
         with self._lock:
             self._outbox = dict(counts)
@@ -183,6 +210,7 @@ class StatusBoard:
         return None if mono is None else int((self._mono() - mono) * 1000)
 
     def snapshot(self) -> dict[str, Any]:
+        system = self._system()  # file reads, outside the lock
         with self._lock:
             g = self._gps
             return {
@@ -225,6 +253,8 @@ class StatusBoard:
                     **self._backend.extra,
                 },
                 "outbox": dict(self._outbox),
+                "upload": dict(self._upload),
+                "system": system,
                 "run": dict(self._run) if self._run else None,
                 "recorder": dict(self._recorder),
                 # Free space, queue depth, and whether recording is reduced (storage.py).

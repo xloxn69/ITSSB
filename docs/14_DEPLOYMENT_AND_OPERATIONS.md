@@ -130,7 +130,7 @@ A successful file export is not a demonstrated recovery procedure. The checkpoin
 
 ## 9. Health monitoring and support
 
-Monitor outcomes, not only uptime. Useful metrics include age of the latest valid GPS fix, age of device contact, upload success rate, queue depth/oldest item, rejected-event reasons, disk pressure, restart count, and application version. Record temperature or power-related warnings only when actually observed.
+Monitor outcomes, not only uptime. Useful metrics include age of the latest valid GPS fix, age of device contact, upload success rate, queue depth/oldest item, rejected-event reasons, disk pressure, restart count, and application version. Record temperature or power-related warnings only when actually observed. Staff Diagnostics shows, per device from its latest heartbeat and with its age: upload failures in a row, retries since the device software started and the last error class, service memory, memory available, CPU temperature and database size; and the age of the oldest push job still waiting plus 24 h job counts by state (docs/08 §11). Values a Pi cannot measure read "not available", never a guess. Deploy the backend before Pis that send these fields; a newer Pi falls back to the base heartbeat against an older backend (docs/08 §7).
 
 For the family service, measure snapshot freshness, query failures, subscription recovery, prediction coverage/error, and notification job outcomes. Distinguish provider acceptance from user visibility. Do not place raw home addresses, sign-in codes, device secrets, or full QR tokens into routine logs.
 

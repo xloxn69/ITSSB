@@ -4,7 +4,11 @@ import { staffFixtureSource } from "../dev/staffFixtures";
 import {
   approvalBlocker,
   contactStatus,
+  deviceMetricFacts,
   driversFileEntry,
+  METRIC_NOT_AVAILABLE,
+  METRICS_NOT_REPORTED,
+  notificationJobFacts,
   invitationState,
   maintenanceWindow,
   PIN_HASH_PLACEHOLDER,
@@ -286,5 +290,91 @@ describe("pathSegments", () => {
     ]);
     expect(pathSegments(["a", "b", "c"], [0, 9, 1.5])).toEqual([{ points: ["a", "b", "c"], gap: false }]);
     expect(pathSegments(["a", "b"])).toEqual([{ points: ["a", "b"], gap: false }]);
+  });
+});
+
+describe("deviceMetricFacts", () => {
+  const now = 1_795_700_000_000;
+  const metrics = {
+    receivedAtMs: now - 40_000,
+    uploadConsecutiveFailures: 0,
+    uploadRetriesSinceStart: 4,
+    lastUploadErrorClass: "http_503",
+    processRssBytes: 41_900_000,
+    memAvailableBytes: 1_204_000_000,
+    cpuTemperatureC: 51.2,
+    databaseBytes: 3_150_000,
+  };
+
+  it("older device software reads as not reported, never as zero", () => {
+    const facts = deviceMetricFacts(null, now, now, now);
+    expect(facts).toEqual([["Measurements", METRICS_NOT_REPORTED]]);
+    expect(JSON.stringify(facts)).not.toMatch(/\b0\b/);
+    expect(deviceMetricFacts(null, now, now, now, false)).toEqual([["Measurements", "No heartbeat received"]]);
+    // The page may be live before the backend that returns measurements.
+    expect(deviceMetricFacts(undefined, now, now, now)).toEqual([["Measurements", "Not reported by this backend"]]);
+  });
+
+  it("a value the device cannot measure says so", () => {
+    const facts = Object.fromEntries(
+      deviceMetricFacts({ ...metrics, cpuTemperatureC: null, processRssBytes: null, databaseBytes: 3_160_000 }, now, now, now),
+    );
+    expect(facts["CPU temperature"]).toBe(METRIC_NOT_AVAILABLE);
+    expect(facts["Service memory"]).toBe(METRIC_NOT_AVAILABLE);
+    expect(facts["Database size"]).toBe("3.2 MB");
+  });
+
+  it("shows measured values with the heartbeat's age", () => {
+    const facts = Object.fromEntries(deviceMetricFacts(metrics, now, now, now));
+    expect(facts["Measured"]).toBe("40s ago, from the latest heartbeat");
+    expect(facts["CPU temperature"]).toBe("51.2 °C");
+    expect(facts["Upload failures"]).toBe("None now");
+    expect(facts["Upload retries since start"]).toBe("4");
+    expect(facts["Last upload error"]).toBe("http_503");
+  });
+
+  it("a slow browser clock cannot make a measurement look recent", () => {
+    const slow = now - 10 * 60_000;
+    // Browser 10 min slow: by its clock the heartbeat is "in the future".
+    expect(Object.fromEntries(deviceMetricFacts(metrics, now, slow, slow))["Measured"]).toMatch(/^40s ago/);
+  });
+});
+
+describe("notificationJobFacts", () => {
+  const now = 1_795_700_000_000;
+  const zero = {
+    pending: 0,
+    in_progress: 0,
+    provider_accepted: 0,
+    retryable_failure: 0,
+    permanent_failure: 0,
+    expired: 0,
+    cancelled: 0,
+  };
+  const base = { oldestWaitingCreatedAtMs: null, waitingCount: 0, windowMs: 86_400_000, countsByState: zero, truncated: false };
+
+  it("a backend from before job age reads as not reported, not as nothing waiting", () => {
+    expect(notificationJobFacts(undefined, now, now, now)).toEqual([["Push jobs", "Not reported by this backend"]]);
+  });
+
+  it("says nothing is waiting when nothing is", () => {
+    expect(notificationJobFacts(base, now, now, now)).toEqual([
+      ["Waiting to send", "Nothing waiting"],
+      ["Created in the last 24 h", "None"],
+    ]);
+  });
+
+  it("names the oldest waiting job's age and the day's outcomes; a capped scan says at least", () => {
+    const n = {
+      ...base,
+      oldestWaitingCreatedAtMs: now - 3 * 3_600_000,
+      waitingCount: 2,
+      countsByState: { ...zero, provider_accepted: 18, retryable_failure: 1, expired: 2 },
+    };
+    expect(notificationJobFacts(n, now, now, now)).toEqual([
+      ["Waiting to send", "2 waiting; oldest created 3 h ago"],
+      ["Created in the last 24 h", "18 accepted by Apple, 1 waiting to retry, 2 expired unsent"],
+    ]);
+    expect(notificationJobFacts({ ...n, truncated: true }, now, now, now)[0]![1]).toMatch(/^at least 2 waiting/);
   });
 });

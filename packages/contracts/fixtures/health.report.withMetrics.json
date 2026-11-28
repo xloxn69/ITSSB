@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "bootId": "3cd44c56-c96b-4b83-a970-5414990bc25a",
+  "capturedAtMs": 1795609085000,
+  "appVersion": "0.1.0",
+  "runId": "demo_run_001",
+  "gpsStatus": "no_fix",
+  "lastValidFixAtMs": 1795609025000,
+  "pendingCount": 3,
+  "oldestPendingCapturedAtMs": 1795609020000,
+  "uploadConsecutiveFailures": 2,
+  "uploadRetriesSinceStart": 17,
+  "lastUploadErrorClass": "http_503",
+  "processRssBytes": 42225664,
+  "memAvailableBytes": 1232457728,
+  "cpuTemperatureC": 48.3,
+  "databaseBytes": 3158016
+}

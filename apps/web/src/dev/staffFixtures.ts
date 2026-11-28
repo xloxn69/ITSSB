@@ -257,7 +257,66 @@ export function staffFixtureSource(variant: StaffVariant): StaffSource {
               : i === 2
                 ? { runId: "demo_run_031", state: "completed", endedAtMs: Date.now() - 26 * 60 * 60_000 }
                 : null,
+            // A measuring Pi, one that cannot read some values, and older software.
+            metrics:
+              d.lastContactAtMs === null
+                ? null
+                : i === 0
+                  ? {
+                      receivedAtMs: d.lastContactAtMs,
+                      uploadConsecutiveFailures: 0,
+                      uploadRetriesSinceStart: 4,
+                      lastUploadErrorClass: "http_503",
+                      processRssBytes: 41_900_000,
+                      memAvailableBytes: 1_204_000_000,
+                      cpuTemperatureC: 51.2,
+                      databaseBytes: 3_150_000,
+                    }
+                  : i === 1
+                    ? {
+                        receivedAtMs: d.lastContactAtMs,
+                        uploadConsecutiveFailures: 3,
+                        uploadRetriesSinceStart: 12,
+                        lastUploadErrorClass: "OSError",
+                        processRssBytes: null,
+                        memAvailableBytes: null,
+                        cpuTemperatureC: null,
+                        databaseBytes: 18_400_000,
+                      }
+                    : null,
           })),
+          notifications:
+            variant === "staff-empty"
+              ? {
+                  oldestWaitingCreatedAtMs: null,
+                  waitingCount: 0,
+                  windowMs: 24 * 60 * 60_000,
+                  countsByState: {
+                    pending: 0,
+                    in_progress: 0,
+                    provider_accepted: 0,
+                    retryable_failure: 0,
+                    permanent_failure: 0,
+                    expired: 0,
+                    cancelled: 0,
+                  },
+                  truncated: false,
+                }
+              : {
+                  oldestWaitingCreatedAtMs: Date.now() - 4 * 60_000,
+                  waitingCount: 2,
+                  windowMs: 24 * 60 * 60_000,
+                  countsByState: {
+                    pending: 1,
+                    in_progress: 0,
+                    provider_accepted: 18,
+                    retryable_failure: 1,
+                    permanent_failure: 0,
+                    expired: 2,
+                    cancelled: 1,
+                  },
+                  truncated: false,
+                },
         });
       case "fleet:listMaintenance":
         return env({ status: "ready", windows });

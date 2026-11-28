@@ -1,8 +1,14 @@
-import { ALERT_MAX_INPUT_AGE_MS, MAX_DELIVERY_ATTEMPTS } from "@itssb/contracts";
+import {
+  ALERT_MAX_INPUT_AGE_MS,
+  MAX_DELIVERY_ATTEMPTS,
+  NOTIFICATION_JOB_STATES,
+  type NotificationJobAge,
+  type NotificationJobState,
+} from "@itssb/contracts";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { internalMutation, type MutationCtx } from "./_generated/server";
+import { internalMutation, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { getTrackableAssignment } from "./lib/authz";
 import { getRunProgress } from "./lib/progressStore";
 import { pushResult } from "./lib/push";
@@ -25,6 +31,54 @@ const TITLE = "School bus approaching";
 const BODY = "Open ITSSB for the current estimate.";
 
 const OPEN_STATES = ["pending", "retryable_failure", "in_progress"] as const;
+
+/** Window for the by-state job counts in staff diagnostics. */
+export const JOB_AGE_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** Rows read per scan; beyond it the counts are marked as lower bounds. */
+export const JOB_SCAN_LIMIT = 2000;
+const WAITING_STATES = ["pending", "retryable_failure"] as const;
+
+/**
+ * How long push jobs wait and how recent ones ended (docs/13 §10). For staff
+ * diagnostics only: counts and ages, never a user, token or alert.
+ */
+export async function jobAgeSummary(ctx: QueryCtx, nowMs: number): Promise<NotificationJobAge> {
+  let truncated = false;
+  let oldest: number | null = null;
+  let waitingCount = 0;
+  for (const state of WAITING_STATES) {
+    // The oldest by creation, read directly: never limited by the count cap.
+    const first = await ctx.db
+      .query("notificationJobs")
+      .withIndex("by_state_created", (q) => q.eq("state", state))
+      .order("asc")
+      .first();
+    if (first && (oldest === null || first._creationTime < oldest)) oldest = first._creationTime;
+    const rows = await ctx.db
+      .query("notificationJobs")
+      .withIndex("by_state_created", (q) => q.eq("state", state))
+      .take(JOB_SCAN_LIMIT + 1);
+    if (rows.length > JOB_SCAN_LIMIT) truncated = true;
+    waitingCount += Math.min(rows.length, JOB_SCAN_LIMIT);
+  }
+  const countsByState = Object.fromEntries(NOTIFICATION_JOB_STATES.map((s) => [s, 0])) as Record<
+    NotificationJobState,
+    number
+  >;
+  const recent = await ctx.db
+    .query("notificationJobs")
+    .withIndex("by_creation_time", (q) => q.gt("_creationTime", nowMs - JOB_AGE_WINDOW_MS))
+    .take(JOB_SCAN_LIMIT + 1);
+  if (recent.length > JOB_SCAN_LIMIT) truncated = true;
+  for (const job of recent.slice(0, JOB_SCAN_LIMIT)) countsByState[job.state] += 1;
+  return {
+    oldestWaitingCreatedAtMs: oldest === null ? null : Math.floor(oldest),
+    waitingCount,
+    windowMs: JOB_AGE_WINDOW_MS,
+    countsByState,
+    truncated,
+  };
+}
 
 /** Wait before the next attempt; `random` returns [0, 1) and is injectable for tests. */
 export function retryDelayMs(attempts: number, random: () => number = Math.random): number {
