@@ -17,8 +17,10 @@ import { connectionNotice, reverifyOnForeground, type TrackContext, type TrackSt
 import type { ServiceNotice, TrackedRun } from "../tracking/model";
 import type { ServerClock } from "../tracking/clock";
 import { reportedDelayLine } from "../tracking/delay";
+import { tripNow } from "../tracking/alertDetail";
 import { AlertsPanel } from "./AlertsPanel";
 import { RouteDiagram } from "./RouteDiagram";
+import { RouteDetails } from "./RouteDetails";
 
 /** Re-renders every second so the age advances without a new update (docs/06 §9). */
 function useTick(): ReturnType<typeof readInstant> {
@@ -129,7 +131,14 @@ export function TrackPage({ store, onSignIn }: { store: TrackStore; onSignIn: ()
         }
       })()}
       {(state.kind === "tracking" || state.kind === "no_active_run") && (
-        <AlertsPanel source={store.source} assignmentId={state.context.assignment.assignmentId} />
+        <>
+          <AlertsPanel
+            source={store.source}
+            assignmentId={state.context.assignment.assignmentId}
+            trip={tripNow(state, store.connectionLost)}
+          />
+          <RouteDetails context={state.context} />
+        </>
       )}
     </div>
   );

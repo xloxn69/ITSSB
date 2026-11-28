@@ -8,6 +8,15 @@ enum PreviewFixtures {
         assignmentId: "demo_assignment_001", relationship: .self,
         studentDisplayName: "Sam Example", routeLabel: "Route 17 Morning", stopLabel: "Oak & Pine")
 
+    /// Two fictional students linked to one guardian (I10).
+    static let guardianAssignments = [
+        AssignmentSummary(assignmentId: "demo_assignment_001", relationship: .guardian,
+                          studentDisplayName: "Sam Example", routeLabel: "Route 17 Morning", stopLabel: "Oak & Pine"),
+        AssignmentSummary(assignmentId: "demo_assignment_002", relationship: .guardian,
+                          studentDisplayName: "Riley Example", routeLabel: "Route 4 Afternoon",
+                          stopLabel: "Maple Court")
+    ]
+
     static let stop = AssignedStop(
         stopId: "demo_stop_003", label: "Oak & Pine",
         coordinate: Coordinate(latitude: 34.105971, longitude: -83.977736), status: .unknown)
@@ -104,6 +113,8 @@ enum PreviewScenario: String, CaseIterable, Sendable {
     /// Today's service-calendar notice, before any trip runs.
     case noService
     case lateStart
+    /// A guardian with two linked students: one riding, one with no trip (I10).
+    case guardians
     case accessUnavailable
     case sessionExpired
     case failed
@@ -128,6 +139,7 @@ struct PreviewLiveRunSource: LiveRunSource {
             switch scenario {
             case .accessUnavailable: continuation.yield(.ready([]))
             case .sessionExpired: continuation.yield(.accessUnavailable(.unauthenticated))
+            case .guardians: continuation.yield(.ready(PreviewFixtures.guardianAssignments))
             default: continuation.yield(.ready([PreviewFixtures.assignment]))
             }
         }
@@ -144,7 +156,13 @@ struct PreviewLiveRunSource: LiveRunSource {
             switch scenario {
             case .loading, .accessUnavailable, .sessionExpired:
                 break
-            case .live, .offline: ready(PreviewFixtures.run(position: PreviewFixtures.position(capturedSecondsAgo: 4)))
+            // The second guardian student has no trip; it must come before `.guardians` below.
+            case .noActiveRun, .cancelled, .replacementPending, .completed, .noService, .lateStart,
+                 .guardians where assignmentId == PreviewFixtures.guardianAssignments[1].assignmentId:
+                continuation.yield(.noActiveRun(assignmentId: assignmentId, routeVersionId: routeVersionId,
+                                                clock: .deviceOnly, notices: PreviewFixtures.notices(scenario)))
+            case .live, .offline, .guardians:
+                ready(PreviewFixtures.run(position: PreviewFixtures.position(capturedSecondsAgo: 4)))
             case .eta, .alerts:
                 let position = PreviewFixtures.position(capturedSecondsAgo: 4)
                 ready(PreviewFixtures.run(position: position, stopStatus: .upcoming,
@@ -158,9 +176,6 @@ struct PreviewLiveRunSource: LiveRunSource {
             case .awaitingPosition: ready(PreviewFixtures.run(position: nil, gpsStatus: nil))
             case .gpsUnavailable: ready(PreviewFixtures.run(position: PreviewFixtures.position(capturedSecondsAgo: 20),
                                                             gpsStatus: .noFix))
-            case .noActiveRun, .cancelled, .replacementPending, .completed, .noService, .lateStart:
-                continuation.yield(.noActiveRun(assignmentId: assignmentId, routeVersionId: routeVersionId,
-                                                clock: .deviceOnly, notices: PreviewFixtures.notices(scenario)))
             case .failed:
                 continuation.finish(throwing: TrackingError.transport)
             }

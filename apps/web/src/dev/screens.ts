@@ -30,6 +30,9 @@ export const FIXTURE_SCREENS: {
     path: `?fixture=${s}`,
     ready: s === "loading" ? "[aria-busy=true]" : "main h2",
   })),
+  // I13/I14 and I21 on the web: the collapsed details, opened.
+  { name: "family-route-details", path: "?fixture=live", ready: "main h2", steps: { open: ["details.card > summary"] } },
+  { name: "family-alert-details", path: "?fixture=eta", ready: "main ul details", steps: { open: ["main ul details > summary"] } },
   { name: "family-actions-track", path: "?fixture=family-flows", ready: "main h2" },
   { name: "family-join-code", path: "?fixture=family-flows#/join", ready: "main input" },
   { name: "family-join-form", path: "join?token=DEMX-7K2M-9QXR-4TVW-8ZPN&fixture=family-flows", ready: "form h2" },

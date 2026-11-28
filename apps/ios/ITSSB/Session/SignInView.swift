@@ -181,7 +181,7 @@ struct AccountView: View {
     @State private var confirmingSignOut = false
     @State private var path: [AccountScreen] = AccountView.initialPath
 
-    enum AccountScreen: Hashable { case display }
+    enum AccountScreen: Hashable { case display, profile }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -192,6 +192,9 @@ struct AccountView: View {
                         .foregroundStyle(AppColors.textPrimary)
                 }
                 Section {
+                    NavigationLink(value: AccountScreen.profile) {
+                        Label("Profile", systemImage: "person.text.rectangle")
+                    }
                     NavigationLink(value: AccountScreen.display) {
                         Label("Display and accessibility", systemImage: "textformat.size")
                     }
@@ -213,9 +216,18 @@ struct AccountView: View {
                 }
             }
             .navigationTitle("Account")
-            .navigationDestination(for: AccountScreen.self) { _ in DisplaySettingsView() }
+            .navigationDestination(for: AccountScreen.self) { screen in
+                switch screen {
+                case .display: DisplaySettingsView()
+                case .profile: ProfileView(profile: ProfileStore(account: session.accountLabel))
+                }
+            }
             .confirmationDialog("Sign out of ITSSB?", isPresented: $confirmingSignOut, titleVisibility: .visible) {
-                Button("Sign out", role: .destructive) { Task { await session.signOut() } }
+                Button("Sign out", role: .destructive) {
+                    // This account's profile doesn't stay on the phone (I04). Read marks clear on any sign-out.
+                    ProfileStore(account: session.accountLabel).clear()
+                    Task { await session.signOut() }
+                }
             }
         }
     }
@@ -225,7 +237,11 @@ extension AccountView {
     /// `-ITSSBOpen display` opens I24 directly, for screenshots.
     static var initialPath: [AccountScreen] {
         #if DEBUG
-        DebugLaunch.opens == "display" ? [.display] : []
+        switch DebugLaunch.opens {
+        case "display": [.display]
+        case "profile": [.profile]
+        default: []
+        }
         #else
         []
         #endif

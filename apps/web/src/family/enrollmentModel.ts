@@ -73,3 +73,32 @@ export function checkInLine(c: CheckInRecord, time: (ms: number) => string): str
   const what = c.status === "boarded" ? "Checked in" : "Marked not on the bus";
   return `${what} at ${time(c.recordedAtMs)}, ${FAMILY_SOURCE_TEXT[c.source]}`;
 }
+
+/**
+ * Editing the join form clears an old answer so the person can fix it (A07:
+ * a `stop_not_eligible` refusal, then a permitted stop or "school chooses").
+ * An unconfirmed answer stays: that request may exist, so its resend must be
+ * unchanged under the same identity.
+ */
+export function clearsOnEdit(view: CommandView | null): boolean {
+  return view !== null && view.kind !== "unconfirmed";
+}
+
+/** The `enrollment:request` arguments. `"none"` is "the school chooses": no stop is sent. */
+export function enrollmentRequestArgs(form: {
+  requestId: string;
+  token: string;
+  studentName: string;
+  address: string;
+  stopId: string;
+  note: string;
+}) {
+  return {
+    requestId: form.requestId,
+    token: form.token,
+    studentName: form.studentName,
+    address: form.address,
+    stopId: form.stopId === "none" ? null : form.stopId,
+    note: form.note.trim() ? form.note : null,
+  };
+}

@@ -86,7 +86,7 @@ struct SignedInTabs: View {
 
     var body: some View {
         TabView(selection: $tab) {
-            TrackView(source: source, openAssignmentId: router.requestedAssignmentId,
+            TrackView(source: source, enrollment: enrollment, openAssignmentId: router.requestedAssignmentId,
                       onOpened: { router.requestedAssignmentId = nil }, onSignIn: onSignIn)
                 .tabItem { Label("Track", systemImage: "bus") }
                 .tag(AppTab.track)

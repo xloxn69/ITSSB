@@ -32,7 +32,13 @@ enum TrackState: Equatable {
 @MainActor
 @Observable
 final class TrackViewModel {
-    private(set) var state: TrackState = .loading
+    private(set) var state: TrackState = .loading {
+        didSet {
+            // Losing access or the session also drops the student list, so no
+            // other view (the I10 dashboard) can keep showing names and routes.
+            if state == .sessionExpired || state == .accessUnavailable { assignments = [] }
+        }
+    }
     private(set) var assignments: [AssignmentSummary] = []
     private(set) var selectedAssignmentId: String?
     /// The phone lost its link after having had one (docs/06 I25). While it
@@ -85,6 +91,16 @@ final class TrackViewModel {
 
     func retry() {
         start()
+    }
+
+    /// I10 is shown only with two or more students and nothing blocking: never
+    /// over a signed-out, no-access, or failed state, which have their own recovery.
+    var dashboardAvailable: Bool {
+        guard assignments.count > 1 else { return false }
+        switch state {
+        case .sessionExpired, .accessUnavailable, .failed: return false
+        case .loading, .tracking, .noActiveRun: return true
+        }
     }
 
     /// Back from the background (docs/06 §12): measure server time again, then

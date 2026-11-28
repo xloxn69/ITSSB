@@ -1,7 +1,8 @@
 import { APPROACHING_MINUTES_MAX, APPROACHING_MINUTES_MIN } from "@itssb/contracts";
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { AlertsStore } from "../tracking/alerts";
-import { alertRow } from "../tracking/presentation";
+import { alertCurrency, alertCurrencyText, type TripNow } from "../tracking/alertDetail";
+import { alertRow, capturedTime } from "../tracking/presentation";
 import type { TrackingSource } from "../tracking/store";
 
 const MINUTE_CHOICES = [2, 3, 5, 7, 10, 15].filter((m) => m >= APPROACHING_MINUTES_MIN && m <= APPROACHING_MINUTES_MAX);
@@ -10,7 +11,7 @@ const MINUTE_CHOICES = [2, 3, 5, 7, 10, 15].filter((m) => m >= APPROACHING_MINUT
  * Approaching-alert preference and the in-app alerts inbox (docs/08 §9.1).
  * The web app gets no push; this list is where web families see alerts.
  */
-export function AlertsPanel({ source, assignmentId }: { source: TrackingSource; assignmentId: string }) {
+export function AlertsPanel({ source, assignmentId, trip }: { source: TrackingSource; assignmentId: string; trip: TripNow }) {
   const store = useMemo(() => new AlertsStore(source), [source]);
   const state = useSyncExternalStore(
     (cb) => store.subscribe(cb),
@@ -68,10 +69,26 @@ export function AlertsPanel({ source, assignmentId }: { source: TrackingSource; 
             <ul className="stack" style={{ listStyle: "none", padding: 0, margin: 0 }}>
               {state.alerts.map((a) => {
                 const row = alertRow(a);
+                // I21 alert details: whether this alert still describes the trip.
+                const currency = alertCurrencyText(alertCurrency(a, trip), (ms) => capturedTime(ms));
                 return (
-                  <li key={a.alertId} className="stack" style={{ gap: "var(--space-xs)" }}>
-                    <strong>{row.title}</strong>
-                    <span className="muted small">{row.detail}</span>
+                  <li key={a.alertId}>
+                    <details className="stack" style={{ gap: "var(--space-xs)" }}>
+                      <summary>
+                        <strong>{row.title}</strong>
+                        <span className="muted small"> {row.detail}</span>
+                      </summary>
+                      <p>
+                        <strong>{currency.title}</strong>
+                        <br />
+                        <span className="muted small">{currency.detail}</span>
+                      </p>
+                      <p className="muted small">
+                        Stop: {a.stopLabel}. Estimated arrival {capturedTime(a.predictedArrivalAtMs)}, estimate made at{" "}
+                        {capturedTime(a.predictionGeneratedAtMs)}, alert sent {new Date(a.createdAtMs).toLocaleString()}. Sent by
+                        ITSSB from the bus's reported location; arrival times are estimates and can change.
+                      </p>
+                    </details>
                   </li>
                 );
               })}
