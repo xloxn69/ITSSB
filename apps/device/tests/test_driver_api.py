@@ -412,3 +412,61 @@ def test_a_write_queued_behind_another_writer_rechecks_parked(env):
     db = Database(env.db_path)
     assert db.conn.execute("SELECT COUNT(*) FROM route_draft_stops").fetchone()[0] == 0
     db.close()
+
+
+# ── D06: the driver page restarts, the service does not ─────────────
+
+
+def test_d06_page_sessions_opening_reloading_and_closing_never_pause_collection(env):
+    from itssb_device.gps_reader import LatestFixHolder
+    from itssb_device.recorder import Recorder
+
+    gps = LatestFixHolder()
+    rec = Recorder(
+        Database(env.db_path),
+        env.api.board,
+        gps,
+        "boot-a",
+        monotonic=env.clock,
+        now_ms=lambda: T0 + 3_600_000,
+    )
+    rec.db.save_run("demo_run_001", "active")
+    captured = [T0]
+
+    def collect():
+        captured[0] += 1000
+        gps.set(Fix(captured[0], 34.1, -83.98, 0.0, 0.0, 6.0, 3), env.clock.t)
+        assert rec.tick() is True  # collection carries on whatever the page does
+
+    def pending():
+        return rec.db.conn.execute(
+            "SELECT o.event_id, o.payload, o.status, o.attempts, t.run_sequence FROM outbox o "
+            "JOIN telemetry_events t ON t.event_id=o.event_id ORDER BY t.run_sequence"
+        ).fetchall()
+
+    collect()
+    collect()
+    queued = [tuple(r) for r in pending()]
+
+    first = Kiosk(env.api)  # page opens
+    collect()
+    first.get("/api/status")
+    env.api.handle("GET", "/", {"Cookie": first.cookie}, b"")  # reload
+    collect()
+    env.gps(0.0)
+    first.post("/api/session/unlock", {"driverId": "drv_demo", "pin": PIN})
+    collect()
+    first.post("/api/session/lock")
+    collect()
+    second = Kiosk(env.api)  # browser restarted: the old page is gone, a new session opens
+    collect()
+    status = second.get("/api/status")
+
+    rows = pending()
+    assert [tuple(r) for r in rows[: len(queued)]] == queued  # earlier rows untouched
+    assert [r["run_sequence"] for r in rows] == list(range(7))
+    assert {r["status"] for r in rows} == {"pending"}
+    assert status["outbox"]["pending"] == 7
+    assert status["run"]["runId"] == "demo_run_001"
+    assert rec.db.active_run()["nextRunSequence"] == 7
+    rec.db.close()
