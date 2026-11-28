@@ -297,10 +297,12 @@ class DraftDesk:
         driver = session.driver
         if driver is None or not driver.operating_grant:
             return {"checked": False, "problem": "Unlock to check the review status."}
+        # Least recently checked first, so with more drafts awaiting review
+        # than one read may ask about, successive reads reach every draft.
         rows = db.conn.execute(
             "SELECT request_id, server_draft_id FROM route_draft_submissions "
             "WHERE sync='accepted' AND review_status='submitted' "
-            "ORDER BY captured_at_ms LIMIT ?",
+            "ORDER BY COALESCE(review_checked_at_ms, 0), captured_at_ms, rowid LIMIT ?",
             (MAX_ROUTE_DRAFT_STATUS_IDS,),
         ).fetchall()
         if not rows:

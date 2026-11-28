@@ -395,3 +395,24 @@ def test_without_a_server_submit_is_unavailable(tmp_path, pin_hash, backend):
     caps = env.get("/api/status")[1]["capabilities"]
     assert caps["submitRoute"]["available"] is False
     assert env.draft(did)["submission"] == "not_submitted"
+
+
+def test_review_status_reaches_every_draft_beyond_one_read(tmp_path, pin_hash, backend):
+    """More drafts await review than one status read may ask about (20):
+    successive reads rotate through them, so the last one's decision shows."""
+    env = Env(tmp_path, pin_hash, backend)
+    dids = [env.record(stops=("Example Oak Corner",), points=2) for _ in range(21)]
+    for did in dids:
+        assert env.submit(did)[0] == 200
+    while env.tick():
+        pass
+    assert all(env.draft(d)["submission"] == "submitted" for d in dids)
+    last = dids[-1]
+    server_id = next(k for k, d in backend.route_drafts.items() if d["deviceDraftId"] == last)
+    backend.decide_draft(server_id, "approved")
+
+    for _ in range(2):
+        env.advance(STATUS_REFRESH_MS)
+        code, body = env.post("/api/recordings/review-status")
+        assert code == 200 and body["checked"] is True
+    assert env.draft(last)["submission"] == "approved"
