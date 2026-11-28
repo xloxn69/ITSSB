@@ -706,3 +706,202 @@ describe("independent review final cases", () => {
     expect(await s.t.run((ctx) => ctx.db.get(jobId))).toMatchObject({ state: "cancelled", endReason: "estimate_unavailable" });
   });
 });
+
+// ── Acceptance gaps (docs/13 §4 D11, §8) ────────────────────────────────
+
+type Scheduled = { name: string; args: unknown[]; state: { kind: string } };
+const scheduled = (s: Setup) =>
+  s.t.run(async (ctx) => (await ctx.db.system.query("_scheduled_functions").collect()) as unknown as Scheduled[]);
+const pendingCalls = async (s: Setup, name: string) =>
+  (await scheduled(s)).filter((f) => f.name.includes(name) && f.state.kind === "pending");
+
+describe("acceptance: one alert per approach", () => {
+  it("re-sending the approaching event (same eventId) adds no alert, job, event or evaluation", async () => {
+    const s = await setup();
+    await enable(s, STUDENT);
+    await register(s, STUDENT, TOKEN_A, INSTALL_A);
+    await approach(s);
+    expect(await alerts(s)).toHaveLength(1);
+    expect(await jobs(s)).toHaveLength(1);
+    const { last, count } = await s.t.run(async (ctx) => {
+      const progress = await ctx.db.query("runProgress").first();
+      const row = await ctx.db
+        .query("telemetryEvents")
+        .withIndex("by_event_id", (q) => q.eq("eventId", progress!.lastEventId!))
+        .unique();
+      return { last: row!, count: (await ctx.db.query("telemetryEvents").collect()).length };
+    });
+    const resent = {
+      eventId: last.eventId,
+      bootId: last.bootId,
+      sequence: last.sequence,
+      runSequence: last.runSequence,
+      runId: last.runId,
+      capturedAtMs: last.capturedAtMs,
+      latitude: last.latitude,
+      longitude: last.longitude,
+      speedMps: last.speedMps ?? null,
+      headingDegrees: last.headingDegrees ?? null,
+      horizontalAccuracyM: last.horizontalAccuracyM ?? null,
+      fixMode: last.fixMode,
+    };
+    const results = await s.t.mutation(internal.telemetry.ingestBatch, {
+      deviceId: s.deviceId,
+      events: [resent],
+      nowMs: Date.now(),
+    });
+    expect(results).toEqual([{ eventId: last.eventId, status: "duplicate", receivedAtMs: last.receivedAtMs, liveStateApplied: true }]);
+    expect(await pendingCalls(s, "alerts")).toEqual([]);
+    await s.t.finishAllScheduledFunctions(vi.runAllTimers);
+    expect(await alerts(s)).toHaveLength(1);
+    expect(await jobs(s)).toHaveLength(1);
+    expect(await s.t.run(async (ctx) => (await ctx.db.query("telemetryEvents").collect()).length)).toBe(count);
+  });
+
+  it("evaluating the same source twice makes one alert and one delivery job", async () => {
+    const s = await setup();
+    await enable(s, STUDENT);
+    await register(s, STUDENT, TOKEN_A, INSTALL_A);
+    // Drive close but outside the threshold, so the ingest itself alerts nobody.
+    await driveTo(s, 400, s.NOW - 200_000);
+    await s.t.mutation(internal.telemetry.ingestBatch, {
+      deviceId: s.deviceId,
+      events: [event(s.runId, eastForRemaining(240), Date.now() - 2_000)],
+      nowMs: Date.now() - 1_000,
+    });
+    const source = await s.t.run(async (ctx) => {
+      const progress = (await ctx.db.query("runProgress").first())!;
+      const predictions = (await ctx.db.query("etaPredictions").collect()).filter((p) => p.sourceEventId === progress.lastEventId);
+      return {
+        sourceEventId: progress.lastEventId!,
+        sourceCapturedAtMs: predictions[0]!.sourceCapturedAtMs,
+        estimates: predictions.map((p) => ({
+          stopId: p.stopId,
+          arrivalAtMs: p.arrivalAtMs,
+          validUntilMs: p.validUntilMs,
+          generatedAtMs: p.generatedAtMs,
+        })),
+      };
+    });
+    expect(source.estimates.length).toBeGreaterThan(0);
+    for (let i = 0; i < 2; i++) {
+      await s.t.mutation(internal.alerts.evaluate, { runId: s.runId, ...source, nowMs: Date.now(), cursor: null });
+    }
+    // Plus the evaluation the ingest scheduled itself: three runs, one alert.
+    await s.t.finishAllScheduledFunctions(vi.runAllTimers);
+    expect(await alerts(s)).toHaveLength(1);
+    expect(await jobs(s)).toHaveLength(1);
+  });
+});
+
+describe("acceptance: the recovery sweep leaves finished jobs alone", () => {
+  it("accepted, permanently failed and cancelled jobs are never rescheduled; a due pending job is", async () => {
+    const { s, jobId } = await oneJob();
+    const finished = await s.t.run(async (ctx) => {
+      const base = (await ctx.db.get(jobId))!;
+      const { _id, _creationTime, ...fields } = base;
+      const ids: Id<"notificationJobs">[] = [];
+      for (const state of ["provider_accepted", "permanent_failure", "cancelled"] as const) {
+        ids.push(
+          await ctx.db.insert("notificationJobs", {
+            ...fields,
+            state,
+            attempts: 1,
+            nextAttemptAtMs: s.NOW - 60_000,
+            leaseExpiresAtMs: s.NOW - 30_000,
+          }),
+        );
+      }
+      return ids;
+    });
+    const before = await s.t.run(async (ctx) => Promise.all(finished.map((id) => ctx.db.get(id))));
+    await s.t.mutation(internal.notificationJobs.sweep, { nowMs: s.NOW + 1_000 });
+    const queued = (await pendingCalls(s, "pushDelivery")).map((f) => (f.args[0] as { jobId: string }).jobId);
+    expect(queued).toEqual([jobId]);
+    expect(await s.t.run(async (ctx) => Promise.all(finished.map((id) => ctx.db.get(id))))).toEqual(before);
+  });
+});
+
+/** Ingests fixes at the given positions and capture times, in batches. */
+async function drive(s: Setup, points: { east: number; at: number }[]) {
+  for (let i = 0; i < points.length; i += 40) {
+    const batch = points.slice(i, i + 40).map((p) => event(s.runId, p.east, p.at));
+    await ingest(s, { deviceId: s.deviceId, events: batch, nowMs: batch.at(-1)!.capturedAtMs + 1_000 });
+  }
+}
+
+describe("acceptance: D11 an already-served stop on a loop route", () => {
+  const OUT_EAST = 500;
+
+  /** Puts the run on an out-and-back route whose two stops share one place. */
+  async function loopSetup() {
+    const s = await setup();
+    const ids = await s.t.run(async (ctx) => {
+      const out = Array.from({ length: 201 }, (_, i) => at(i * 10));
+      const loop = await ctx.db.insert("routeVersions", {
+        label: "Route 9 Loop",
+        path: [...out, ...out.toReversed().slice(1)],
+      });
+      const outStop = await ctx.db.insert("stops", { routeVersionId: loop, label: "Elm (outbound)", sequence: 0, ...at(OUT_EAST) });
+      const backStop = await ctx.db.insert("stops", { routeVersionId: loop, label: "Elm (return)", sequence: 1, ...at(OUT_EAST) });
+      await ctx.db.patch(s.runId, { routeVersionId: loop });
+      await ctx.db.patch(s.assignmentId, { routeVersionId: loop, stopId: outStop });
+      // A second student who boards at the return-leg stop.
+      const backUser = await ctx.db.insert("users", { tokenIdentifier: "test|back-rider", role: "family", displayName: "Jo" });
+      const backStudent = await ctx.db.insert("students", { displayName: "Jo Example", userId: backUser });
+      const backAssignment = await ctx.db.insert("assignments", { studentId: backStudent, routeVersionId: loop, stopId: backStop, status: "approved" });
+      await ctx.db.insert("notificationPreferences", {
+        userId: backUser,
+        assignmentId: backAssignment,
+        approachingEnabled: true,
+        approachingMinutes: 5,
+        updatedAtMs: s.NOW,
+        lastRequestId: crypto.randomUUID(),
+      });
+      return { outStop, backUser, backAssignment };
+    });
+    return { s, ...ids };
+  }
+
+  it("the outbound stop stays passed with its original times, and the return leg alerts only the return stop", async () => {
+    const { s, outStop, backUser, backAssignment } = await loopSetup();
+    await enable(s, STUDENT); // the outbound stop's student wants alerts
+    const outbound = [];
+    for (let d = 50; d <= 2000; d += 50) outbound.push(d);
+    const back = [];
+    for (let d = 1950; d >= 700; d -= 50) back.push(d);
+    const end = Date.now() - 2_000;
+    const step = 4_000;
+    const all = [...outbound, ...back].map((east, i, xs) => ({ east, at: end - (xs.length - 1 - i) * step }));
+
+    // Outbound, long enough ago that it alerts nobody.
+    await drive(s, all.slice(0, outbound.length));
+    const served = await s.t.run(async (ctx) => (await ctx.db.query("runProgress").first())!.stops.find((o) => o.stopId === outStop));
+    expect(served).toMatchObject({ arrivedAtMs: expect.any(Number), departedAtMs: expect.any(Number) });
+    expect(await alerts(s)).toEqual([]);
+
+    // Return leg, the last fix fresh, approaching the same place again.
+    await drive(s, all.slice(outbound.length));
+    const progress = (await s.t.run((ctx) => ctx.db.query("runProgress").first()))!;
+    expect(progress.lastStatus).toBe("on_route");
+    expect(progress.alongM).toBeGreaterThan(3000);
+    expect(progress.stops.find((o) => o.stopId === outStop)).toEqual(served);
+    // The return stop's rider is alerted once; the already-served stop's rider never is.
+    const rows = await alerts(s);
+    expect(rows.map((a) => [a.userId, a.assignmentId])).toEqual([[backUser, backAssignment]]);
+    const predictions = await s.t.run((ctx) => ctx.db.query("etaPredictions").collect());
+    expect(predictions.filter((p) => p.stopId === outStop && p.sourceEventId === progress.lastEventId)).toEqual([]);
+  });
+});
+
+describe("acceptance: the inbox needs a sign-in", () => {
+  it("a signed-out caller gets only an access answer", async () => {
+    const s = await setup();
+    await enable(s, STUDENT);
+    await approach(s);
+    expect(await alerts(s)).toHaveLength(1);
+    const result = await s.t.query(api.notifications.myAlerts, {});
+    expect(Object.keys(result).toSorted()).toEqual(["reason", "schemaVersion", "serverNowMs", "status"]);
+    expect(result).toMatchObject({ status: "access_unavailable", reason: "unauthenticated" });
+  });
+});

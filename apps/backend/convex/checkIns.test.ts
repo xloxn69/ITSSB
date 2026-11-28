@@ -33,6 +33,7 @@ const CHALLENGE = "AAAA-BBBB-CCCC-DDDD-EEEE";
 const EXPIRED_CHALLENGE = "FFFF-GGGG-HHHH-JJJJ-KKKK";
 const OTHER_RUN_CHALLENGE = "MMMM-NNNN-PPPP-QQQQ-RRRR";
 const ENROLLMENT_TOKEN = "SSSS-TTTT-VVVV-WWWW-XXXX";
+const REVOKED_CHALLENGE = "YYYY-ZZZZ-0000-1111-2222";
 
 const hash = async (token: string) => await sha256Hex(normalizeToken(token) as string);
 
@@ -44,6 +45,7 @@ async function setup() {
     expired: await hash(EXPIRED_CHALLENGE),
     otherRun: await hash(OTHER_RUN_CHALLENGE),
     enrollment: await hash(ENROLLMENT_TOKEN),
+    revokedChallenge: await hash(REVOKED_CHALLENGE),
     secretA: await sha256Hex(SECRET_A),
     secretB: await sha256Hex(SECRET_B),
     grantA: await sha256Hex(GRANT_A),
@@ -123,6 +125,7 @@ async function setup() {
     await token(h.challenge, "trip_check_in", { runId: runA });
     await token(h.expired, "trip_check_in", { runId: runA, expiresAtMs: now - 1 });
     await token(h.otherRun, "trip_check_in", { runId: runB });
+    await token(h.revokedChallenge, "trip_check_in", { runId: runA, revoked: true });
     const routeRow = await ctx.db.insert("routes", { label: "Route 17 Morning", direction: "to_school", createdAtMs: now, currentVersionId: routeA });
     await ctx.db.patch(routeA, { routeId: routeRow });
     await token(h.enrollment, "route_enrollment", { routeId: routeRow });
@@ -183,6 +186,7 @@ describe("checkIns:record (student QR claim)", () => {
 
   it.each([
     ["expired challenge", EXPIRED_CHALLENGE, "expired"],
+    ["revoked challenge", REVOKED_CHALLENGE, "invalid"],
     ["enrollment invitation", ENROLLMENT_TOKEN, "wrong_purpose"],
     ["unknown code", "ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ", "invalid"],
     ["garbage", "https://evil.example/x", "invalid"],
@@ -584,4 +588,174 @@ describe("staff attendance and removal", () => {
       });
     }
   }
+});
+
+// ── Acceptance gaps (docs/13 §5–§6) ─────────────────────────────────────
+
+const rows = (t: T) =>
+  t.run(async (ctx) => ({
+    checkIns: await ctx.db.query("checkIns").collect(),
+    audit: await ctx.db.query("auditLog").collect(),
+  }));
+
+describe("acceptance: check-in refusals", () => {
+  it("a student whose assignment was removed cannot use the trip's current challenge", async () => {
+    const { t, runA, a1 } = await setup();
+    expect(
+      await as(t, STAFF).mutation(api.routes.removeAssignment, { requestId: "rm-accept-0001", assignmentId: a1, reason: "Moved schools" }),
+    ).toMatchObject({ status: "accepted" });
+    expect(await scan(t, STUDENT_1, runA)).toMatchObject({ status: "rejected", code: "not_assigned" });
+    const after = await rows(t);
+    expect(after.checkIns).toHaveLength(0);
+    expect(after.audit.filter((r) => r.action === "checkIn.studentClaim")).toHaveLength(0);
+  });
+
+  it.each([
+    ["expired", EXPIRED_CHALLENGE, "expired"],
+    ["revoked", REVOKED_CHALLENGE, "invalid"],
+    ["unknown", "ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ", "invalid"],
+    ["wrong-purpose", ENROLLMENT_TOKEN, "wrong_purpose"],
+  ])("a %s challenge answer carries no route, stop, run or student fields", async (_n, token, problem) => {
+    const { t, runA } = await setup();
+    const result = await scan(t, STUDENT_1, runA, token);
+    expect(Object.keys(result).toSorted()).toEqual(["problem", "schemaVersion", "serverNowMs", "status"]);
+    expect(result).toMatchObject({ status: "token_problem", problem });
+  });
+});
+
+const correct = (runId: string, assignmentId: string, correctsCheckInId: string, extra: Record<string, unknown> = {}, requestId = "act-corr-gap-0001") =>
+  ({
+    ...action("correctAttendance", { runId, assignmentId, status: "not_boarded", correctsCheckInId, reason: "Stayed home" }, requestId),
+    ...extra,
+  });
+
+describe("acceptance: driver correction refusals", () => {
+  it.each([
+    ["no reason", { reason: undefined }],
+    ["a blank reason", { reason: "   " }],
+    ["a null reason", { reason: null }],
+  ])("a correction with %s is refused at the request and changes nothing", async (_n, extra) => {
+    const { t, runA, a1 } = await setup();
+    const scanned = (await scan(t, STUDENT_1, runA)) as { checkIn: { checkInId: string } };
+    const before = await rows(t);
+    const res = await post(t, "/device/v1/roster-actions", SECRET_A, correct(runA, a1, scanned.checkIn.checkInId, extra));
+    expect(res.status).toBe(400);
+    expect(res.body.error?.code).toBe("INVALID_REQUEST");
+    expect(await rows(t)).toEqual(before);
+  });
+
+  it.each([
+    ["a revoked grant", SECRET_A, GRANT_REVOKED, "grant_not_authorized", 60_000],
+    // Backdated into the expired grant's old window (and after the run start), so only expiry refuses it.
+    ["an expired grant", SECRET_A, GRANT_EXPIRED, "grant_not_authorized", 2.5 * HOUR],
+    ["another route's driver grant on its own bus", SECRET_B, GRANT_B, "assignment_not_authorized", 60_000],
+  ])("a correction under %s is rejected and changes nothing", async (_n, secret, grant, code, ageMs) => {
+    const { t, runA, a1 } = await setup();
+    const scanned = (await scan(t, STUDENT_1, runA)) as { checkIn: { checkInId: string } };
+    const before = await rows(t);
+    const res = await post(t, "/device/v1/roster-actions", secret, {
+      ...correct(runA, a1, scanned.checkIn.checkInId),
+      driverOperatingGrant: grant,
+      capturedAtMs: Date.now() - ageMs,
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ status: "rejected", code });
+    const after = await rows(t);
+    expect(after.checkIns).toEqual(before.checkIns);
+    expect(after.audit.filter((r) => r.action === "checkIn.correct")).toHaveLength(0);
+  });
+
+  it("a driver cannot correct a student on another route (assignment outside the grant)", async () => {
+    const { t, runB, a3 } = await setup();
+    // Student three's real record on run B, recorded by run B's own driver device.
+    const recorded = await post(t, "/device/v1/roster-actions", SECRET_B, {
+      ...action("recordAttendance", { runId: runB, assignmentId: a3, status: "boarded" }, "act-rec-b-0001"),
+      driverOperatingGrant: GRANT_B,
+    });
+    const checkInId = (recorded.body as { checkIn: { checkInId: string } }).checkIn.checkInId;
+    const before = await rows(t);
+    const res = await post(t, "/device/v1/roster-actions", SECRET_A, correct(runB, a3, checkInId));
+    expect(res.body).toMatchObject({ status: "rejected", code: "assignment_not_authorized" });
+    expect((await rows(t)).checkIns).toEqual(before.checkIns);
+  });
+
+  it("a correction naming another student's record on the same trip is rejected", async () => {
+    const { t, runA, a1 } = await setup();
+    await scan(t, STUDENT_1, runA);
+    const other = (await scan(t, STUDENT_2, runA)) as { checkIn: { checkInId: string } };
+    const before = await rows(t);
+    const res = await post(t, "/device/v1/roster-actions", SECRET_A, correct(runA, a1, other.checkIn.checkInId));
+    expect(res.body).toMatchObject({ status: "rejected", code: "correction_target_invalid" });
+    const after = await rows(t);
+    expect(after.checkIns).toEqual(before.checkIns);
+    expect(after.audit.filter((r) => r.action === "checkIn.correct")).toHaveLength(0);
+  });
+
+  it("a correction naming the student's record on another trip is rejected", async () => {
+    const { t, runA, a1, deviceA } = await setup();
+    const scanned = (await scan(t, STUDENT_1, runA)) as { checkIn: { checkInId: string } };
+    // A second run of the same route on the same bus, which the old record does not belong to.
+    const runA2 = await t.run(async (ctx) => {
+      const run = (await ctx.db.get(runA))!;
+      await ctx.db.patch(runA, { state: "completed", endedAtMs: Date.now() - 2 * HOUR });
+      return await ctx.db.insert("runs", {
+        deviceId: deviceA,
+        routeVersionId: run.routeVersionId,
+        state: "active",
+        startRequestId: "start-a2",
+        startedAtMs: Date.now() - HOUR / 2,
+      });
+    });
+    const res = await post(t, "/device/v1/roster-actions", SECRET_A, correct(runA2, a1, scanned.checkIn.checkInId));
+    expect(res.body).toMatchObject({ status: "rejected", code: "correction_target_invalid" });
+    expect((await rows(t)).checkIns).toHaveLength(1);
+  });
+});
+
+describe("acceptance: attendance audit rows", () => {
+  it("a student's own claim is audited once, from the family app, without the challenge text", async () => {
+    const { t, runA, staff } = await setup();
+    const first = (await scan(t, STUDENT_1, runA)) as { checkIn: { checkInId: string } };
+    await scan(t, STUDENT_1, runA, CHALLENGE, "scan-student1-again");
+    const { audit } = await rows(t);
+    const claims = audit.filter((r) => r.action === "checkIn.studentClaim");
+    expect(claims).toHaveLength(1);
+    expect(claims[0]).toMatchObject({ resourceType: "checkIns", resourceId: first.checkIn.checkInId, result: "allowed", source: "family_app" });
+    expect(claims[0]!.actor).not.toEqual({ kind: "user", userId: staff });
+    expect(JSON.stringify(audit)).not.toContain(normalizeToken(CHALLENGE));
+  });
+
+  it("staff-web attendance is audited with its source and actor", async () => {
+    const { t, runA, aNoPhone, staff } = await setup();
+    const res = (await as(t, STAFF).mutation(api.checkIns.staffRecord, { runId: runA, assignmentId: aNoPhone, status: "boarded" })) as {
+      checkIn: { checkInId: string };
+    };
+    const rec = (await rows(t)).audit.filter((r) => r.action === "checkIn.staffRecord");
+    expect(rec).toEqual([
+      expect.objectContaining({
+        actor: { kind: "user", userId: staff },
+        resourceType: "checkIns",
+        resourceId: res.checkIn.checkInId,
+        result: "allowed",
+        source: "staff_web",
+      }),
+    ]);
+  });
+
+  it("driver-device attendance and corrections are audited with the device, capture time and reason, without the grant", async () => {
+    const { t, runA, a1, aNoPhone, driver, deviceA } = await setup();
+    const recorded = await post(t, "/device/v1/roster-actions", SECRET_A, action("recordAttendance", { runId: runA, assignmentId: aNoPhone, status: "boarded" }));
+    const scanned = (await scan(t, STUDENT_1, runA)) as { checkIn: { checkInId: string } };
+    const corrected = await post(t, "/device/v1/roster-actions", SECRET_A, correct(runA, a1, scanned.checkIn.checkInId));
+    expect(corrected.body).toMatchObject({ status: "accepted" });
+    const { audit } = await rows(t);
+    const common = { actor: { kind: "user", userId: driver }, resourceType: "checkIns", result: "allowed", source: "driver_device", viaDeviceId: deviceA, capturedAtMs: expect.any(Number) };
+    expect(audit.filter((r) => r.action === "checkIn.staffRecord")).toEqual([
+      expect.objectContaining({ ...common, resourceId: (recorded.body as { checkIn: { checkInId: string } }).checkIn.checkInId }),
+    ]);
+    expect(audit.filter((r) => r.action === "checkIn.correct")).toEqual([
+      expect.objectContaining({ ...common, resourceId: (corrected.body as { checkIn: { checkInId: string } }).checkIn.checkInId, reason: "Stayed home" }),
+    ]);
+    expect(JSON.stringify(audit)).not.toContain(GRANT_A);
+  });
 });
