@@ -28,6 +28,17 @@ TOKEN = "fake-dev-token"  # noqa: S105 - obviously fake
 RUN_ID = "demo_run_001"
 
 
+def _hang_up(s: socket.socket) -> None:
+    """Shut a socket down, then close it. On Linux `close()` alone does not
+    end a connection while another thread is blocked in `recv()` on it: the
+    peer gets no EOF and waits out its own timeout. `shutdown()` ends it now
+    on every platform."""
+    with contextlib.suppress(OSError):
+        s.shutdown(socket.SHUT_RDWR)
+    with contextlib.suppress(OSError):
+        s.close()
+
+
 class LinkProxy:
     """A TCP forwarder with a switch. `cut()` drops every open connection and
     refuses to carry new ones, the way a dead cellular link behaves from the
@@ -194,6 +205,57 @@ def assert_delivered_exactly_once(b) -> None:
     assert set(b.backend.events) == set(local_ids)
     seqs = sorted(e["runSequence"] for e in b.backend.events.values())
     assert seqs == list(range(len(seqs)))
+
+
+@pytest.fixture
+def upstream():
+    server = socket.create_server(("127.0.0.1", 0))
+    server.settimeout(5)
+    yield server
+    server.close()
+
+
+def _through(link: LinkProxy, upstream: socket.socket) -> tuple[socket.socket, socket.socket]:
+    client = socket.create_connection(("127.0.0.1", link.port), timeout=5)
+    server, _ = upstream.accept()
+    server.settimeout(5)
+    return client, server
+
+
+# The drills are only as true as this stand-in. Each check below times out
+# (5 s) instead of passing if the proxy leaves a connection half open.
+
+
+def test_link_proxy_passes_on_a_server_hang_up(upstream):
+    link = LinkProxy(upstream.getsockname()[1])
+    try:
+        client, server = _through(link, upstream)
+        _hang_up(server)  # the backend closes without answering (D02)
+        assert client.recv(1) == b""  # the device sees it now, not at its timeout
+        client.close()
+    finally:
+        link.close()
+
+
+def test_link_proxy_cut_ends_connections_and_refuses_new_ones(upstream):
+    link = LinkProxy(upstream.getsockname()[1])
+    try:
+        client, server = _through(link, upstream)
+        link.cut()
+        assert client.recv(1) == b""  # the open connection ends
+        client.close()
+        server.close()
+        with pytest.raises(ConnectionRefusedError):  # like a dead route
+            socket.create_connection(("127.0.0.1", link.port), timeout=5)
+
+        link.restore()  # same port: the device's configured origin works again
+        client, server = _through(link, upstream)
+        client.sendall(b"ping")
+        assert server.recv(4) == b"ping"
+        client.close()
+        server.close()
+    finally:
+        link.close()
 
 
 def test_d07_d08_bus_internet_loss_queues_locally_then_fresh_first(bench):
