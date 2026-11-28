@@ -80,14 +80,14 @@ struct PreviewEnrollmentSource: EnrollmentSource {
 #if DEBUG
 import SwiftUI
 
-/// DEBUG-only screen states for `-ITSSBEnrollmentScreen` screenshots: each
-/// builds the real view and drives its real view model with fictional input.
-@MainActor
 extension CameraPermission {
     /// The camera turned off in Settings, for the camera-denied screenshot.
     static let previewDenied = CameraPermission(status: { .denied }, hasCamera: { true }, request: { false })
 }
 
+/// DEBUG-only screen states for `-ITSSBEnrollmentScreen` screenshots: each
+/// builds the real view and drives its real view model with fictional input.
+@MainActor
 enum PreviewScreens {
     @ViewBuilder
     static func view(_ screen: FamilyScreen, source: any EnrollmentSource) -> some View {
