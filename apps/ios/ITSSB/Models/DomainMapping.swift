@@ -24,11 +24,17 @@ enum DomainMapping {
         case .ready(let ready):
             try checkVersion(ready.schemaVersion)
             let clock = try serverClock(ready.serverNowMs, receivedAt: receivedAt)
+            // A running trip has no ended run of its own; only the calendar applies.
             return .ready(assignmentId: ready.assignmentId, routeVersionId: ready.routeVersionId,
-                          run: try run(from: ready.run, serverNow: clock.serverNow), clock: clock)
+                          run: try run(from: ready.run, serverNow: clock.serverNow), clock: clock,
+                          notices: TripNotices(endedRun: nil,
+                                               serviceNotice: try ready.serviceNotice.map(serviceNotice(from:))))
         case .noActiveRun(let none):
             try checkVersion(none.schemaVersion)
-            return .noActiveRun(assignmentId: none.assignmentId, routeVersionId: none.routeVersionId)
+            return .noActiveRun(assignmentId: none.assignmentId, routeVersionId: none.routeVersionId,
+                                clock: try serverClock(none.serverNowMs, receivedAt: receivedAt),
+                                notices: TripNotices(endedRun: try none.endedRun.map(endedRun(from:)),
+                                                     serviceNotice: try none.serviceNotice.map(serviceNotice(from:))))
         case .accessUnavailable(let denied):
             return .accessUnavailable(try reason(denied))
         }
@@ -146,6 +152,44 @@ enum DomainMapping {
         case .accessUnavailable(let denied):
             return .accessUnavailable(try reason(denied))
         }
+    }
+
+    // MARK: Ended run and calendar notice
+
+    /// A present but malformed entry throws: dropping it would show "no trip"
+    /// in place of a cancellation.
+    static func endedRun(from dto: EndedRunDTO) throws -> EndedRun {
+        guard let state = EndedRun.State(rawValue: dto.state) else { throw MappingError.invalidField("endedRun.state") }
+        guard dto.replacement == nil || dto.replacement == "pending" else {
+            throw MappingError.invalidField("endedRun.replacement")
+        }
+        return EndedRun(runId: dto.runId, state: state,
+                        serviceDate: try serviceDate(dto.serviceDate, field: "endedRun.serviceDate"),
+                        endedAt: try dto.endedAtMs.map { try timestamp($0, field: "endedRun.endedAtMs") },
+                        replacementPending: dto.replacement == "pending",
+                        validUntil: try timestamp(dto.validUntilMs, field: "endedRun.validUntilMs"))
+    }
+
+    static func serviceNotice(from dto: ServiceNoticeDTO) throws -> ServiceNotice {
+        let kind: ServiceNotice.Kind
+        switch (dto.status, dto.lateStartMinutes) {
+        case ("no_service", nil):
+            kind = .noService
+        case ("late_start", let minutes?):
+            let whole = try safeWholeNumber(minutes, field: "serviceNotice.lateStartMinutes")
+            guard whole > 0 else { throw MappingError.invalidField("serviceNotice.lateStartMinutes") }
+            kind = .lateStart(minutes: whole)
+        default:
+            throw MappingError.invalidField("serviceNotice.status")
+        }
+        return ServiceNotice(serviceDate: try serviceDate(dto.serviceDate, field: "serviceNotice.serviceDate"),
+                             kind: kind, notice: dto.notice,
+                             validUntil: try timestamp(dto.validUntilMs, field: "serviceNotice.validUntilMs"))
+    }
+
+    private static func serviceDate(_ value: String, field: String) throws -> String {
+        guard value.wholeMatch(of: /\d{4}-\d{2}-\d{2}/) != nil else { throw MappingError.invalidField(field) }
+        return value
     }
 
     // MARK: Field rules

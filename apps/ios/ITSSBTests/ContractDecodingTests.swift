@@ -14,7 +14,7 @@ final class ContractDecodingTests: XCTestCase {
     }
 
     func testReadyRunDecodesEveryField() throws {
-        guard case let .ready(assignmentId, routeVersionId, run, clock) = try runSnapshot("myRun.ready") else {
+        guard case let .ready(assignmentId, routeVersionId, run, clock, _) = try runSnapshot("myRun.ready") else {
             return XCTFail("expected ready")
         }
         XCTAssertEqual(assignmentId, "demo_assignment_001")
@@ -39,7 +39,7 @@ final class ContractDecodingTests: XCTestCase {
     }
 
     func testExplicitNullsDecodeAsNil() throws {
-        guard case let .ready(_, _, run, _) = try runSnapshot("myRun.readyNoPosition") else {
+        guard case let .ready(_, _, run, _, _) = try runSnapshot("myRun.readyNoPosition") else {
             return XCTFail("expected ready")
         }
         XCTAssertNil(run.position, "no position must never become a marker")
@@ -50,14 +50,19 @@ final class ContractDecodingTests: XCTestCase {
     }
 
     func testStaleFixtureCarriesAccuracy() throws {
-        guard case let .ready(_, _, run, _) = try runSnapshot("myRun.stale") else { return XCTFail("expected ready") }
+        guard case let .ready(_, _, run, _, _) = try runSnapshot("myRun.stale") else {
+            return XCTFail("expected ready")
+        }
         XCTAssertEqual(run.position?.horizontalAccuracyM, 12.5)
         XCTAssertNil(run.position?.speedMps)
     }
 
     func testNoActiveRun() throws {
         XCTAssertEqual(try runSnapshot("myRun.noActiveRun"),
-                       .noActiveRun(assignmentId: "demo_assignment_001", routeVersionId: "demo_route_version_003"))
+                       .noActiveRun(assignmentId: "demo_assignment_001", routeVersionId: "demo_route_version_003",
+                                    clock: ServerClock(serverNow: Date(timeIntervalSince1970: 1_795_609_085.5),
+                                                       receivedAt: received),
+                                    notices: .none))
     }
 
     func testAccessUnavailable() throws {
@@ -93,7 +98,9 @@ final class ContractDecodingTests: XCTestCase {
     func testInvalidCoordinatesDropThePositionButKeepTheRun() throws {
         for (key, value) in [("latitude", 91.0), ("longitude", -181.0)] {
             let data = try ContractFixture.patched("myRun.ready", "run.lastPosition.\(key)", value)
-            guard case let .ready(_, _, run, _) = try runSnapshot(data: data) else { return XCTFail("expected ready") }
+            guard case let .ready(_, _, run, _, _) = try runSnapshot(data: data) else {
+                return XCTFail("expected ready")
+            }
             XCTAssertNil(run.position, "\(key) out of range must not become a marker")
             XCTAssertEqual(run.assignedStop.label, "Oak & Pine")
         }
@@ -102,13 +109,13 @@ final class ContractDecodingTests: XCTestCase {
     func testFarFutureCaptureTimeIsRejected() throws {
         let future = 1_795_609_085_500.0 + 10 * 60 * 1000
         let data = try ContractFixture.patched("myRun.ready", "run.lastPosition.capturedAtMs", future)
-        guard case let .ready(_, _, run, _) = try runSnapshot(data: data) else { return XCTFail("expected ready") }
+        guard case let .ready(_, _, run, _, _) = try runSnapshot(data: data) else { return XCTFail("expected ready") }
         XCTAssertNil(run.position)
     }
 
     func testNegativeAccuracyIsRejected() throws {
         let data = try ContractFixture.patched("myRun.ready", "run.lastPosition.horizontalAccuracyM", -1.0)
-        guard case let .ready(_, _, run, _) = try runSnapshot(data: data) else { return XCTFail("expected ready") }
+        guard case let .ready(_, _, run, _, _) = try runSnapshot(data: data) else { return XCTFail("expected ready") }
         XCTAssertNil(run.position)
     }
 
@@ -141,7 +148,7 @@ final class ContractDecodingTests: XCTestCase {
         var nan = Double.nan
         let encoded = Data(bytes: &nan, count: MemoryLayout<Double>.size).base64EncodedString()
         let data = try ContractFixture.patched("myRun.ready", "run.lastPosition.latitude", ["$float": encoded])
-        guard case let .ready(_, _, run, _) = try runSnapshot(data: data) else { return XCTFail("expected ready") }
+        guard case let .ready(_, _, run, _, _) = try runSnapshot(data: data) else { return XCTFail("expected ready") }
         XCTAssertNil(run.position)
     }
 }

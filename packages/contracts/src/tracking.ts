@@ -118,6 +118,42 @@ export interface TrackedRun {
   eta: Eta | null;
 }
 
+/**
+ * Today's most recent finished trip on the assignment's route version, when
+ * no trip is running (docs/08 §8). It has no position: a finished trip's
+ * last point is never shown as current. Staff's free-text cancellation
+ * reason is staff-only and never sent; clients use fixed wording.
+ */
+export interface EndedRun {
+  runId: string;
+  state: "completed" | "cancelled";
+  /** The run's local service date (`YYYY-MM-DD`). */
+  serviceDate: string;
+  /** When the trip finished or staff cancelled it. */
+  endedAtMs: number | null;
+  /** `pending`: staff sent a replacement bus that has not started yet. */
+  replacement: "pending" | null;
+  /** End of `serviceDate` in the run's time zone. Clients hide it from then on. */
+  validUntilMs: number;
+}
+
+/** Today's service-calendar entry (docs/12 §3). District-wide: it names no route. */
+export interface ServiceNotice {
+  serviceDate: string;
+  status: "no_service" | "late_start";
+  /** Whole minutes for `late_start`; null for `no_service`. */
+  lateStartMinutes: number | null;
+  /** The family-facing notice staff wrote. */
+  notice: string;
+  /** End of `serviceDate` in the entry's time zone. Clients hide it from then on. */
+  validUntilMs: number;
+}
+
+/**
+ * `endedRun` and `serviceNotice` were added after the first iOS release.
+ * The server always sends them (explicit null when empty); clients treat a
+ * missing key as null so they also read an older deployment.
+ */
 export type MyRunResult =
   | {
       schemaVersion: typeof SCHEMA_VERSION;
@@ -126,6 +162,7 @@ export type MyRunResult =
       assignmentId: string;
       routeVersionId: string;
       run: TrackedRun;
+      serviceNotice: ServiceNotice | null;
     }
   | {
       schemaVersion: typeof SCHEMA_VERSION;
@@ -134,6 +171,8 @@ export type MyRunResult =
       assignmentId: string;
       routeVersionId: string;
       run: null;
+      endedRun: EndedRun | null;
+      serviceNotice: ServiceNotice | null;
     }
   | AccessUnavailable;
 

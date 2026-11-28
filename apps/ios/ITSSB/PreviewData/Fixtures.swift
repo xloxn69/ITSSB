@@ -55,6 +55,31 @@ enum PreviewFixtures {
                   predictedArrivalAt: now.addingTimeInterval(4 * 60),
                   predictionGeneratedAt: now.addingTimeInterval(-70))
     }
+
+    /// Fictional ended trips and calendar notices, valid until tomorrow so the screen keeps them.
+    static func notices(_ scenario: PreviewScenario) -> TripNotices {
+        let today = Date.now.formatted(.iso8601.year().month().day())
+        let ended = { (state: EndedRun.State, pending: Bool) in
+            EndedRun(runId: "demo_run_001", state: state, serviceDate: today,
+                     endedAt: Date.now.addingTimeInterval(-25 * 60), replacementPending: pending,
+                     validUntil: Date.now.addingTimeInterval(86_400))
+        }
+        let notice = { (kind: ServiceNotice.Kind, text: String) in
+            ServiceNotice(serviceDate: today, kind: kind, notice: text, validUntil: Date.now.addingTimeInterval(86_400))
+        }
+        switch scenario {
+        case .cancelled: return TripNotices(endedRun: ended(.cancelled, false), serviceNotice: nil)
+        case .replacementPending: return TripNotices(endedRun: ended(.cancelled, true), serviceNotice: nil)
+        case .completed: return TripNotices(endedRun: ended(.completed, false), serviceNotice: nil)
+        case .noService:
+            return TripNotices(endedRun: nil, serviceNotice: notice(
+                .noService, "No buses today: the school is closed for a teacher workday."))
+        case .lateStart:
+            return TripNotices(endedRun: nil, serviceNotice: notice(
+                .lateStart(minutes: 20), "Buses run 20 minutes late this morning because of fog."))
+        default: return .none
+        }
+    }
 }
 
 /// Each screen state the app can show, for previews and `-ITSSBScenario` screenshots.
@@ -72,6 +97,13 @@ enum PreviewScenario: String, CaseIterable, Sendable {
     /// A recent position, but the phone has just lost its own connection (I25).
     case offline
     case noActiveRun
+    /// Staff cancelled today's trip (I27); with a replacement bus sent but not started.
+    case cancelled
+    case replacementPending
+    case completed
+    /// Today's service-calendar notice, before any trip runs.
+    case noService
+    case lateStart
     case accessUnavailable
     case sessionExpired
     case failed
@@ -107,7 +139,7 @@ struct PreviewLiveRunSource: LiveRunSource {
             let routeVersionId = PreviewFixtures.route.routeVersionId
             let ready = { (run: TrackedRun) in
                 continuation.yield(.ready(assignmentId: assignmentId, routeVersionId: routeVersionId,
-                                          run: run, clock: .deviceOnly))
+                                          run: run, clock: .deviceOnly, notices: .none))
             }
             switch scenario {
             case .loading, .accessUnavailable, .sessionExpired:
@@ -126,8 +158,9 @@ struct PreviewLiveRunSource: LiveRunSource {
             case .awaitingPosition: ready(PreviewFixtures.run(position: nil, gpsStatus: nil))
             case .gpsUnavailable: ready(PreviewFixtures.run(position: PreviewFixtures.position(capturedSecondsAgo: 20),
                                                             gpsStatus: .noFix))
-            case .noActiveRun:
-                continuation.yield(.noActiveRun(assignmentId: assignmentId, routeVersionId: routeVersionId))
+            case .noActiveRun, .cancelled, .replacementPending, .completed, .noService, .lateStart:
+                continuation.yield(.noActiveRun(assignmentId: assignmentId, routeVersionId: routeVersionId,
+                                                clock: .deviceOnly, notices: PreviewFixtures.notices(scenario)))
             case .failed:
                 continuation.finish(throwing: TrackingError.transport)
             }

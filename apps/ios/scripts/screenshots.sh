@@ -44,6 +44,7 @@ shoot() { # name, then launch arguments
 for APPEARANCE in ${ITSSB_APPEARANCES:-light dark}; do
   xcrun simctl ui "$UDID" appearance "$APPEARANCE"
   for scenario in live eta atStop passed aging stale awaitingPosition gpsUnavailable noActiveRun loading \
+                  cancelled replacementPending completed noService lateStart \
                   accessUnavailable sessionExpired failed; do
     shoot "$scenario" -ITSSBScenario "$scenario"
   done

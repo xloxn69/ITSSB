@@ -1,6 +1,9 @@
 import {
   type AccessUnavailable,
+  type EndedRun,
+  endOfLocalDayMs,
   type Eta,
+  localDate,
   POSITION_STALE_AFTER_MS,
   type StopStatus,
   type AccessUnavailableReason,
@@ -9,6 +12,7 @@ import {
   type MyRunResult,
   SCHEMA_VERSION,
   type ServerTimeResult,
+  type ServiceNotice,
 } from "@itssb/contracts";
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
@@ -121,6 +125,29 @@ const eta = v.object({
   sourceEventId: v.string(),
 });
 
+const serviceNotice = v.union(
+  v.object({
+    serviceDate: v.string(),
+    status: v.union(v.literal("no_service"), v.literal("late_start")),
+    lateStartMinutes: v.union(v.number(), v.null()),
+    notice: v.string(),
+    validUntilMs: v.number(),
+  }),
+  v.null(),
+);
+
+const endedRun = v.union(
+  v.object({
+    runId: v.string(),
+    state: v.union(v.literal("completed"), v.literal("cancelled")),
+    serviceDate: v.string(),
+    endedAtMs: v.union(v.number(), v.null()),
+    replacement: v.union(v.literal("pending"), v.null()),
+    validUntilMs: v.number(),
+  }),
+  v.null(),
+);
+
 /** Generic, honest label when the bus device has no family-facing name yet. */
 const FALLBACK_BUS_LABEL = "School bus";
 
@@ -153,6 +180,7 @@ export const myRun = query({
         }),
         eta: v.union(eta, v.null()),
       }),
+      serviceNotice,
     }),
     v.object({
       schemaVersion: v.literal(SCHEMA_VERSION),
@@ -161,6 +189,8 @@ export const myRun = query({
       assignmentId: v.string(),
       routeVersionId: v.string(),
       run: v.null(),
+      endedRun,
+      serviceNotice,
     }),
     accessUnavailable,
   ),
@@ -174,7 +204,7 @@ export const myRun = query({
     if (!stop) return denied("not_permitted");
 
     const serverNowMs = Date.now();
-    const run = await activeRunFor(ctx, assignment);
+    const [run, notice] = await Promise.all([activeRunFor(ctx, assignment), todaysServiceNotice(ctx, serverNowMs)]);
     if (!run) {
       return {
         schemaVersion: SCHEMA_VERSION,
@@ -183,6 +213,8 @@ export const myRun = query({
         assignmentId: assignment._id,
         routeVersionId: assignment.routeVersionId,
         run: null,
+        endedRun: await todaysEndedRun(ctx, assignment, serverNowMs),
+        serviceNotice: notice,
       };
     }
 
@@ -248,6 +280,7 @@ export const myRun = query({
             ? await currentEta(ctx, run._id, stop._id, live, serverNowMs)
             : null,
       },
+      serviceNotice: notice,
     };
   },
 });
@@ -348,4 +381,79 @@ async function activeRunFor(ctx: QueryCtx, assignment: Doc<"assignments">) {
       q.eq("routeVersionId", assignment.routeVersionId).eq("state", "active"),
     )
     .first();
+}
+
+const endedAt = (r: Doc<"runs">) => r.cancelledAtMs ?? r.endedAtMs ?? r._creationTime;
+const utcDate = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+/** Enough for every run one route version has in a day, newest first. */
+const ENDED_RUNS_SCANNED = 20;
+
+/**
+ * Today's most recent finished run on the assignment's route version (D14):
+ * completed, or cancelled by staff. "Today" is each run's own service date
+ * in its own time zone; a run without one (written before trip events
+ * existed) is never reported. A query is not re-run as time passes, so the
+ * result carries `validUntilMs` and clients hide it once that day ends.
+ */
+async function todaysEndedRun(
+  ctx: QueryCtx,
+  assignment: Doc<"assignments">,
+  nowMs: number,
+): Promise<EndedRun | null> {
+  const ended = (
+    await Promise.all(
+      (["completed", "cancelled"] as const).map((state) =>
+        ctx.db
+          .query("runs")
+          .withIndex("by_route_version_state", (q) =>
+            q.eq("routeVersionId", assignment.routeVersionId).eq("state", state),
+          )
+          .order("desc")
+          .take(ENDED_RUNS_SCANNED),
+      ),
+    )
+  )
+    .flat()
+    .filter(
+      (r) => r.serviceDate !== undefined && r.serviceTimezone !== undefined && r.serviceDate === localDate(nowMs, r.serviceTimezone),
+    );
+  const latest = ended.reduce<Doc<"runs"> | null>((a, r) => (!a || endedAt(r) > endedAt(a) ? r : a), null);
+  if (!latest || latest.serviceDate === undefined || latest.serviceTimezone === undefined) return null;
+  const state = latest.state === "cancelled" ? "cancelled" : "completed";
+  return {
+    runId: latest._id,
+    state,
+    serviceDate: latest.serviceDate,
+    endedAtMs: latest.cancelledAtMs ?? latest.endedAtMs ?? null,
+    // An active replacement is returned as the run itself, never here.
+    replacement:
+      state === "cancelled" && latest.replacementDeviceId !== undefined && latest.replacedByRunId === undefined
+        ? "pending"
+        : null,
+    validUntilMs: endOfLocalDayMs(latest.serviceDate, latest.serviceTimezone),
+  };
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Today's service-calendar entry, if any (docs/12 §3). The calendar is
+ * district-wide, so every route sees it. Each entry is "today" in its own
+ * time zone; local dates are always within a day of the UTC date.
+ */
+async function todaysServiceNotice(ctx: QueryCtx, nowMs: number): Promise<ServiceNotice | null> {
+  const rows = await ctx.db
+    .query("serviceDays")
+    .withIndex("by_date", (q) => q.gte("serviceDate", utcDate(nowMs - DAY_MS)).lte("serviceDate", utcDate(nowMs + DAY_MS)))
+    .take(3);
+  const today = rows.find((r) => r.serviceDate === localDate(nowMs, r.timezone));
+  if (!today) return null;
+  return {
+    serviceDate: today.serviceDate,
+    status: today.status,
+    lateStartMinutes: today.status === "late_start" ? (today.lateStartMinutes ?? null) : null,
+    notice: today.notice,
+    validUntilMs: endOfLocalDayMs(today.serviceDate, today.timezone),
+  };
 }

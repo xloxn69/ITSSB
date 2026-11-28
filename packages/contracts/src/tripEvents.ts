@@ -123,6 +123,37 @@ export function localDate(atMs: number, timeZone: string): string {
   }).format(new Date(atMs));
 }
 
+/**
+ * The UTC instant `date` (`YYYY-MM-DD`) ends in `timeZone`: the next local
+ * day's midnight. Handles 23- and 25-hour days at daylight-saving changes.
+ */
+export function endOfLocalDayMs(date: string, timeZone: string): number {
+  const m = DATE.exec(date);
+  if (!m) throw new Error(`Not a YYYY-MM-DD date: ${date}`);
+  const nextMidnightAsUtc = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + 1);
+  // Subtract the zone's offset; re-measure it at the result for a change near midnight.
+  let atMs = nextMidnightAsUtc - zoneOffsetMs(nextMidnightAsUtc, timeZone);
+  atMs = nextMidnightAsUtc - zoneOffsetMs(atMs, timeZone);
+  return atMs;
+}
+
+/** How far `timeZone`'s wall clock is ahead of UTC at `atMs`. */
+function zoneOffsetMs(atMs: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(new Date(atMs));
+  const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((p) => p.type === type)?.value);
+  const wallAsUtc = Date.UTC(part("year"), part("month") - 1, part("day"), part("hour"), part("minute"), part("second"));
+  return wallAsUtc - Math.floor(atMs / 1000) * 1000;
+}
+
 export type TripEventValidation =
   | { ok: true; request: TripEventRequest }
   | { ok: false; code: "INVALID_REQUEST" | "UNSUPPORTED_SCHEMA_VERSION"; message: string };

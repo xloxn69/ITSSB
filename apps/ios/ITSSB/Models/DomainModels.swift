@@ -164,16 +164,68 @@ enum AccessUnavailableReason: String, Equatable, Sendable {
     case notPermitted = "not_permitted"
 }
 
+/// Today's finished trip on the assignment's route (docs/08 §8). Never has a
+/// position: a finished trip's last point is not shown as current.
+struct EndedRun: Equatable, Sendable {
+    enum State: String, Equatable, Sendable { case completed, cancelled }
+
+    let runId: String
+    let state: State
+    let serviceDate: String
+    let endedAt: Date?
+    /// Staff sent a replacement bus that hasn't started yet.
+    let replacementPending: Bool
+    /// End of its service day; hidden from then on.
+    let validUntil: Date
+}
+
+/// Today's service-calendar entry (docs/12 §3). District-wide.
+struct ServiceNotice: Equatable, Sendable {
+    enum Kind: Equatable, Sendable {
+        case noService
+        case lateStart(minutes: Int)
+    }
+
+    let serviceDate: String
+    let kind: Kind
+    /// The family-facing text staff wrote.
+    let notice: String
+    let validUntil: Date
+}
+
+/// What `tracking:myRun` says about today beyond the live run.
+struct TripNotices: Equatable, Sendable {
+    var endedRun: EndedRun?
+    var serviceNotice: ServiceNotice?
+
+    static let none = TripNotices(endedRun: nil, serviceNotice: nil)
+
+    /// Only what still describes today. The backend query isn't re-run when a
+    /// day ends, so yesterday's status would otherwise stay on screen.
+    func current(at serverNow: Date) -> TripNotices {
+        TripNotices(endedRun: endedRun.flatMap { serverNow < $0.validUntil ? $0 : nil },
+                    serviceNotice: serviceNotice.flatMap { serverNow < $0.validUntil ? $0 : nil })
+    }
+}
+
 /// One validated `tracking:myRun` result.
 enum RunSnapshot: Equatable, Sendable {
-    case ready(assignmentId: String, routeVersionId: String, run: TrackedRun, clock: ServerClock)
-    case noActiveRun(assignmentId: String, routeVersionId: String)
+    case ready(assignmentId: String, routeVersionId: String, run: TrackedRun, clock: ServerClock,
+               notices: TripNotices)
+    case noActiveRun(assignmentId: String, routeVersionId: String, clock: ServerClock, notices: TripNotices)
     case accessUnavailable(AccessUnavailableReason)
 
     /// The same snapshot measured against another clock (a verified one, once it arrives).
     func with(clock: ServerClock) -> RunSnapshot {
-        guard case let .ready(assignmentId, routeVersionId, run, _) = self else { return self }
-        return .ready(assignmentId: assignmentId, routeVersionId: routeVersionId, run: run, clock: clock)
+        switch self {
+        case let .ready(assignmentId, routeVersionId, run, _, notices):
+            .ready(assignmentId: assignmentId, routeVersionId: routeVersionId, run: run, clock: clock,
+                   notices: notices)
+        case let .noActiveRun(assignmentId, routeVersionId, _, notices):
+            .noActiveRun(assignmentId: assignmentId, routeVersionId: routeVersionId, clock: clock, notices: notices)
+        case .accessUnavailable:
+            self
+        }
     }
 }
 

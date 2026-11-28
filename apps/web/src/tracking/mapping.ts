@@ -22,13 +22,16 @@ import type {
   AssignedStop,
   AssignmentsSnapshot,
   Coordinate,
+  EndedRun,
   LivePosition,
   Preference,
   PreferenceSnapshot,
   RouteSnapshot,
   RunEta,
   RunSnapshot,
+  ServiceNotice,
   TrackedRun,
+  TripNotices,
 } from "./model";
 
 export class MappingError extends Error {
@@ -181,6 +184,53 @@ function run(raw: unknown, serverNowMs: number): TrackedRun {
   };
 }
 
+const SERVICE_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function serviceDate(value: unknown, field: string): string {
+  const date = str(value, field);
+  if (!SERVICE_DATE.test(date)) throw new MappingError(field);
+  return date;
+}
+
+/**
+ * A missing key is an older deployment and means none. A present but
+ * malformed entry is a mapping error: dropping it would show "no trip"
+ * in place of a cancellation.
+ */
+function endedRun(raw: unknown): EndedRun | null {
+  if (raw === null || raw === undefined) return null;
+  const e = obj(raw, "endedRun");
+  return {
+    runId: str(e.runId, "endedRun.runId"),
+    state: oneOf(e.state, ["completed", "cancelled"] as const, "endedRun.state"),
+    serviceDate: serviceDate(e.serviceDate, "endedRun.serviceDate"),
+    endedAtMs: e.endedAtMs === null ? null : timestamp(e.endedAtMs, "endedRun.endedAtMs"),
+    replacement: e.replacement === null ? null : oneOf(e.replacement, ["pending"] as const, "endedRun.replacement"),
+    validUntilMs: timestamp(e.validUntilMs, "endedRun.validUntilMs"),
+  };
+}
+
+function serviceNotice(raw: unknown): ServiceNotice | null {
+  if (raw === null || raw === undefined) return null;
+  const n = obj(raw, "serviceNotice");
+  const status = oneOf(n.status, ["no_service", "late_start"] as const, "serviceNotice.status");
+  const minutes = n.lateStartMinutes === null ? null : safeWhole(n.lateStartMinutes, "serviceNotice.lateStartMinutes");
+  if ((status === "late_start") !== (minutes !== null && minutes > 0)) {
+    throw new MappingError("serviceNotice.lateStartMinutes");
+  }
+  return {
+    serviceDate: serviceDate(n.serviceDate, "serviceNotice.serviceDate"),
+    status,
+    lateStartMinutes: minutes,
+    notice: str(n.notice, "serviceNotice.notice"),
+    validUntilMs: timestamp(n.validUntilMs, "serviceNotice.validUntilMs"),
+  };
+}
+
+function notices(env: Json): TripNotices {
+  return { endedRun: endedRun(env.endedRun), serviceNotice: serviceNotice(env.serviceNotice) };
+}
+
 export function runSnapshot(raw: unknown): RunSnapshot {
   const env = obj(raw, "myRun");
   checkVersion(env);
@@ -193,6 +243,8 @@ export function runSnapshot(raw: unknown): RunSnapshot {
         routeVersionId: str(env.routeVersionId, "routeVersionId"),
         run: run(env.run, serverNowMs),
         serverNowMs,
+        // A running trip has no ended run of its own; only the calendar applies.
+        notices: { endedRun: null, serviceNotice: serviceNotice(env.serviceNotice) },
       };
     }
     case "no_active_run":
@@ -200,6 +252,8 @@ export function runSnapshot(raw: unknown): RunSnapshot {
         kind: "no_active_run",
         assignmentId: str(env.assignmentId, "assignmentId"),
         routeVersionId: str(env.routeVersionId, "routeVersionId"),
+        serverNowMs: timestamp(env.serverNowMs, "serverNowMs"),
+        notices: notices(env),
       };
     case "access_unavailable":
       return { kind: "access_unavailable", reason: reason(env) };

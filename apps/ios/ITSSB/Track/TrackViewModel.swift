@@ -6,6 +6,8 @@ struct TrackContext: Equatable, Sendable {
     let assignment: AssignmentSummary
     /// Nil until `tracking:myRoute` answers, or if it answered for another route version.
     let route: RouteGeometry?
+    /// Today's ended trip and calendar notice; the view hides them once their day ends.
+    let notices: TripNotices
 }
 
 /// Explicit screen states (docs/06 §6). Never show a map that looks live while
@@ -15,7 +17,8 @@ struct TrackContext: Equatable, Sendable {
 enum TrackState: Equatable {
     case loading
     case tracking(TrackContext, TrackedRun, ServerClock)
-    case noActiveRun(TrackContext)
+    /// The clock decides when today's ended trip or notice expires.
+    case noActiveRun(TrackContext, ServerClock)
     /// No approved assignment, or access was removed. Protected data is cleared.
     case accessUnavailable
     /// The backend no longer accepts the session. Protected data is cleared.
@@ -206,12 +209,12 @@ final class TrackViewModel {
         switch runSnapshot {
         case nil:
             state = .loading
-        case let .ready(assignmentId, routeVersionId, run, clock):
+        case let .ready(assignmentId, routeVersionId, run, clock, notices):
             guard assignmentId == selected else { return }
-            state = .tracking(context(assignment, routeVersionId: routeVersionId), run, clock)
-        case let .noActiveRun(assignmentId, routeVersionId):
+            state = .tracking(context(assignment, routeVersionId: routeVersionId, notices: notices), run, clock)
+        case let .noActiveRun(assignmentId, routeVersionId, clock, notices):
             guard assignmentId == selected else { return }
-            state = .noActiveRun(context(assignment, routeVersionId: routeVersionId))
+            state = .noActiveRun(context(assignment, routeVersionId: routeVersionId, notices: notices), clock)
         case .accessUnavailable(let reason):
             clearSelection()
             state = reason == .unauthenticated ? .sessionExpired : .accessUnavailable
@@ -219,8 +222,10 @@ final class TrackViewModel {
     }
 
     /// Only geometry for the run's own route version is drawn.
-    private func context(_ assignment: AssignmentSummary, routeVersionId: String) -> TrackContext {
-        TrackContext(assignment: assignment, route: route?.routeVersionId == routeVersionId ? route : nil)
+    private func context(_ assignment: AssignmentSummary, routeVersionId: String,
+                         notices: TripNotices) -> TrackContext {
+        TrackContext(assignment: assignment, route: route?.routeVersionId == routeVersionId ? route : nil,
+                     notices: notices)
     }
 
     private func fail(with error: Error) {

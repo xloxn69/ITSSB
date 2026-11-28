@@ -2,16 +2,19 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { readInstant } from "../tracking/clock";
 import {
   capturedTime,
+  currentNotices,
   dimsMarker,
   etaView,
   livePresentation,
+  noTripCopy,
+  serviceNoticeTitle,
   showsMarker,
   statusCopy,
   stopProgressText,
   whileDisconnected,
 } from "../tracking/presentation";
 import { connectionNotice, reverifyOnForeground, type TrackContext, type TrackStore } from "../tracking/store";
-import type { TrackedRun } from "../tracking/model";
+import type { ServiceNotice, TrackedRun } from "../tracking/model";
 import type { ServerClock } from "../tracking/clock";
 import { AlertsPanel } from "./AlertsPanel";
 import { RouteDiagram } from "./RouteDiagram";
@@ -85,12 +88,7 @@ export function TrackPage({ store, onSignIn }: { store: TrackStore; onSignIn: ()
           case "loading":
             return <Message title="Finding your bus…" detail="Loading your approved trip." busy />;
           case "no_active_run":
-            return (
-              <>
-                <ContextHeader context={state.context} />
-                <Message title="No trip right now" detail="Your bus isn't running a route at the moment." />
-              </>
-            );
+            return <NoTrip context={state.context} clock={state.clock} />;
           case "access_unavailable":
             return (
               <Message
@@ -148,6 +146,39 @@ function ContextHeader({ context }: { context: TrackContext }) {
   );
 }
 
+/** I19/I27: today's cancelled or completed trip, a calendar notice, or no trip. No bus marker. */
+function NoTrip({ context, clock }: { context: TrackContext; clock: ServerClock }) {
+  const now = useTick();
+  const notices = currentNotices(context.notices, clock, now);
+  const copy = noTripCopy(notices);
+  // A calendar notice under a cancellation or completion, which takes the card's title.
+  const extra = notices.endedRun ? notices.serviceNotice : null;
+  return (
+    <>
+      <ContextHeader context={context} />
+      <section className="card message" aria-live="polite" aria-atomic="true">
+        <div className="message-icon" aria-hidden>
+          i
+        </div>
+        <h2>{copy.title}</h2>
+        <p className="muted">{copy.detail}</p>
+        {copy.age && <p className="muted small age">{copy.age}</p>}
+      </section>
+      {extra && <NoticeCard notice={extra} />}
+    </>
+  );
+}
+
+function NoticeCard({ notice }: { notice: ServiceNotice }) {
+  return (
+    <section className="card stack" style={{ gap: "var(--space-xs)" }} aria-live="polite">
+      <p className="muted small">From your school</p>
+      <h2>{serviceNoticeTitle(notice)}</h2>
+      <p>{notice.notice}</p>
+    </section>
+  );
+}
+
 function Tracking({
   context,
   run,
@@ -166,6 +197,7 @@ function Tracking({
   // Only while the bus is live: never while disconnected, stale, or without a GPS fix.
   const eta = !connectionLost && presentation.kind === "live" ? etaView(run, clock, now) : null;
   const progress = stopProgressText(run);
+  const { serviceNotice } = currentNotices(context.notices, clock, now);
   return (
     <>
       <ContextHeader context={context} />
@@ -197,6 +229,7 @@ function Tracking({
               <p className="muted small age">{eta.madeText}. Estimates can change.</p>
             </section>
           )}
+          {serviceNotice && <NoticeCard notice={serviceNotice} />}
           <section className="card">
             <dl className="facts">
               <dt>Bus</dt>

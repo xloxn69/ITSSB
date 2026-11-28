@@ -65,6 +65,49 @@ struct StatusCopy: Equatable {
         }
     }
 
+    /// The card when no trip is running (docs/06 I19/I27). A cancellation
+    /// uses fixed wording: staff's reason is for staff and drivers. A pending
+    /// replacement is "being sent", not "on the way", until it starts.
+    static func noTrip(_ notices: TripNotices, timeZone: TimeZone = .current) -> StatusCopy {
+        let when = { (verb: String) in
+            notices.endedRun?.endedAt.map { "\(verb) at \(capturedTime($0, timeZone: timeZone))" }
+        }
+        switch notices.endedRun?.state {
+        case .cancelled? where notices.endedRun?.replacementPending == true:
+            return StatusCopy(title: "Trip cancelled",
+                              detail: "The school cancelled this trip and is sending a replacement bus. "
+                                + "Its location appears here once it starts.",
+                              age: when("Cancelled"), systemImage: "arrow.triangle.swap", tone: .unknown)
+        case .cancelled?:
+            return StatusCopy(title: "Trip cancelled",
+                              detail: "The school cancelled today's trip on this route. "
+                                + "There's no live bus location for it.",
+                              age: when("Cancelled"), systemImage: "xmark.circle", tone: .unknown)
+        case .completed?:
+            return StatusCopy(title: "Trip completed",
+                              detail: "Today's trip on this route has finished. There's no live bus location now.",
+                              age: when("Finished"), systemImage: "checkmark.circle", tone: .unknown)
+        case nil:
+            break
+        }
+        if let notice = notices.serviceNotice {
+            return StatusCopy(title: noticeTitle(notice), detail: notice.notice, age: nil,
+                              systemImage: "calendar.badge.exclamationmark", tone: .unknown)
+        }
+        return StatusCopy(title: "No trip right now",
+                          detail: "Your bus isn't running this route at the moment. "
+                            + "The live location appears when the trip starts.",
+                          age: nil, systemImage: "bus", tone: .unknown)
+    }
+
+    /// "No service today", "Starts 20 minutes late today".
+    static func noticeTitle(_ notice: ServiceNotice) -> String {
+        switch notice.kind {
+        case .noService: "No service today"
+        case .lateStart(let minutes): "Starts \(minutes) \(minutes == 1 ? "minute" : "minutes") late today"
+        }
+    }
+
     static func capturedTime(_ date: Date, timeZone: TimeZone) -> String {
         var style = Date.FormatStyle(date: .omitted, time: .shortened)
         style.timeZone = timeZone

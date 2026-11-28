@@ -6,7 +6,15 @@
  */
 import { type GpsStatus, POSITION_STALE_AFTER_MS, type RunState } from "@itssb/contracts";
 import { ageClockMs, type Instant, type ServerClock } from "./clock";
-import { type AlertItem, type Freshness, positionAgeMs, positionFreshness, type TrackedRun } from "./model";
+import {
+  type AlertItem,
+  type Freshness,
+  positionAgeMs,
+  positionFreshness,
+  type ServiceNotice,
+  type TrackedRun,
+  type TripNotices,
+} from "./model";
 
 export type LivePresentation =
   /** A recent position. `aging` means an update is overdue but not yet stale. */
@@ -148,6 +156,73 @@ export function statusCopy(
         tone: "unknown",
       };
   }
+}
+
+/**
+ * Only what still describes today on the server-aligned clock. The backend
+ * query isn't re-run when a day ends, so yesterday's cancellation or "no
+ * service" would otherwise stay on screen overnight (docs/08 §8).
+ */
+export function currentNotices(notices: TripNotices, clock: ServerClock, now: Instant): TripNotices {
+  const serverNow = ageClockMs(clock, now);
+  return {
+    endedRun: notices.endedRun && serverNow < notices.endedRun.validUntilMs ? notices.endedRun : null,
+    serviceNotice: notices.serviceNotice && serverNow < notices.serviceNotice.validUntilMs ? notices.serviceNotice : null,
+  };
+}
+
+/** "No service today", "Starts 20 minutes late". */
+export function serviceNoticeTitle(notice: ServiceNotice): string {
+  if (notice.status === "no_service") return "No service today";
+  const minutes = notice.lateStartMinutes ?? 0;
+  return `Starts ${minutes} ${minutes === 1 ? "minute" : "minutes"} late today`;
+}
+
+/**
+ * The card when no trip is running (docs/06 I19/I27). A cancellation uses
+ * fixed wording: staff's reason is for staff and drivers. A pending
+ * replacement is "being sent", not "on the way", until it actually starts.
+ */
+export function noTripCopy(notices: TripNotices, timeZone?: string): StatusCopy {
+  const ended = notices.endedRun;
+  const at = (verb: string) => (ended?.endedAtMs ? `${verb} at ${capturedTime(ended.endedAtMs, timeZone)}` : null);
+  if (ended?.state === "cancelled") {
+    return ended.replacement === "pending"
+      ? {
+          title: "Trip cancelled",
+          detail: "The school cancelled this trip and is sending a replacement bus. Its location appears here once it starts.",
+          age: at("Cancelled"),
+          tone: "unknown",
+        }
+      : {
+          title: "Trip cancelled",
+          detail: "The school cancelled today's trip on this route. There's no live bus location for it.",
+          age: at("Cancelled"),
+          tone: "unknown",
+        };
+  }
+  if (ended?.state === "completed") {
+    return {
+      title: "Trip completed",
+      detail: "Today's trip on this route has finished. There's no live bus location now.",
+      age: at("Finished"),
+      tone: "unknown",
+    };
+  }
+  if (notices.serviceNotice) {
+    return {
+      title: serviceNoticeTitle(notices.serviceNotice),
+      detail: notices.serviceNotice.notice,
+      age: null,
+      tone: "unknown",
+    };
+  }
+  return {
+    title: "No trip right now",
+    detail: "Your bus isn't running a route at the moment.",
+    age: null,
+    tone: "unknown",
+  };
 }
 
 export interface EtaView {

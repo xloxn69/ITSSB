@@ -5,7 +5,7 @@ import endRequest from "../fixtures/tripEvent.endRun.request.json" with { type: 
 import startAccepted from "../fixtures/tripEvent.startRun.accepted.json" with { type: "json" };
 import startRequest from "../fixtures/tripEvent.startRun.request.json" with { type: "json" };
 import { tripEventFixtureFiles } from "./tripEventFixtures.js";
-import { localDate, validateTripEventRequest } from "./tripEvents.js";
+import { endOfLocalDayMs, localDate, validateTripEventRequest } from "./tripEvents.js";
 
 const json: Record<keyof typeof tripEventFixtureFiles, unknown> = {
   "tripEvent.startRun.request": startRequest,
@@ -69,5 +69,21 @@ describe("localDate", () => {
     const atMs = Date.UTC(2026, 10, 26, 3, 0, 0);
     expect(localDate(atMs, "America/New_York")).toBe("2026-11-25");
     expect(localDate(atMs, "UTC")).toBe("2026-11-26");
+  });
+});
+
+describe("endOfLocalDayMs", () => {
+  it.each([
+    // Ordinary day, and both daylight-saving changes in New York (23 h and 25 h days).
+    ["2026-11-25", "America/New_York", Date.UTC(2026, 10, 26, 5)],
+    ["2026-03-08", "America/New_York", Date.UTC(2026, 2, 9, 4)],
+    ["2026-11-01", "America/New_York", Date.UTC(2026, 10, 2, 5)],
+    ["2026-11-25", "UTC", Date.UTC(2026, 10, 26)],
+    ["2026-11-25", "Pacific/Kiritimati", Date.UTC(2026, 10, 25, 10)],
+  ])("%s in %s ends at the next local midnight", (date, zone, expected) => {
+    const end = endOfLocalDayMs(date, zone);
+    expect(end).toBe(expected);
+    expect(localDate(end - 1, zone)).toBe(date);
+    expect(localDate(end, zone)).not.toBe(date);
   });
 });
