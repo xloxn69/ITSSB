@@ -27,8 +27,10 @@ enum DomainMapping {
             // A running trip has no ended run of its own; only the calendar applies.
             return .ready(assignmentId: ready.assignmentId, routeVersionId: ready.routeVersionId,
                           run: try run(from: ready.run, serverNow: clock.serverNow), clock: clock,
-                          notices: TripNotices(endedRun: nil,
-                                               serviceNotice: try ready.serviceNotice.map(serviceNotice(from:))))
+                          // A bad notice is dropped, like a bad estimate: the live trip stays usable.
+                          notices: TripNotices(endedRun: nil, serviceNotice: ready.serviceNotice.flatMap {
+                              try? serviceNotice(from: $0)
+                          }))
         case .noActiveRun(let none):
             try checkVersion(none.schemaVersion)
             return .noActiveRun(assignmentId: none.assignmentId, routeVersionId: none.routeVersionId,

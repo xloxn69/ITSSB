@@ -227,6 +227,14 @@ function serviceNotice(raw: unknown): ServiceNotice | null {
   };
 }
 
+function optional<T>(map: () => T | null): T | null {
+  try {
+    return map();
+  } catch {
+    return null;
+  }
+}
+
 function notices(env: Json): TripNotices {
   return { endedRun: endedRun(env.endedRun), serviceNotice: serviceNotice(env.serviceNotice) };
 }
@@ -244,7 +252,8 @@ export function runSnapshot(raw: unknown): RunSnapshot {
         run: run(env.run, serverNowMs),
         serverNowMs,
         // A running trip has no ended run of its own; only the calendar applies.
-        notices: { endedRun: null, serviceNotice: serviceNotice(env.serviceNotice) },
+        // A bad notice is dropped, like a bad estimate: the live trip stays usable.
+        notices: { endedRun: null, serviceNotice: optional(() => serviceNotice(env.serviceNotice)) },
       };
     }
     case "no_active_run":

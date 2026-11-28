@@ -60,6 +60,13 @@ describe("myRun ended-run and notice mapping", () => {
   });
 });
 
+describe("a malformed notice on a running trip", () => {
+  it("is dropped and the live trip stays usable", () => {
+    const raw = { ...myRunReady, serviceNotice: { ...(myRunLateStart as NoRun).serviceNotice, status: "maybe" } };
+    expect(runSnapshot(raw)).toMatchObject({ kind: "ready", notices: { endedRun: null, serviceNotice: null } });
+  });
+});
+
 describe("no-trip status copy", () => {
   it.each([
     [myRunCancelled, "Trip cancelled", "The school cancelled today's trip"],

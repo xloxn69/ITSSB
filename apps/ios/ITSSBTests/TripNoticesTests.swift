@@ -63,6 +63,16 @@ final class TripNoticesTests: XCTestCase {
         }
     }
 
+    /// On a running trip a bad notice is dropped; the live trip stays usable.
+    func testMalformedNoticeOnARunningTripIsDropped() throws {
+        let fixture = try ContractFixture.data("myRun.ready")
+        var root = try XCTUnwrap(JSONSerialization.jsonObject(with: fixture) as? [String: Any])
+        root["serviceNotice"] = ["serviceDate": "2026-11-25", "status": "maybe", "lateStartMinutes": NSNull(),
+                                 "notice": "x", "validUntilMs": 1_795_669_200_000]
+        let data = try JSONSerialization.data(withJSONObject: root)
+        XCTAssertEqual(try notices(data: data), .none)
+    }
+
     // MARK: Expiry
 
     func testNoticesDisappearWhenTheirDayEnds() throws {
