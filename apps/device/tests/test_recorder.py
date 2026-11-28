@@ -1,4 +1,6 @@
-from itssb_device.database import Database
+import pytest
+
+from itssb_device.database import Database, RunNotActive
 from itssb_device.gps_reader import LatestFixHolder
 from itssb_device.models import Fix
 from itssb_device.recorder import Recorder
@@ -152,3 +154,87 @@ def test_failed_saves_become_a_visible_fault_until_recovery(tmp_path, clock, sto
     assert faults[:2] == ["save failed: OSError", "save failed: OSError"]
     assert board.snapshot()["recorder"]["fault"] is None  # cleared after a good cycle
     assert None in faults[2:]
+
+
+# ── D15: the run ends while a GPS write is in flight ─────────────────
+
+
+def _rows(db, run_id):
+    return db.conn.execute(
+        "SELECT t.event_id, t.run_sequence, o.payload FROM telemetry_events t "
+        "JOIN outbox o ON o.event_id=t.event_id WHERE t.run_id=? ORDER BY t.run_sequence",
+        (run_id,),
+    ).fetchall()
+
+
+def _end_lands_between_check_and_write(rec, path):
+    """Ends the run from another connection (the driver API's) right after the
+    recorder saw it active and before its write transaction begins."""
+    real = rec.db.last_captured_at_ms
+    ended = {}
+
+    def hooked(run_id, at_most=None):
+        other = Database(path)
+        try:
+            ended["payload"] = other.end_run_locally(run_id, "end-req-1", "grant-demo", 5_000)
+        finally:
+            other.close()
+        rec.db.last_captured_at_ms = real  # once
+        return real(run_id, at_most=at_most)
+
+    rec.db.last_captured_at_ms = hooked
+    return ended
+
+
+def test_d15_run_ended_between_check_and_write_commits_nothing(tmp_path, clock):
+    path = tmp_path / "d.db"
+    rec, latest, board = make(path, clock)
+    rec.db.save_run("demo_run_001", "active")
+    for t in (1_000, 2_000):
+        latest.set(fix(t), clock())
+        assert rec.tick() is True
+    before = [tuple(r) for r in _rows(rec.db, "demo_run_001")]
+
+    ended = _end_lands_between_check_and_write(rec, path)
+    latest.set(fix(3_000), clock())
+    assert rec.tick() is False  # the in-flight write lost the race and committed nothing
+
+    assert ended["payload"]["lastRunSequence"] == 1
+    assert [tuple(r) for r in _rows(rec.db, "demo_run_001")] == before
+    assert rec.db.outbox_counts()["pending"] == 2
+    assert rec.sequence == 2  # the lost write did not consume a sequence
+    assert rec.db.active_run() is None
+    assert board.snapshot()["run"] is None
+    state = rec.db.conn.execute(
+        "SELECT state, next_run_sequence FROM local_runs WHERE run_id='demo_run_001'"
+    ).fetchone()
+    assert (state["state"], state["next_run_sequence"]) == ("completed", 2)
+    assert rec.db.pending_end_payloads() == [ended["payload"]]
+
+
+def test_d15_restart_after_the_race_records_nothing_past_the_final_sequence(tmp_path, clock):
+    path = tmp_path / "d.db"
+    rec, latest, _ = make(path, clock, boot="boot-a")
+    rec.db.save_run("demo_run_001", "active")
+    for t in (1_000, 2_000):
+        latest.set(fix(t), clock())
+        rec.tick()
+    ended = _end_lands_between_check_and_write(rec, path)
+    latest.set(fix(3_000), clock())
+    rec.tick()
+    before = [tuple(r) for r in _rows(rec.db, "demo_run_001")]
+    rec.db.close()  # process dies with the end still pending upload
+
+    rec2, latest2, board2 = make(path, clock, boot="boot-b")
+    for t in (4_000, 5_000):  # fresh, newer fixes keep arriving after restart
+        latest2.set(fix(t), clock())
+        assert rec2.tick() is False
+    with pytest.raises(RunNotActive):
+        rec2.db.record_observation("demo_run_001", fix(6_000), "boot-b", 0)
+
+    rows = _rows(rec2.db, "demo_run_001")
+    assert [tuple(r) for r in rows] == before
+    assert max(r["run_sequence"] for r in rows) == ended["payload"]["lastRunSequence"] == 1
+    assert rec2.db.active_run() is None
+    assert board2.snapshot()["run"] is None
+    assert rec2.db.pending_end_payloads() == [ended["payload"]]
