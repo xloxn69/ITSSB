@@ -562,7 +562,9 @@ export default defineSchema({
     updatedAtMs: v.number(),
   })
     .index("by_state_next", ["state", "nextAttemptAtMs"])
-    .index("by_run_state", ["runId", "state"]),
+    .index("by_run_state", ["runId", "state"])
+    // Convex orders every index by _creationTime last: oldest job per state.
+    .index("by_state_created", ["state"]),
 
   /**
    * Service calendar exceptions (docs/12 §3, §7): one row per date with no

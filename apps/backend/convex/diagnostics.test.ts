@@ -2,6 +2,7 @@ import { convexTest } from "convex-test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
+import { JOB_SCAN_LIMIT } from "./notificationJobs";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -139,7 +140,9 @@ describe("fleet.diagnostics notification job age", () => {
 
   afterEach(() => vi.useRealTimers());
 
-  async function withJobs(jobs: { agoMs: number; state: Doc<"notificationJobs">["state"] }[]) {
+  async function withJobs(
+    jobs: { agoMs: number; state: Doc<"notificationJobs">["state"]; nextAttemptAtMs?: number; copies?: number }[],
+  ) {
     vi.useFakeTimers();
     vi.setSystemTime(NOW - 30 * HOUR);
     const s = await setup();
@@ -164,29 +167,31 @@ describe("fleet.diagnostics notification job age", () => {
       vi.setSystemTime(NOW - job.agoMs); // _creationTime is the transaction's time
       await s.t.run(async (ctx) => {
         const { userId, stopId, assignmentId, pushTokenId } = base;
-        const alertId = await ctx.db.insert("alerts", {
-          logicalKey: `k${i}`,
-          type: "approaching",
-          userId,
-          assignmentId,
-          runId: s.activeRun,
-          stopId,
-          createdAtMs: NOW - job.agoMs,
-          predictedArrivalAtMs: NOW,
-          predictionGeneratedAtMs: NOW - job.agoMs,
-          sourceEventId: `e${i}`,
-        });
-        await ctx.db.insert("notificationJobs", {
-          alertId,
-          userId,
-          runId: s.activeRun,
-          pushTokenId,
-          state: job.state,
-          attempts: 0,
-          nextAttemptAtMs: NOW,
-          expiresAtMs: NOW + HOUR,
-          updatedAtMs: NOW,
-        });
+for (let c = 0; c < (job.copies ?? 1); c++) {
+          const alertId = await ctx.db.insert("alerts", {
+            logicalKey: `k${i}-${c}`,
+            type: "approaching",
+            userId,
+            assignmentId,
+            runId: s.activeRun,
+            stopId,
+            createdAtMs: NOW - job.agoMs,
+            predictedArrivalAtMs: NOW,
+            predictionGeneratedAtMs: NOW - job.agoMs,
+            sourceEventId: `e${i}-${c}`,
+          });
+          await ctx.db.insert("notificationJobs", {
+            alertId,
+            userId,
+            runId: s.activeRun,
+            pushTokenId,
+            state: job.state,
+            attempts: 0,
+            nextAttemptAtMs: job.nextAttemptAtMs ?? NOW,
+            expiresAtMs: NOW + HOUR,
+            updatedAtMs: NOW,
+          });
+        }
       });
     }
     vi.setSystemTime(NOW);
@@ -230,6 +235,21 @@ describe("fleet.diagnostics notification job age", () => {
     expect(result.notifications.oldestWaitingCreatedAtMs).toBe(NOW - 27 * HOUR);
     expect(result.notifications.countsByState.pending).toBe(0); // created before the window
   });
+
+  it("an old retryable job scheduled behind more than the scan cap is still the oldest", async () => {
+    const { t } = await withJobs([
+      // Created first, but its next attempt is the furthest away.
+      { agoMs: 29 * HOUR, state: "retryable_failure", nextAttemptAtMs: NOW + 10 * HOUR },
+      // Newer jobs whose next attempts come sooner fill the first 2000 index rows.
+      // All before the 24 h window, so only the waiting scan can hit its cap.
+      { agoMs: 25 * HOUR, state: "retryable_failure", nextAttemptAtMs: NOW, copies: JOB_SCAN_LIMIT + 1 },
+    ]);
+    const result = await t.withIdentity({ tokenIdentifier: STAFF }).query(api.fleet.diagnostics, {});
+    if (result.status !== "ready") throw new Error(result.status);
+    expect(result.notifications.oldestWaitingCreatedAtMs).toBe(NOW - 29 * HOUR);
+    // The waiting count stopped at the cap and says so.
+    expect(result.notifications).toMatchObject({ waitingCount: JOB_SCAN_LIMIT, truncated: true });
+  }, 60_000);
 
   it("with no jobs, nothing is waiting", async () => {
     const { t } = await withJobs([]);

@@ -47,15 +47,19 @@ export async function jobAgeSummary(ctx: QueryCtx, nowMs: number): Promise<Notif
   let oldest: number | null = null;
   let waitingCount = 0;
   for (const state of WAITING_STATES) {
+    // The oldest by creation, read directly: never limited by the count cap.
+    const first = await ctx.db
+      .query("notificationJobs")
+      .withIndex("by_state_created", (q) => q.eq("state", state))
+      .order("asc")
+      .first();
+    if (first && (oldest === null || first._creationTime < oldest)) oldest = first._creationTime;
     const rows = await ctx.db
       .query("notificationJobs")
-      .withIndex("by_state_next", (q) => q.eq("state", state))
+      .withIndex("by_state_created", (q) => q.eq("state", state))
       .take(JOB_SCAN_LIMIT + 1);
     if (rows.length > JOB_SCAN_LIMIT) truncated = true;
-    for (const job of rows.slice(0, JOB_SCAN_LIMIT)) {
-      waitingCount += 1;
-      if (oldest === null || job._creationTime < oldest) oldest = job._creationTime;
-    }
+    waitingCount += Math.min(rows.length, JOB_SCAN_LIMIT);
   }
   const countsByState = Object.fromEntries(NOTIFICATION_JOB_STATES.map((s) => [s, 0])) as Record<
     NotificationJobState,
