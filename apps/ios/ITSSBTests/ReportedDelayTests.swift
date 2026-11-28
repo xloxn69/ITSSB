@@ -4,13 +4,19 @@ import XCTest
 /// The driver's delay report: decoded from the shared fixture, category only,
 /// shown with its age, never as an ETA, and gone once it expires (docs/08 §9.4).
 final class ReportedDelayTests: XCTestCase {
-    private func run(_ name: String, _ patch: String? = nil, _ value: Any? = nil) throws -> TrackedRun {
-        let data = try patch.map { try ContractFixture.patched(name, $0, value as Any) } ?? ContractFixture.data(name)
-        let dto = try JSONDecoder().decode(MyRunDTO.self, from: data)
-        guard case let .ready(_, _, run, _) = try DomainMapping.snapshot(from: dto, receivedAt: Date()) else {
+    private func fixtureRun(_ name: String, _ patch: String? = nil, _ value: Any? = nil) throws -> TrackedRun {
+        let data: Data
+        if let patch {
+            data = try ContractFixture.patched(name, patch, value as Any)
+        } else {
+            data = try ContractFixture.data(name)
+        }
+        let dto: MyRunDTO = try JSONDecoder().decode(MyRunDTO.self, from: data)
+        let snapshot: RunSnapshot = try DomainMapping.snapshot(from: dto, receivedAt: Date())
+        guard case let .ready(_, _, tracked, _) = snapshot else {
             throw XCTSkip("not ready")
         }
-        return run
+        return tracked
     }
 
     private func line(_ run: TrackedRun, _ offset: TimeInterval) -> String? {
@@ -21,7 +27,7 @@ final class ReportedDelayTests: XCTestCase {
     }
 
     func testDecodesTheFixtureWithNoEta() throws {
-        let run = try run("myRun.reportedDelay")
+        let run = try fixtureRun("myRun.reportedDelay")
         XCTAssertNil(run.eta)
         let delay = try XCTUnwrap(run.reportedDelay)
         XCTAssertEqual(delay.category, .traffic)
@@ -30,32 +36,33 @@ final class ReportedDelayTests: XCTestCase {
     }
 
     func testAnOlderBackendWithoutTheFieldStillDecodes() throws {
-        XCTAssertNil(try run("myRun.ready").reportedDelay)
+        XCTAssertNil(try fixtureRun("myRun.ready").reportedDelay)
     }
 
     func testAMalformedReportIsDroppedAndTheRunKept() throws {
-        for (key, value) in [("category", "late"), ("source", "staff")] as [(String, Any)] {
-            let bad = try run("myRun.reportedDelay", "run.reportedDelay.\(key)", value)
+        let badValues: [(key: String, value: String)] = [("category", "late"), ("source", "staff")]
+        for (key, value) in badValues {
+            let bad = try fixtureRun("myRun.reportedDelay", "run.reportedDelay.\(key)", value)
             XCTAssertNil(bad.reportedDelay, key)
             XCTAssertEqual(bad.busLabel, "Bus 12")
         }
-        XCTAssertNil(try run("myRun.reportedDelay", "run.reportedDelay.minutes", 2.5).reportedDelay)
+        XCTAssertNil(try fixtureRun("myRun.reportedDelay", "run.reportedDelay.minutes", 2.5).reportedDelay)
     }
 
     func testShowsTheCategoryMinutesAndAge() throws {
-        XCTAssertEqual(line(try run("myRun.reportedDelay"), 180),
+        XCTAssertEqual(line(try fixtureRun("myRun.reportedDelay"), 180),
                        "Driver reported a delay (traffic), about 10 min — reported 3 min ago")
     }
 
     func testDisappearsAtValidUntil() throws {
-        let run = try run("myRun.reportedDelay")
+        let run = try fixtureRun("myRun.reportedDelay")
         let validFor = run.reportedDelay!.validUntil.timeIntervalSince(run.reportedDelay!.reportedAt)
         XCTAssertNotNil(line(run, validFor - 1))
         XCTAssertNil(line(run, validFor))
     }
 
     func testNeverShownOnARunThatIsNotActive() throws {
-        XCTAssertNil(line(try run("myRun.reportedDelay", "run.state", "completed"), 60))
+        XCTAssertNil(line(try fixtureRun("myRun.reportedDelay", "run.state", "completed"), 60))
     }
 
     func testCategoryWordsMatchTheContract() {
