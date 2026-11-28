@@ -26,9 +26,10 @@ const BODY = "Open ITSSB for the current estimate.";
 
 const OPEN_STATES = ["pending", "retryable_failure", "in_progress"] as const;
 
-function retryDelayMs(attempts: number): number {
+/** Wait before the next attempt; `random` returns [0, 1) and is injectable for tests. */
+export function retryDelayMs(attempts: number, random: () => number = Math.random): number {
   const base = Math.min(RETRY_CAP_MS, RETRY_BASE_MS * 2 ** Math.max(0, attempts - 1));
-  return Math.round(base * (1 + 0.2 * Math.random()));
+  return Math.round(base * (1 + 0.2 * random()));
 }
 
 async function end(

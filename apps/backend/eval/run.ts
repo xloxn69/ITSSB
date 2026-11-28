@@ -20,7 +20,7 @@ const fmt = (x: number) => (Number.isFinite(x) ? x.toFixed(0) : "—");
 function report(title: string, params: typeof BASELINE_V1) {
   const r = evaluate(route, test, params);
   console.log(`\n${title}: cruise ${params.cruiseSpeedMps} m/s, dwell ${params.dwellMs / 1000} s`);
-  console.log(`coverage ${(r.coverage * 100).toFixed(1)}% of upcoming-stop opportunities`);
+  console.log(`coverage ${(r.coverage * 100).toFixed(1)}% of upcoming-stop time (dropouts and withheld estimates count as uncovered)`);
   console.log("horizon     |      n | median |  mean |   p90 |  bias   (seconds; bias + = predicted late)");
   for (const row of [{ horizon: "all", ...r.overall }, ...r.byHorizon]) {
     console.log(

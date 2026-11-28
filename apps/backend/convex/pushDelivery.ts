@@ -18,9 +18,9 @@ import {
   apnsConfigFromEnv,
   base64Url,
   buildApnsRequest,
-  classifyApnsResponse,
   providerTokenSigningInput,
 } from "./lib/apns";
+import { sendOverHttp2 } from "./lib/apnsTransport";
 import type { PushMessage, PushResult, PushSender } from "./lib/push";
 
 /** Apple allows refreshing the provider token at most every 20 minutes and requires it under an hour. */
@@ -48,45 +48,7 @@ class ApnsSender implements PushSender {
   async send(message: PushMessage): Promise<PushResult> {
     const http2 = await import("node:http2");
     const request = buildApnsRequest(this.config, message, await providerToken(this.config));
-    return await new Promise<PushResult>((resolve) => {
-      const session = http2.connect(request.origin);
-      const done = (result: PushResult) => {
-        session.close();
-        resolve(result);
-      };
-      // An ambiguous timeout: APNs may have accepted it. Retrying reuses
-      // the same collapse ID, which limits but does not prevent a duplicate.
-      const timer = setTimeout(() => done({ kind: "retryable", reason: "timeout" }), SEND_TIMEOUT_MS);
-      session.on("error", (e) => {
-        clearTimeout(timer);
-        done({ kind: "retryable", reason: `network:${e.message}` });
-      });
-      const stream = session.request({ ":method": "POST", ":path": request.path, ...request.headers });
-      let status = 0;
-      let body = "";
-      stream.on("response", (headers) => {
-        status = Number(headers[":status"]);
-      });
-      stream.setEncoding("utf8");
-      stream.on("data", (chunk: string) => {
-        body += chunk;
-      });
-      stream.on("end", () => {
-        clearTimeout(timer);
-        let reason: string | null = null;
-        try {
-          reason = body ? ((JSON.parse(body) as { reason?: string }).reason ?? null) : null;
-        } catch {
-          reason = null;
-        }
-        done(classifyApnsResponse(status, reason));
-      });
-      stream.on("error", (e) => {
-        clearTimeout(timer);
-        done({ kind: "retryable", reason: `stream:${e.message}` });
-      });
-      stream.end(request.body);
-    });
+    return await sendOverHttp2((origin) => http2.connect(origin), request, SEND_TIMEOUT_MS);
   }
 }
 

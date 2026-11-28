@@ -22,26 +22,64 @@ export interface Sample {
 
 export interface ReplayResult {
   samples: Sample[];
-  /** Fix × upcoming-stop opportunities where the bus had not yet arrived. */
-  opportunities: number;
+  /**
+   * Coverage is measured in time, not per fix: for every upcoming stop, the
+   * span from run start to its true arrival is an opportunity, and only the
+   * part of it during which a family would have been shown a still-valid
+   * estimate counts as covered. A GPS dropout or a withheld estimate is
+   * uncovered time, so an algorithm cannot look better by hiding hard cases.
+   */
+  opportunityMs: number;
+  coveredMs: number;
+}
+
+/** What the backend would show after one fix: its estimate's validity end, or null when withheld. */
+export interface Shown {
+  atMs: number;
+  validUntilMs: number | null;
+}
+
+/**
+ * Covered and opportunity time for one stop. Each fix's estimate is shown
+ * from its fix until the earliest of its validity end, the next fix (which
+ * replaces it, as tracking.ts only shows the newest position's estimate) and
+ * the true arrival. `shown` is in capture order.
+ */
+export function stopCoverage(windowStartMs: number, arrivalMs: number, shown: Shown[]) {
+  let coveredMs = 0;
+  shown.forEach((s, i) => {
+    if (s.validUntilMs === null || s.atMs >= arrivalMs) return;
+    const end = Math.min(s.validUntilMs, shown[i + 1]?.atMs ?? Infinity, arrivalMs);
+    coveredMs += Math.max(0, end - Math.max(s.atMs, windowStartMs));
+  });
+  return { opportunityMs: Math.max(0, arrivalMs - windowStartMs), coveredMs };
 }
 
 export function replayRun(route: PreparedRoute, run: ReplayRun, params: BaselineParams): ReplayResult {
   const samples: Sample[] = [];
-  let opportunities = 0;
+  const shown: Shown[][] = route.stops.map(() => []);
   let state = initialProgress(route, run.startedAtMs);
   for (const fix of run.fixes) {
     state = advance(route, state, fix);
     route.stops.forEach((stop, i) => {
       const actual = run.trueArrivalMs[i];
       if (actual === undefined || actual <= fix.capturedAtMs) return;
-      opportunities += 1;
       const p = predictArrival(route, state, stop.stopId, params, fix.capturedAtMs);
+      shown[i]!.push({ atMs: fix.capturedAtMs, validUntilMs: p?.validUntilMs ?? null });
       if (!p) return;
       samples.push({ runIndex: run.runIndex, horizonMs: actual - fix.capturedAtMs, errorMs: p.arrivalAtMs - actual });
     });
   }
-  return { samples, opportunities };
+  let opportunityMs = 0;
+  let coveredMs = 0;
+  route.stops.forEach((_, i) => {
+    const actual = run.trueArrivalMs[i];
+    if (actual === undefined) return;
+    const c = stopCoverage(run.startedAtMs, actual, shown[i]!);
+    opportunityMs += c.opportunityMs;
+    coveredMs += c.coveredMs;
+  });
+  return { samples, opportunityMs, coveredMs };
 }
 
 function quantile(sorted: number[], q: number): number {
@@ -82,18 +120,23 @@ export const HORIZONS = [
   { label: "15+ min", minMs: 15 * 60_000, maxMs: Infinity },
 ] as const;
 
-export function evaluate(route: PreparedRoute, runs: ReplayRun[], params: BaselineParams) {
-  const results = runs.map((run) => replayRun(route, run, params));
+/** Overall and per-horizon error, and time-weighted coverage, for a set of replayed runs. */
+export function summarize(results: ReplayResult[]) {
   const samples = results.flatMap((r) => r.samples);
-  const opportunities = results.reduce((a, r) => a + r.opportunities, 0);
+  const opportunityMs = results.reduce((a, r) => a + r.opportunityMs, 0);
+  const coveredMs = results.reduce((a, r) => a + r.coveredMs, 0);
   return {
     overall: metrics(samples),
-    coverage: opportunities ? samples.length / opportunities : Number.NaN,
+    coverage: opportunityMs ? coveredMs / opportunityMs : Number.NaN,
     byHorizon: HORIZONS.map((h) => ({
       horizon: h.label,
       ...metrics(samples.filter((s) => s.horizonMs >= h.minMs && s.horizonMs < h.maxMs)),
     })),
   };
+}
+
+export function evaluate(route: PreparedRoute, runs: ReplayRun[], params: BaselineParams) {
+  return summarize(runs.map((run) => replayRun(route, run, params)));
 }
 
 /** Grid search on the training runs only, minimizing mean absolute error. */
