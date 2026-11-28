@@ -96,3 +96,43 @@ export function serviceDateLabel(serviceDate: string): string {
 export function runActionsAvailable(device: Pick<DeviceSummary, "activeRun" | "revoked">): boolean {
   return device.activeRun !== null;
 }
+
+/** Stands in for the PIN hash, which is made on the Pi. The Pi refuses the file until it is replaced. */
+export const PIN_HASH_PLACEHOLDER = "<paste the hash-pin output here>";
+
+/**
+ * The Pi's drivers-file entry for an issued grant (apps/device
+ * `load_drivers`): it goes inside `{"drivers": [ ... ]}` in
+ * `/etc/itssb/drivers.json`, replacing any older entry for the same driver.
+ * The PIN hash is never made in the browser: it comes from `hash-pin` on the
+ * Pi, so the entry carries a placeholder the Pi refuses until it is replaced.
+ */
+export function driversFileEntry(issued: {
+  driverUserId: string;
+  driverName: string;
+  grant: string;
+  routeVersions: { routeVersionId: string; label: string }[];
+}): string {
+  return JSON.stringify(
+    {
+      driverId: issued.driverUserId,
+      displayName: issued.driverName,
+      pinHash: PIN_HASH_PLACEHOLDER,
+      operatingGrant: issued.grant,
+      routeVersions: issued.routeVersions.map(({ routeVersionId, label }) => ({ routeVersionId, label })),
+    },
+    null,
+    2,
+  );
+}
+
+/** A staff invitation's state for the list. Only a pending one can be revoked. */
+export function invitationState(
+  i: { revoked: boolean; usedAtMs: number | null; expiresAtMs: number },
+  serverNowMs: number,
+): { text: string; pending: boolean } {
+  if (i.usedAtMs !== null) return { text: `Joined ${dateTime(i.usedAtMs)}`, pending: false };
+  if (i.revoked) return { text: "Revoked", pending: false };
+  if (i.expiresAtMs <= serverNowMs) return { text: "Expired", pending: false };
+  return { text: `Waiting, valid until ${dateTime(i.expiresAtMs)}`, pending: true };
+}

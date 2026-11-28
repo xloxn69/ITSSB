@@ -318,3 +318,143 @@ export const MAINTENANCE_REFUSAL_CODES = [
 ] as const;
 export type MaintenanceRefusalCode = (typeof MAINTENANCE_REFUSAL_CODES)[number];
 export type MaintenanceResult = StaffOpResult<MaintenanceRefusalCode>;
+
+// MARK: fleet:addDriver (docs/12 §3)
+
+/** Names of people staff add (drivers, invited staff); at most this many characters. */
+export const MAX_PERSON_NAME_LENGTH = 80;
+
+/**
+ * A driver person. Drivers unlock the bus touchscreen with a PIN and drive
+ * with an operating grant; they need no app sign-in, so the row is created
+ * unlinked.
+ */
+export type AddDriverResult =
+  | { schemaVersion: typeof SCHEMA_VERSION; status: "created"; serverNowMs: number; userId: string }
+  | { schemaVersion: typeof SCHEMA_VERSION; status: "refused"; serverNowMs: number; code: "invalid_name"; message: string }
+  | AccessUnavailable;
+
+// MARK: driverGrants:issueForDriver (action), driverGrants:listForStaff, driverGrants:revokeForStaff (docs/07 §6, docs/08 §6)
+
+export const GRANT_REFUSAL_CODES = [
+  /** No driver person with that ID. */
+  "driver_not_found",
+  /** No device with that ID, or it is revoked. */
+  "device_unavailable",
+  /** Empty list, too many, or a version that isn't approved for new runs. */
+  "route_version_unavailable",
+  "invalid_ttl",
+  /** Revoke: no such grant. */
+  "not_found",
+] as const;
+export type GrantRefusalCode = (typeof GRANT_REFUSAL_CODES)[number];
+
+/** At most this many route versions on one grant. */
+export const MAX_GRANT_ROUTE_VERSIONS = 20;
+
+export interface GrantRouteVersion {
+  routeVersionId: string;
+  label: string;
+}
+
+/**
+ * A grant issued to the staff member who asked. `grant` appears in this
+ * response only: the server keeps its SHA-256 hash. It goes into the Pi's
+ * drivers file as `operatingGrant` for `driverUserId`.
+ */
+export type GrantIssuedResult =
+  | {
+      schemaVersion: typeof SCHEMA_VERSION;
+      status: "issued";
+      serverNowMs: number;
+      grantId: string;
+      grant: string;
+      expiresAtMs: number;
+      driverUserId: string;
+      driverName: string;
+      deviceId: string;
+      routeVersions: GrantRouteVersion[];
+    }
+  | { schemaVersion: typeof SCHEMA_VERSION; status: "refused"; serverNowMs: number; code: GrantRefusalCode; message: string }
+  | AccessUnavailable;
+
+/** An active grant: not revoked, not expired. Never its secret or hash. */
+export interface DriverGrantSummary {
+  grantId: string;
+  driverUserId: string;
+  deviceId: string;
+  deviceLabel: string;
+  routeVersions: GrantRouteVersion[];
+  issuedAtMs: number;
+  expiresAtMs: number;
+  /** Null for grants issued from the command line or the dev seed. */
+  issuedByName: string | null;
+}
+
+/** A route version a new run may start on, so a grant may name it. */
+export interface GrantableRouteVersion extends GrantRouteVersion {
+  /** Null for versions created before route review existed. */
+  versionNumber: number | null;
+}
+
+export type ListDriverGrantsResult =
+  | Ready<{ grants: DriverGrantSummary[]; routeVersions: GrantableRouteVersion[] }>
+  | AccessUnavailable;
+
+export type RevokeGrantResult = StaffOpResult<"not_found">;
+
+// MARK: staffInvitations:create (action), :list, :revoke, :redeem (docs/12 §1)
+
+/** Staff invitations are single use and last from one hour to 7 days. */
+export const MAX_STAFF_INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+export type CreateStaffInvitationResult =
+  | {
+      schemaVersion: typeof SCHEMA_VERSION;
+      status: "created";
+      serverNowMs: number;
+      invitationId: string;
+      /** Shown once; only its hash is stored. */
+      token: string;
+      expiresAtMs: number;
+    }
+  | {
+      schemaVersion: typeof SCHEMA_VERSION;
+      status: "refused";
+      serverNowMs: number;
+      code: "invalid_name" | "invalid_ttl";
+      message: string;
+    }
+  | AccessUnavailable;
+
+export interface StaffInvitationSummary {
+  invitationId: string;
+  /** The name the new staff account gets. */
+  displayName: string;
+  issuedAtMs: number;
+  issuedByName: string | null;
+  expiresAtMs: number;
+  revoked: boolean;
+  usedAtMs: number | null;
+}
+
+export type ListStaffInvitationsResult = Ready<{ invitations: StaffInvitationSummary[] }> | AccessUnavailable;
+
+export type RevokeStaffInvitationResult = StaffOpResult<"not_found">;
+
+/**
+ * Redeeming by a signed-in person whose identity is not linked to anyone.
+ * Unknown, malformed, expired, used, revoked and wrong-purpose codes all
+ * answer `invalid_code`, so the answer reveals nothing about the code.
+ * A retry by the person who already redeemed it answers `joined` again.
+ */
+export type RedeemStaffInvitationResult =
+  | { schemaVersion: typeof SCHEMA_VERSION; status: "joined"; serverNowMs: number; displayName: string }
+  | {
+      schemaVersion: typeof SCHEMA_VERSION;
+      status: "refused";
+      serverNowMs: number;
+      code: "invalid_code" | "already_linked" | "identity_unverified";
+      message: string;
+    }
+  | AccessUnavailable;

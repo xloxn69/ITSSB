@@ -35,6 +35,8 @@ export function commandView(raw: unknown): CommandView {
         id: (r.enrollmentRequestId ?? r.linkRequestId ?? null) as string | null,
         checkIn: null,
       };
+    case "joined":
+      return { kind: "sent", status: "joined", id: null, checkIn: null };
     case "accepted":
     case "already_recorded":
       if (!isRecord(r.checkIn)) return { kind: "unconfirmed" };

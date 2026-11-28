@@ -5,7 +5,9 @@
  * `import.meta.env.DEV`. The real rules live in apps/backend/convex/routes.ts.
  */
 import type {
+  DriverGrantSummary,
   MaintenanceWindow,
+  StaffInvitationSummary,
   ServiceDay,
   DeviceSummary,
   DraftDetail,
@@ -177,6 +179,28 @@ export function staffFixtureSource(variant: StaffVariant): StaffSource {
     variant === "staff"
       ? [{ windowId: "demo_window_001", deviceId: "demo_device_003", deviceLabel: "Spare Pi", startsAtMs: Date.now() + 20 * 60 * 60_000, endsAtMs: Date.now() + 22 * 60 * 60_000, reason: "Software update", scheduledByName: "Riley Staff" }]
       : [];
+  const grants: DriverGrantSummary[] =
+    variant === "staff"
+      ? [
+          {
+            grantId: "demo_grant_001",
+            driverUserId: "demo_user_021",
+            deviceId: "demo_device_001",
+            deviceLabel: "Bench Pi",
+            routeVersions: [{ routeVersionId: "demo_route_version_003", label: "Route 17 Morning" }],
+            issuedAtMs: Date.now() - 3 * 60 * 60_000,
+            expiresAtMs: Date.now() + 9 * 60 * 60_000,
+            issuedByName: "Riley Staff",
+          },
+        ]
+      : [];
+  const staffInvitations: StaffInvitationSummary[] =
+    variant === "staff"
+      ? [
+          { invitationId: "demo_staff_inv_002", displayName: "Jamie Staff", issuedAtMs: Date.now() - 2 * 60 * 60_000, issuedByName: "Riley Staff", expiresAtMs: Date.now() + 2 * dayMs, revoked: false, usedAtMs: null },
+          { invitationId: "demo_staff_inv_001", displayName: "Casey Staff", issuedAtMs: Date.now() - 5 * dayMs, issuedByName: "Riley Staff", expiresAtMs: Date.now() - 2 * dayMs, revoked: false, usedAtMs: Date.now() - 4 * dayMs },
+        ]
+      : [];
   const listeners = new Set<() => void>();
   const changed = () => {
     for (const l of listeners) l();
@@ -230,6 +254,16 @@ export function staffFixtureSource(variant: StaffVariant): StaffSource {
         });
       case "fleet:listMaintenance":
         return env({ status: "ready", windows });
+      case "driverGrants:listForStaff":
+        return env({
+          status: "ready",
+          grants,
+          routeVersions: state.routes.flatMap((r) =>
+            r.currentVersion ? [{ routeVersionId: r.currentVersion.routeVersionId, label: r.label, versionNumber: r.currentVersion.versionNumber }] : [],
+          ),
+        });
+      case "staffInvitations:list":
+        return env({ status: "ready", invitations: staffInvitations });
       case "calendar:listDays":
         return env({ status: "ready", days: days.toSorted((a, b) => a.serviceDate.localeCompare(b.serviceDate)) });
       default:
@@ -344,6 +378,28 @@ export function staffFixtureSource(variant: StaffVariant): StaffSource {
         changed();
         return env({ status: "ok" });
       }
+      case "fleet:addDriver": {
+        const displayName = args.displayName?.trim() ?? "";
+        if (!displayName || displayName.length > 80) return refuse("invalid_name", "Use 1 to 80 characters for the name.");
+        const userId = `demo_user_new_${state.drivers.length + 1}`;
+        state.drivers.push({ userId, displayName });
+        changed();
+        return env({ status: "created", userId });
+      }
+      case "driverGrants:revokeForStaff": {
+        const i = grants.findIndex((g) => g.grantId === args.grantId);
+        if (i < 0) return refuse("not_found", "That grant doesn't exist.");
+        grants.splice(i, 1);
+        changed();
+        return env({ status: "ok" });
+      }
+      case "staffInvitations:revoke": {
+        const inv = staffInvitations.find((x) => x.invitationId === args.invitationId);
+        if (!inv) return refuse("not_found", "That invitation doesn't exist.");
+        inv.revoked = true;
+        changed();
+        return env({ status: "ok" });
+      }
       case "fleet:revokeDevice": {
         const device = state.devices.find((x) => x.deviceId === args.deviceId);
         if (!device) return refuse("not_found", "That device doesn't exist.");
@@ -363,7 +419,7 @@ export function staffFixtureSource(variant: StaffVariant): StaffSource {
   let issuedCount = 0;
   const fakeSecret = () => `fixture0not0a0real0device0secret${String(++issuedCount).padStart(32, "0")}`;
 
-  function act(name: StaffActionName, args: Record<string, string | number>): unknown {
+  function act(name: StaffActionName, args: StaffArgs): unknown {
     if (variant === "staff-denied") return env({ status: "access_unavailable", reason: "not_permitted" });
     switch (name) {
       case "fleet:provisionDevice": {
@@ -374,6 +430,34 @@ export function staffFixtureSource(variant: StaffVariant): StaffSource {
         changed();
         return env({ status: "issued", deviceId, deviceSecret: fakeSecret() });
       }
+      case "driverGrants:issueForDriver": {
+        const driver = state.drivers.find((x) => x.userId === args.driverUserId);
+        if (!driver) return refuse("driver_not_found", "That driver doesn't exist.");
+        const device = state.devices.find((x) => x.deviceId === args.deviceId);
+        if (!device || device.revoked) return refuse("device_unavailable", "That device doesn't exist or is revoked.");
+        const ids = Array.isArray(args.routeVersionIds) ? args.routeVersionIds : [];
+        const routeVersions = state.routes
+          .filter((r) => r.currentVersion && ids.includes(r.currentVersion.routeVersionId))
+          .map((r) => ({ routeVersionId: r.currentVersion!.routeVersionId, label: r.label }));
+        if (routeVersions.length === 0 || routeVersions.length !== ids.length) {
+          return refuse("route_version_unavailable", "A chosen route isn't approved for new runs. Reload and choose again.");
+        }
+        const expiresAtMs = Date.now() + Number(args.ttlMs);
+        const grantId = `demo_grant_new_${grants.length + 2}`;
+        grants.push({ grantId, driverUserId: driver.userId, deviceId: device.deviceId, deviceLabel: device.label, routeVersions, issuedAtMs: Date.now(), expiresAtMs, issuedByName: "Riley Staff" });
+        changed();
+        return env({ status: "issued", grantId, grant: fakeSecret(), expiresAtMs, driverUserId: driver.userId, driverName: driver.displayName, deviceId: device.deviceId, routeVersions });
+      }
+      case "staffInvitations:create": {
+        const displayName = String(args.displayName ?? "").trim();
+        if (!displayName) return refuse("invalid_name", "Use 1 to 80 characters for the name.");
+        const expiresAtMs = Date.now() + Number(args.ttlMs);
+        const invitationId = `demo_staff_inv_new_${staffInvitations.length + 1}`;
+        staffInvitations.unshift({ invitationId, displayName, issuedAtMs: Date.now(), issuedByName: "Riley Staff", expiresAtMs, revoked: false, usedAtMs: null });
+        changed();
+        // Fictional and obviously fake; never a real code.
+        return env({ status: "created", invitationId, token: "FAKE0STAFF0C0DE00000", expiresAtMs });
+      }
       case "fleet:rotateDeviceCredential": {
         const device = state.devices.find((x) => x.deviceId === args.deviceId);
         if (!device) return refuse("not_found", "That device doesn't exist.");
@@ -381,7 +465,7 @@ export function staffFixtureSource(variant: StaffVariant): StaffSource {
         return env({ status: "issued", deviceId: device.deviceId, deviceSecret: fakeSecret() });
       }
       default: {
-        const result = enrollmentAct(enrollment, name, args);
+        const result = enrollmentAct(enrollment, name, args as Record<string, string | number>);
         changed();
         return result;
       }

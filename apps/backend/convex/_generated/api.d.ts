@@ -44,6 +44,7 @@ import type * as routes from "../routes.js";
 import type * as runOps from "../runOps.js";
 import type * as runs from "../runs.js";
 import type * as seed from "../seed.js";
+import type * as staffInvitations from "../staffInvitations.js";
 import type * as students from "../students.js";
 import type * as telemetry from "../telemetry.js";
 import type * as tracking from "../tracking.js";
@@ -93,6 +94,7 @@ declare const fullApi: ApiFromModules<{
   runOps: typeof runOps;
   runs: typeof runs;
   seed: typeof seed;
+  staffInvitations: typeof staffInvitations;
   students: typeof students;
   telemetry: typeof telemetry;
   tracking: typeof tracking;

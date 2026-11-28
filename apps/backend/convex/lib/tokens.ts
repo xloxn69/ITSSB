@@ -5,9 +5,16 @@ import { sha256Hex } from "./deviceAuth";
 
 /**
  * Scoped opaque tokens (docs/09 §2–§3): enrollment invitations, guardian
- * invitations, and trip check-in challenges share one table and one
- * resolution path, so a token is always checked for its own purpose.
+ * invitations, trip check-in challenges, and staff invitations share one
+ * table and one resolution path, so a token is always checked for its own
+ * purpose.
  */
+
+/**
+ * Every stored purpose. `staff_invitation` is backend and staff-web only, so
+ * it is not one of the family-facing `TOKEN_PURPOSES` in the contract.
+ */
+export type StoredTokenPurpose = TokenPurpose | "staff_invitation";
 
 /**
  * A new token: 20 Crockford base32 characters, 100 random bits. Call only
@@ -39,7 +46,7 @@ export type TokenResolution =
 export async function resolveToken(
   ctx: QueryCtx | MutationCtx,
   raw: string,
-  purpose: TokenPurpose,
+  purpose: StoredTokenPurpose,
   nowMs: number,
 ): Promise<TokenResolution> {
   const hash = await tokenHash(raw);

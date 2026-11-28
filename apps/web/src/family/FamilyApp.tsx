@@ -1,9 +1,9 @@
 import { TOKEN_LINK_PATHS } from "@itssb/contracts";
 import { type ReactNode, useEffect, useState } from "react";
-import { CheckInPage, FamilyActions, JoinPage, LinkPage, RequestsPage } from "./FamilyFlows";
+import { CheckInPage, FamilyActions, JoinPage, LinkPage, RequestsPage, StaffInvitePage } from "./FamilyFlows";
 import type { FamilySource } from "./familySource";
 
-const PAGES = ["join", "link", "checkin", "requests"] as const;
+const PAGES = ["join", "link", "checkin", "requests", "join-staff"] as const;
 type Page = (typeof PAGES)[number];
 
 /**
@@ -52,6 +52,7 @@ export function FamilyApp({ source, track }: { source: FamilySource; track: Reac
       {page === "link" && <LinkPage source={source} initialCode={code} />}
       {page === "checkin" && <CheckInPage source={source} initialCode={code} />}
       {page === "requests" && <RequestsPage source={source} />}
+      {page === "join-staff" && <StaffInvitePage source={source} />}
     </div>
   );
 }

@@ -54,6 +54,17 @@ export function familyFlowSource(variant: FamilyFlowVariant): FamilySource {
         return env({ status: "submitted", enrollmentRequestId: "demo_enrollment_request_009", requestStatus: "pending" });
       case "guardianLinks:request":
         return env({ status: "submitted", linkRequestId: "demo_link_request_009", requestStatus: "pending" });
+      case "staffInvitations:redeem": {
+        // Codes starting "BAD" stand in for every unusable code; "LNK" for a sign-in already linked.
+        const t = normalizeToken(args.token ?? "") ?? "";
+        if (t.startsWith("BAD")) {
+          return env({ status: "refused", code: "invalid_code", message: "This code can't be used. Ask the person who invited you for a new one." });
+        }
+        if (t.startsWith("LNK")) {
+          return env({ status: "refused", code: "already_linked", message: "This sign-in already belongs to an account. Sign in with a different email to join as staff." });
+        }
+        return env({ status: "joined", displayName: "Jamie Staff" });
+      }
       case "checkIns:record": {
         const t = normalizeToken(args.token ?? "") ?? "";
         if (t.startsWith("EXP")) return env({ status: "token_problem", problem: "expired" });

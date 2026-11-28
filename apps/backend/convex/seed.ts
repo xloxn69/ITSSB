@@ -71,7 +71,7 @@ export const dev = internalAction({
       next: [
         "Pi: set ITSSB_DEVICE_TOKEN=<deviceSecret> and ITSSB_DEVICE_API_ORIGIN=<deployment .convex.site URL> in /etc/itssb/device.env (root, 0600).",
         "Sign in with Clerk, then link: bunx convex run users:linkIdentity '{\"userId\":\"<guardianUserId>\",\"tokenIdentifier\":\"<issuer>|<Clerk user id>\"}'",
-        "The driver grant expires; issue another with driverGrants:issue.",
+        "The driver grant expires; issue another in the staff console under Drivers.",
       ],
     };
   },

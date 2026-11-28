@@ -68,7 +68,7 @@ Drivers come from `ITSSB_DRIVERS_FILE` (default `/etc/itssb/drivers.json`):
 ```json
 {"drivers": [{
   "driverId": "drv_demo", "displayName": "Demo Driver", "pinHash": "scrypt$16384$8$1$...",
-  "operatingGrant": "<grant from driverGrants:issue>",
+  "operatingGrant": "<grant from the staff console, Drivers>",
   "routeVersions": [{"routeVersionId": "<id>", "label": "Demo Route North (to school)"}]
 }]}
 ```

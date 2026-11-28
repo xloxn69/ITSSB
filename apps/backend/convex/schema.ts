@@ -105,7 +105,11 @@ export default defineSchema({
     issuedAtMs: v.number(),
     expiresAtMs: v.number(),
     revoked: v.boolean(),
-  }).index("by_token_hash", ["tokenHash"]),
+    /** Staff member who issued it from the console; absent for command-line and seed grants. */
+    issuedByUserId: v.optional(v.id("users")),
+  })
+    .index("by_token_hash", ["tokenHash"])
+    .index("by_expires", ["expiresAtMs"]),
 
   /** Accepted telemetry history. `eventId` makes delivery idempotent. */
   telemetryEvents: defineTable({
@@ -315,19 +319,27 @@ export default defineSchema({
    */
   scopedTokens: defineTable({
     tokenHash: v.string(),
-    purpose: v.union(v.literal("route_enrollment"), v.literal("guardian_link"), v.literal("trip_check_in")),
+    purpose: v.union(
+      v.literal("route_enrollment"),
+      v.literal("guardian_link"),
+      v.literal("trip_check_in"),
+      // Staff web only (docs/12 §1); never offered to families or the Pi.
+      v.literal("staff_invitation"),
+    ),
     /** route_enrollment: the route whose current approved stops are offered. */
     routeId: v.optional(v.id("routes")),
     /** guardian_link: the one student this invitation may link. */
     studentId: v.optional(v.id("students")),
     /** trip_check_in: the one run this challenge belongs to. */
     runId: v.optional(v.id("runs")),
+    /** staff_invitation: the name the new staff account gets. */
+    displayName: v.optional(v.string()),
     issuedByUserId: v.optional(v.id("users")),
     issuedByDeviceId: v.optional(v.id("devices")),
     issuedAtMs: v.number(),
     expiresAtMs: v.number(),
     revoked: v.boolean(),
-    /** Single-use tokens (guardian_link) record their first use. */
+    /** Single-use tokens (guardian_link, staff_invitation) record their first use. */
     singleUse: v.boolean(),
     usedAtMs: v.optional(v.number()),
     usedByTokenIdentifier: v.optional(v.string()),
