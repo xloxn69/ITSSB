@@ -224,9 +224,8 @@ struct AccountView: View {
             }
             .confirmationDialog("Sign out of ITSSB?", isPresented: $confirmingSignOut, titleVisibility: .visible) {
                 Button("Sign out", role: .destructive) {
-                    // Nothing of this account's own choices stays on the phone (I04, I20).
+                    // This account's profile doesn't stay on the phone (I04). Read marks clear on any sign-out.
                     ProfileStore(account: session.accountLabel).clear()
-                    AlertReadMarks().clear()
                     Task { await session.signOut() }
                 }
             }

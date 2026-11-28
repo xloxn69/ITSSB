@@ -20,7 +20,7 @@ struct DashboardRow: Equatable {
             return DashboardRow(status: "Not available", detail: "Access to this route was removed.", tone: .unknown)
         case .noActiveRun:
             return DashboardRow(status: "No trip right now", detail: nil, tone: .unknown)
-        case let .ready(_, _, run, clock):
+        case let .ready(_, _, run, clock, _):
             guard let position = run.position else {
                 return DashboardRow(status: "Trip running", detail: "Waiting for the bus's location", tone: .unknown)
             }
@@ -62,8 +62,8 @@ final class GuardianDashboardModel {
                 do {
                     for try await snapshot in source.run(assignmentId: id) {
                         guard let self, !Task.isCancelled else { return }
-                        if case let .ready(assignmentId, _, _, _) = snapshot, assignmentId != id { continue }
-                        if case let .noActiveRun(assignmentId, _) = snapshot, assignmentId != id { continue }
+                        if case let .ready(assignmentId, _, _, _, _) = snapshot, assignmentId != id { continue }
+                        if case let .noActiveRun(assignmentId, _, _, _) = snapshot, assignmentId != id { continue }
                         self.snapshots[id] = snapshot
                         self.failed.remove(id)
                     }

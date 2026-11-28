@@ -136,15 +136,23 @@ final class RemainingStatesTests: XCTestCase {
                               position: PreviewFixtures.position(capturedSecondsAgo: 2),
                               assignedStop: PreviewFixtures.stop)
         source.runContinuation("a_alex")?.yield(.ready(assignmentId: "a_alex", routeVersionId: "rv_1", run: live,
-                                                       clock: .deviceOnly))
+                                                       clock: .deviceOnly, notices: .none))
         let tracking = await eventually { if case .tracking = model.state { true } else { false } }
         XCTAssertTrue(tracking)
 
         // The run completes; then the person taps the alert for it.
-        source.runContinuation("a_alex")?.yield(.noActiveRun(assignmentId: "a_alex", routeVersionId: "rv_1"))
+        let completed = TripNotices(endedRun: EndedRun(runId: "run_1", state: .completed, serviceDate: "2026-11-28",
+                                                       endedAt: nil, replacementPending: false,
+                                                       validUntil: .distantFuture),
+                                    serviceNotice: nil)
+        source.runContinuation("a_alex")?.yield(.noActiveRun(assignmentId: "a_alex", routeVersionId: "rv_1",
+                                                             clock: .deviceOnly, notices: completed))
         model.open(assignmentId: "a_alex")
-        let ended = await eventually { if case .noActiveRun = model.state { true } else { false } }
-        XCTAssertTrue(ended, "the tap shows the completed state, with no live bus")
+        let ended = await eventually {
+            if case let .noActiveRun(context, _) = model.state { return context.notices.endedRun?.state == .completed }
+            return false
+        }
+        XCTAssertTrue(ended, "the tap shows the completed trip, with no live bus")
         model.stop()
     }
 
@@ -155,11 +163,12 @@ final class RemainingStatesTests: XCTestCase {
         func run(_ secondsAgo: TimeInterval?) -> RunSnapshot {
             .ready(assignmentId: "a", routeVersionId: "rv", run: PreviewFixtures.run(
                 position: secondsAgo.map { PreviewFixtures.position(capturedSecondsAgo: $0, now: now) }),
-                   clock: .deviceOnly)
+                   clock: .deviceOnly, notices: .none)
         }
         XCTAssertEqual(DashboardRow.make(snapshot: nil, failed: false, now: now).status, "Checking…")
         XCTAssertEqual(DashboardRow.make(snapshot: nil, failed: true, now: now).status, "Couldn't load this trip")
-        XCTAssertEqual(DashboardRow.make(snapshot: .noActiveRun(assignmentId: "a", routeVersionId: "rv"),
+        XCTAssertEqual(DashboardRow.make(snapshot: .noActiveRun(assignmentId: "a", routeVersionId: "rv",
+                                         clock: .deviceOnly, notices: .none),
                                          failed: false, now: now).status, "No trip right now")
         XCTAssertEqual(DashboardRow.make(snapshot: run(nil), failed: false, now: now).detail,
                        "Waiting for the bus's location")
@@ -174,9 +183,11 @@ final class RemainingStatesTests: XCTestCase {
         let model = GuardianDashboardModel(source: source)
         model.update(assignmentIds: ["a_alex", "a_jordan"])
         _ = await eventually { source.runContinuation("a_alex") != nil && source.runContinuation("a_jordan") != nil }
-        source.runContinuation("a_jordan")?.yield(.noActiveRun(assignmentId: "a_jordan", routeVersionId: "rv"))
+        source.runContinuation("a_jordan")?.yield(.noActiveRun(assignmentId: "a_jordan", routeVersionId: "rv",
+                                         clock: .deviceOnly, notices: .none))
         // A misrouted answer for another assignment is never shown on this row.
-        source.runContinuation("a_alex")?.yield(.noActiveRun(assignmentId: "a_jordan", routeVersionId: "rv"))
+        source.runContinuation("a_alex")?.yield(.noActiveRun(assignmentId: "a_jordan", routeVersionId: "rv",
+                                         clock: .deviceOnly, notices: .none))
         let jordan = await eventually { model.snapshots["a_jordan"] != nil }
         XCTAssertTrue(jordan)
         XCTAssertNil(model.snapshots["a_alex"])

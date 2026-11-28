@@ -55,6 +55,12 @@ struct AppEnvironment {
         // While still signed in: drop a pending notification tap and stop this
         // phone receiving the account's pushes.
         NotificationRouter.wireSignOut(session, router: .shared) { await registrar.deactivate() }
+        // Read marks aren't account-scoped: every sign-out path clears them (I20).
+        let clearRouter = session.clearAccountState
+        session.clearAccountState = {
+            clearRouter?()
+            AlertReadMarks().clear()
+        }
         return AppEnvironment(session: session, source: ConvexLiveRunSource(client: querying),
                               notifications: notifications, registrar: registrar,
                               enrollment: ConvexEnrollmentSource(client: client))
