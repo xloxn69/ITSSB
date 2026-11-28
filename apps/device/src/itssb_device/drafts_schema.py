@@ -64,3 +64,10 @@ CREATE TABLE route_draft_submissions (
 CREATE INDEX route_draft_submissions_draft ON route_draft_submissions(draft_id, captured_at_ms);
 CREATE INDEX route_draft_submissions_pending ON route_draft_submissions(sync, captured_at_ms);
 """
+
+# Migration 7: the order review-status reads rotate through awaiting drafts.
+# An increasing counter, set to max+1 on every draft a read asks about, so the
+# rotation never depends on the wall clock (which can step backward).
+REVIEW_ROTATION_MIGRATION = """
+ALTER TABLE route_draft_submissions ADD COLUMN review_check_seq INTEGER NOT NULL DEFAULT 0;
+"""

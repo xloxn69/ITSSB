@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from .drafts_schema import DRAFTS_MIGRATION, SUBMISSIONS_MIGRATION
+from .drafts_schema import DRAFTS_MIGRATION, REVIEW_ROTATION_MIGRATION, SUBMISSIONS_MIGRATION
 from .models import Fix, TelemetryEvent
 
 MIGRATIONS: list[str] = [
@@ -78,6 +78,8 @@ MIGRATIONS: list[str] = [
     """,
     # 6: route drafts submitted for staff review, queued until the server answers
     SUBMISSIONS_MIGRATION,
+    # 7: review-status reads rotate by a counter, not the wall clock
+    REVIEW_ROTATION_MIGRATION,
 ]
 
 

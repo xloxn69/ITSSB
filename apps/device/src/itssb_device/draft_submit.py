@@ -297,12 +297,13 @@ class DraftDesk:
         driver = session.driver
         if driver is None or not driver.operating_grant:
             return {"checked": False, "problem": "Unlock to check the review status."}
-        # Least recently checked first, so with more drafts awaiting review
-        # than one read may ask about, successive reads reach every draft.
+        # Least recently asked first, by a counter rather than a time: with
+        # more drafts awaiting review than one read may ask about, successive
+        # reads reach every draft even if the wall clock steps backward.
         rows = db.conn.execute(
             "SELECT request_id, server_draft_id FROM route_draft_submissions "
             "WHERE sync='accepted' AND review_status='submitted' "
-            "ORDER BY COALESCE(review_checked_at_ms, 0), captured_at_ms, rowid LIMIT ?",
+            "ORDER BY review_check_seq, captured_at_ms, rowid LIMIT ?",
             (MAX_ROUTE_DRAFT_STATUS_IDS,),
         ).fetchall()
         if not rows:
@@ -331,6 +332,15 @@ class DraftDesk:
             return {"checked": False, "problem": "The school server's answer was unreadable."}
         now = self.now_ms()
         with db.transaction() as tx:
+            seq = tx.execute(
+                "SELECT COALESCE(MAX(review_check_seq), 0) + 1 FROM route_draft_submissions"
+            ).fetchone()[0]
+            # Every draft asked about moves to the back of the rotation, even
+            # one the server left out, so it can't hold a slot forever.
+            tx.executemany(
+                "UPDATE route_draft_submissions SET review_check_seq=? WHERE request_id=?",
+                [(seq, r["request_id"]) for r in rows],
+            )
             for r in rows:
                 if r["server_draft_id"] not in reviews:
                     continue

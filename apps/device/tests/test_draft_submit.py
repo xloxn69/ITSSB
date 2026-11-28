@@ -416,3 +416,26 @@ def test_review_status_reaches_every_draft_beyond_one_read(tmp_path, pin_hash, b
         code, body = env.post("/api/recordings/review-status")
         assert code == 200 and body["checked"] is True
     assert env.draft(last)["submission"] == "approved"
+
+
+def test_review_status_rotation_survives_the_clock_stepping_back(tmp_path, pin_hash, backend):
+    """The rotation must not depend on wall time: after the Pi clock steps
+    back, the 21st draft still gets its turn."""
+    env = Env(tmp_path, pin_hash, backend)
+    dids = [env.record(stops=("Example Oak Corner",), points=2) for _ in range(21)]
+    for did in dids:
+        assert env.submit(did)[0] == 200
+    while env.tick():
+        pass
+    last = dids[-1]
+    server_id = next(k for k, d in backend.route_drafts.items() if d["deviceDraftId"] == last)
+    backend.decide_draft(server_id, "approved")
+
+    env.now -= 3_600_000  # the wall clock steps back an hour; elapsed time still moves on
+    for _ in range(4):
+        env.elapsed_ms += STATUS_REFRESH_MS
+        env.now += 1_000
+        env.gps()
+        code, body = env.post("/api/recordings/review-status")
+        assert code == 200 and body["checked"] is True
+    assert env.draft(last)["submission"] == "approved"
