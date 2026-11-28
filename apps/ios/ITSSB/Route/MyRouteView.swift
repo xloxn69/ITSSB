@@ -55,7 +55,7 @@ struct MyRouteView: View {
             Section {
                 // No bus marker: this screen is the plan, Track is the live bus.
                 BusMapView(route: route, stop: route.assignedStop, bus: nil)
-                    .containerRelativeFrame(.vertical) { height, _ in height * 0.4 }
+                    .frame(height: AppSpacing.mapPreview)
                     .listRowInsets(EdgeInsets())
                     .accessibilityLabel("Map of \(route.routeLabel) and your stop, \(route.assignedStop.label)")
             }
@@ -113,7 +113,7 @@ struct StopDetailsView: View {
                         .tint(AppColors.assignedStop)
                 }
                 .mapStyle(.standard(pointsOfInterest: .excludingAll))
-                .containerRelativeFrame(.vertical) { height, _ in height * 0.3 }
+                .frame(height: AppSpacing.mapPreview)
                 .listRowInsets(EdgeInsets())
                 .accessibilityLabel("Map of \(stop.label)")
             }
