@@ -387,7 +387,7 @@ describe("users.bootstrapStaff", () => {
     await expect(t2.mutation(internal.users.bootstrapStaff, { tokenIdentifier: B, displayName: "Lee" })).rejects.toThrow(/STAFF_ALREADY_EXISTS/);
   });
 
-  it("on a development deployment that allows the fictional seed, may add one more", async () => {
+  it("on a development deployment that allows the fictional seed, may still add staff", async () => {
     vi.stubEnv("ITSSB_ALLOW_DEV_SEED", "true");
     try {
       const t = convexTest(schema, modules);

@@ -82,7 +82,7 @@ export const bootstrapStaff = internalMutation({
     if (taken) throw new ConvexError({ code: "IDENTITY_ALREADY_LINKED" });
     // First account only: once staff exist, more staff join by invitation, so
     // a rerun can never quietly add a staff member. A development deployment
-    // that allows the fictional seed may add one more, because its seeded
+    // that allows the fictional seed may still add staff, because its seeded
     // staff row has no identity anyone can sign in with.
     const anyStaff = await ctx.db
       .query("users")
