@@ -90,6 +90,13 @@ Stops have stable identifiers and an ordered position within a route version. Gi
 
 Finishing a recording creates a draft. Review its direction, endpoint, stop sequence, missing sections, and accidental detours. Submission and approval are separate events. A locally saved draft can survive loss of internet; **Submitted** means the server accepted the submission. Students continue using their existing approved assignments until an authorized version becomes effective.
 
+On the Pi, how submission works today (docs/08 §7.1):
+- **D10, Submit for review.** Needs an unlocked driver with an operating grant, the bus parked, a finished recording and at least one stop. The draft is saved on the device first and reads **Waiting to send … Not submitted yet** (with the number of tries) until the school server accepts it.
+- **Refused.** A refusal shows the reason and offers **Submit again**.
+- **Frozen after Submit.** Once Submit is pressed the stops can't be changed. To change a submitted or rejected route, record it again.
+- **D11, review status.** Shows **Awaiting approval**, **Approved**, or **Rejected** with staff's reason. Each comes with when the device last read it from the server, re-read about every 30 s while the screen is open and on **Check again**.
+- **Route library (D06).** Each draft shows the same state in one line.
+
 Do not use a generic fastest road route as a silent replacement for the recorded school route. Approved transportation routes can contain deliberate sequences that ordinary navigation would avoid.
 
 ## 7. Student information and attendance wording

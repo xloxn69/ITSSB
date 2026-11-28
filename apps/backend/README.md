@@ -9,13 +9,14 @@ Shared database, authorization, and device ingestion. Spec:
 | File | Does |
 |---|---|
 | `convex/schema.ts` | Users, devices, runs, telemetry history, live state, audit log |
-| `convex/http.ts` | `POST /device/v1/telemetry` and `POST /device/v1/trip-events` with bearer auth, size/version checks |
+| `convex/http.ts` | Device endpoints (`/device/v1/telemetry`, `/trip-events`, `/health`, `/qr-codes`, `/roster`, `/roster-actions`, `/route-drafts`, `/route-drafts/status`) with bearer auth, size/version checks |
+| `convex/deviceDrafts.ts` | Driver route-draft submission from the Pi: grant-checked, idempotent by `requestId` and device draft, stored `submitted` (never approved), audited; review status for the device's own drafts (docs/08 §7.1) |
 | `convex/tripEvents.ts` | Idempotent online run start/end, driver grant and scope checks, one active run per device and route |
 | `convex/driverGrants.ts` | Driver operating grants (hash stored, scoped, expiring): staff issue, list and revoke them in the console; internal `issue`/`revoke` for the command line |
 | `convex/telemetry.ts` | Idempotent per-event ingestion; late data kept as history only, including bounded history after a run ends |
 | `convex/runs.ts` | `runs.live` query (staff, the assigned student, or an approved guardian); returns null for unknown *and* forbidden runs |
 | `convex/tracking.ts` | Family queries `myAssignments`, `myRun`, `myRoute` (docs/08 §8), checked against the shared fixtures |
-| `convex/routes.ts` | Staff route library and draft review: `list`, `listDrafts`, `getDraft`, `approveDraft`, `rejectDraft`; internal `recordDraft` (docs/08 §11) |
+| `convex/routes.ts` | Staff route library and draft review: `list`, `listDrafts`, `getDraft`, `approveDraft`, `rejectDraft`; internal `recordDraft` for tests and tools (docs/08 §11) |
 | `convex/fleet.ts` | Staff device and driver pages: `listDevices`, `setBusLabel`, `revokeDevice`, `listDrivers`, `addDriver` |
 | `convex/staffInvitations.ts` | Staff invitations: staff create, list and revoke single-use codes; a new person redeems one to join as staff |
 | `convex/lib/staff.ts` | `staffCaller`: the staff-role check every staff function runs first |
