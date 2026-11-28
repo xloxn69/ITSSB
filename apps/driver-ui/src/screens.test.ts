@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ACTIONS, type ActionId, actionAvailability, editBlocked, selectScreen } from "./screens.js";
+import { ACTIONS, type ActionId, actionAvailability, editBlocked, selectScreen, unlockOfferedWhileStopped, unlockSubmitAllowed } from "./screens.js";
 import type { CapabilitiesPart, DeviceSnapshot } from "./snapshot.js";
 import { observed, snapshot } from "./testing.js";
 
@@ -78,6 +78,51 @@ describe("moving-view lockout", () => {
   it("a low speed without the driver's confirmed stop is not parked", () => {
     const o = observed(ready({ motion: { state: "stopped", parked: false } }));
     for (const id of ids) expect(actionAvailability(o, id).reason).toBe("Stop safely and confirm the bus is parked.");
+  });
+
+  it("a locked driver on a stopped bus mid-run can unlock, so the run can be parked and ended", () => {
+    // After a lock or a service restart mid-run the session is locked; parking
+    // needs an unlocked driver, so without this the bus was stuck on D13.
+    const locked = { unlocked: false, driverName: null };
+    const fix = (ageMs: number): DeviceSnapshot["gps"] => ({
+      status: "valid",
+      gpsd: "connected",
+      receivers: 1,
+      lastReportAgeMs: ageMs,
+      lastValidFixAgeMs: ageMs,
+      lastValidFixCapturedAtMs: 1_795_608_000_000 - ageMs,
+    });
+    const at = (ageMs: number, elapsedMs = 0, gps = fix(ageMs)) =>
+      observed(ready({ run: activeRun, session: locked, gps, motion: { state: "stopped", parked: false } }), elapsedMs);
+    const stopped = at(400);
+    expect(unlockOfferedWhileStopped(stopped)).toBe(true);
+    expect(selectScreen(stopped, "D04")).toBe("D04");
+    expect(selectScreen(stopped, "D05")).toBe("D13");
+
+    for (const state of ["moving", "unknown"] as const) {
+      const o = observed(ready({ run: activeRun, session: locked, motion: { state, parked: false } }));
+      expect(unlockOfferedWhileStopped(o)).toBe(false);
+      expect(selectScreen(o, "D04")).toBe("D13");
+    }
+    // Already unlocked: the driver confirms parked instead.
+    const open = observed(ready({ run: activeRun, motion: { state: "stopped", parked: false } }));
+    expect(unlockOfferedWhileStopped(open)).toBe(false);
+    // A stale snapshot is never trusted.
+    expect(unlockOfferedWhileStopped(at(400, 10_000))).toBe(false);
+    // Nor a stopped reading whose fix has aged past the device's 5 s limit,
+    // counting the time since the snapshot (a stalled poll).
+    expect(unlockOfferedWhileStopped(at(4_000, 1_000))).toBe(true);
+    expect(unlockOfferedWhileStopped(at(4_000, 1_001))).toBe(false);
+    expect(selectScreen(at(4_000, 1_001), "D04")).toBe("D13");
+    expect(unlockOfferedWhileStopped(at(5_001))).toBe(false);
+    // The same rule at the moment the PIN is submitted (render and tap differ).
+    expect(unlockSubmitAllowed(at(4_000, 1_000))).toBe(true);
+    expect(unlockSubmitAllowed(at(4_000, 1_001))).toBe(false);
+    // No run, or parked: unlocking is unaffected.
+    expect(unlockSubmitAllowed(observed(ready({ session: locked, motion: { state: "unknown", parked: false } })))).toBe(true);
+    expect(unlockSubmitAllowed(observed(ready({ run: activeRun, session: locked })))).toBe(true);
+    // No valid fix at all: never.
+    expect(unlockOfferedWhileStopped(at(400, 0, { ...fix(400), status: "no_fix" as const }))).toBe(false);
   });
 
   it("parked with an active run opens the dashboard", () => {
