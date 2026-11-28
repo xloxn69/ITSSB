@@ -59,8 +59,12 @@ const gpsLost: RouteCheck = {
 };
 const noStops: RouteCheck = { code: "no_stops", severity: "blocking", message: "The route has no stops." };
 
+// Stops sit 60 recorded points (about 1 km) apart along the path. Adjacent
+// points are metres apart, so their pins would be drawn over one another.
+const STOP_SPACING = 60;
+
 function stops(label: string, i: number) {
-  const p = basePath[Math.min(i, basePath.length - 1)] ?? { latitude: 34.1, longitude: -83.98 };
+  const p = basePath[Math.min(i * STOP_SPACING, basePath.length - 1)] ?? { latitude: 34.1, longitude: -83.98 };
   return { sequence: i, label, latitude: p.latitude, longitude: p.longitude, instructions: i === 0 ? "Wait on the north corner." : null };
 }
 
@@ -284,6 +288,17 @@ export function staffFixtureSource(variant: StaffVariant): StaffSource {
                         databaseBytes: 18_400_000,
                       }
                     : null,
+            lastRunReport: d.activeRun
+              ? {
+                  reportId: "demo_run_report_001",
+                  runId: d.activeRun.runId,
+                  category: "traffic",
+                  expectedDelayMinutes: 10,
+                  capturedAtMs: Date.now() - 6 * 60_000,
+                  receivedAtMs: Date.now() - 6 * 60_000 + 900,
+                  driverName: "Dana Driver",
+                }
+              : null,
           })),
           notifications:
             variant === "staff-empty"
