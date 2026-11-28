@@ -1,7 +1,7 @@
 # I.T.S.S.B. — Build roadmap
 
 **Intelligence Transportation System for School Buses**  
-Status: proposed implementation sequence, not a completion claim. [Documentation index](README.md).
+Status: implementation sequence. Each phase's **Status** line says what is met, with its evidence, and what only the field or the owner can close. [Documentation index](README.md).
 
 ## 1. Build order and why it matters
 

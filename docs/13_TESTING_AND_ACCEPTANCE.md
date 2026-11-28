@@ -1,7 +1,7 @@
 # I.T.S.S.B. — Testing and acceptance
 
 **Intelligence Transportation System for School Buses**  
-Status: tests to implement and execute; no hardware, Swift compilation, or field-pilot result is claimed by this documentation. [Documentation index](README.md).
+Status: automated tests for the device, backend, web and iOS run in CI, and bench and development-backend results are recorded in §12 and §14. No real GPS fix, real iPhone, vehicle or field-pilot result is claimed. [Documentation index](README.md).
 
 ## 1. What testing must establish
 
