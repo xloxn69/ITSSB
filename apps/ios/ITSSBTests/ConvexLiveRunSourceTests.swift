@@ -219,6 +219,49 @@ final class ConvexLiveRunSourceTests: XCTestCase {
         XCTAssertEqual(waiters, 0)
     }
 
+    /// Foreground refresh (docs/13 §7): after `reverifyServerTime()` a new run
+    /// subscription measures server time again instead of reusing the old clock.
+    func testReverifyMeasuresServerTimeAgain() async throws {
+        let source = ConvexLiveRunSource(client: FixtureQuerying(fixtures: ["tracking:myRun": "myRun.ready"],
+                                                                 keepOpen: true))
+        let first = Task { for try await _ in source.run(assignmentId: "a") {} }
+        let measured = await eventuallyAsync { await source.serverTime.requestCount == 1 }
+        XCTAssertTrue(measured)
+        let reused = Task { for try await _ in source.run(assignmentId: "b") {} }
+        try? await Task.sleep(for: .milliseconds(50))
+        let beforeReverify = await source.serverTime.requestCount
+        XCTAssertEqual(beforeReverify, 1, "a verified clock is shared, not re-measured")
+
+        await source.reverifyServerTime()
+        var iterator = source.run(assignmentId: "c").makeAsyncIterator()
+        guard case let .ready(_, _, _, clock)? = try await iterator.next() else { return XCTFail("expected ready") }
+        XCTAssertFalse(clock.isVerified, "the old clock is not reused after returning to the app")
+        let remeasured = await eventuallyAsync { await source.serverTime.requestCount == 2 }
+        XCTAssertTrue(remeasured)
+        guard case let .ready(_, _, _, verified)? = try await iterator.next() else { return XCTFail("expected ready") }
+        XCTAssertTrue(verified.isVerified)
+        first.cancel()
+        reused.cancel()
+    }
+
+    /// A measurement already in flight when the app returns is from before the
+    /// gap: it is discarded and taken again.
+    func testMeasurementSentBeforeReverifyIsDiscarded() async throws {
+        let gate = MutationGate()
+        let source = ConvexLiveRunSource(client: BlockingTimeQuerying(gate: gate))
+        var iterator = source.run(assignmentId: "a").makeAsyncIterator()
+        _ = try await iterator.next()
+        let sent = await eventuallyAsync { await source.serverTime.requestCount == 1 }
+        XCTAssertTrue(sent)
+
+        await source.reverifyServerTime()
+        gate.release()
+        let retaken = await eventuallyAsync { await source.serverTime.requestCount == 2 }
+        XCTAssertTrue(retaken, "the pre-reverify answer is discarded and measured again")
+        guard case let .ready(_, _, _, verified)? = try await iterator.next() else { return XCTFail("expected ready") }
+        XCTAssertTrue(verified.isVerified)
+    }
+
     /// Re-check regression: a stream cancelled before its registration ran must not leave
     /// an orphan waiter that keeps the retry loop alive.
     func testUnregisterBeforeRegisterLeavesNoOrphan() async {

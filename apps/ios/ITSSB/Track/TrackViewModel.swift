@@ -85,6 +85,17 @@ final class TrackViewModel {
         start()
     }
 
+    /// Back from the background (docs/06 §12): measure server time again, then
+    /// resubscribe, keeping the selected student. Does nothing while Track is stopped.
+    func resumeFromBackground() async {
+        guard assignmentsTask != nil else { return }
+        let keep = selectedAssignmentId ?? pendingAssignmentId
+        await source.reverifyServerTime()
+        guard assignmentsTask != nil else { return }
+        start()
+        pendingAssignmentId = keep
+    }
+
     /// An assignment a tapped notification asked for, kept until assignments load.
     private(set) var pendingAssignmentId: String?
 

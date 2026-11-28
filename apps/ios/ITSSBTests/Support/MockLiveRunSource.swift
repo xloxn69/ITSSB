@@ -9,6 +9,13 @@ final class MockLiveRunSource: LiveRunSource, @unchecked Sendable {
     private var routeStreams: [(String, AsyncThrowingStream<RouteSnapshot, Error>.Continuation)] = []
     private(set) var cancelledRuns: [String] = []
     private var connectionStreams: [AsyncStream<Bool>.Continuation] = []
+    private var reverifies = 0
+
+    func reverifyServerTime() async {
+        lock.withLock { reverifies += 1 }
+    }
+
+    var reverifyCount: Int { lock.withLock { reverifies } }
 
     func connection() -> AsyncStream<Bool> {
         let (stream, continuation) = AsyncStream<Bool>.makeStream()
