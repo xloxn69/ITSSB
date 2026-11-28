@@ -1,7 +1,7 @@
 # I.T.S.S.B. — Testing and acceptance
 
 **Intelligence Transportation System for School Buses**  
-Status: tests to implement and execute; no hardware, Swift compilation, or field-pilot result is claimed by this documentation. [Documentation index](README.md).
+Status: automated tests for the device, backend, web and iOS run in CI, and bench and development-backend results are recorded in §11 and §12. No real GPS fix, real iPhone, vehicle or field-pilot result is claimed. [Documentation index](README.md).
 
 ## 1. What testing must establish
 
@@ -14,6 +14,12 @@ Verify the smallest behavior that resolves a real risk. Prefer deterministic eve
 Maintain separate development and pilot/production backend deployments and app configurations. Name them visibly. Never let a GPS replay publisher silently target a live fleet. A test device should have its own credential and synthetic assignments.
 
 Create fixtures for a straight route, a route that loops near a stop twice, two parallel nearby roads, a GPS gap, an out-of-order batch, a lost acknowledgment, and a completed/cancelled trip. Include at least two organizations, two drivers with different scopes, two students, a verified guardian, an unlinked guardian, and an account whose access is revoked during an active subscription.
+
+**Fixture identities.** Every person, route, stop, bus and address in the repository and on the development deployment is fictional, and development rows carry a "(demo)" suffix.
+- `seed:dev` creates one route with stops, a driver, a bus and device, a student and a guardian. It runs only on a deployment with `ITSSB_ALLOW_DEV_SEED=true`, and only into an empty database.
+- Sign-in test accounts use Clerk test addresses (`<name>+clerk_test@example.com`, fixed code `424242`), one per role. A staff test account is created with `users:bootstrapStaff`; every other account joins through the app, as a real person would.
+- Device credentials and driver grants are issued per test device from the staff console and revoked after use.
+- The backend, web and iOS test suites use their own in-memory fixtures (`packages/contracts` fixtures and per-test data), never a deployment.
 
 Use the exact payloads and fields from [08_DATA_CONTRACTS_AND_API.md](08_DATA_CONTRACTS_AND_API.md). A fixture should record input events, expected accepted/rejected outcomes, expected live state, and expected logical alerts. Freeze or control the clock when testing expiration and freshness.
 
@@ -117,13 +123,13 @@ Avoid invented universal pass limits. Agree on pilot targets from the actual ser
 
 ## 11. Evidence and release gates
 
-| Gate | Minimum evidence |
-|---|---|
-| Bench demo | Hardware checks, real GPS-to-phone path, correct account access, visible freshness |
-| Resilient prototype | Retry/outage/restart cases, independent GPS/network failures, stable run identity |
-| Feature-complete V1 | Enrollment, guardian, roster, QR, removal, correction, all named states, alert handling |
-| Authorized pilot | Approved installation/power/connectivity and data process, recovery/support ownership, measured behavior |
-| Broader deployment | Representative pilot evidence, capacity evaluation, restore/rollback rehearsal, supported device matrix |
+| Gate | Minimum evidence | Status (2026-11-28) |
+|---|---|---|
+| Bench demo | Hardware checks, real GPS-to-phone path, correct account access, visible freshness | **Not met (field).** Access and freshness are met: tests and the development rehearsal (#59). Still needed: H01–H06 on the real Pi and a real GPS fix to a real iPhone |
+| Resilient prototype | Retry/outage/restart cases, independent GPS/network failures, stable run identity | **Met in code and simulated drills** (§12). Owner runbook: real network pull, real GPSD stop, OS reboot |
+| Feature-complete V1 | Enrollment, guardian, roster, QR, removal, correction, all named states, alert handling | **Met in code except one owner decision.** Named states: iOS (#68, #71), driver (#74; D02 and D03 need the privileged installer). Delete account waits for the owner's record-retention decision. Camera, push and permissions still need a real iPhone |
+| Authorized pilot | Approved installation/power/connectivity and data process, recovery/support ownership, measured behavior | **Not started (owner, field).** Measurement fields exist (#73) |
+| Broader deployment | Representative pilot evidence, capacity evaluation, restore/rollback rehearsal, supported device matrix | **Not started.** Development restore rehearsed (Convex runbook) |
 
 For each executed case, record build versions, backend environment, fixture/run ID, date, expected result, observed result, and a concise evidence link. Mark blocked or unexecuted cases honestly. Keep screenshots/logs free of unnecessary real student information.
 
@@ -147,7 +153,7 @@ Recorded 2026-11-26 against the development backend, with fictional data only. T
 | D15 end during a write | `test_recorder.py::test_d15_run_ended_between_check_and_write_commits_nothing` and `test_recorder.py::test_d15_restart_after_the_race_records_nothing_past_the_final_sequence` (device); `tripEvents.test.ts` final sequence boundary (backend) | — | Pass |
 | D12 near full disk or queue limit | Device: `test_storage.py` (fake free space and a filled outbox: warning with numbers, critical reduces recording, no pending row deleted or acknowledged, recovery, cleanup keeps pending and rejected rows). Driver screen: `indicators.test.ts` D12 cases, including that reduced recording does not block a start | Not run on the Pi (no real full disk) | Pass (simulated disk) |
 | D14 cancel or replace | Backend `tripStatus.test.ts`: staff cancel → `cancelled` with no position and no staff reason; replace → `pending`, then the started replacement is the tracked run; completed → `completed`; another route's run, a previous day's run, an unrelated account, and other days' calendar entries all excluded. Each exclusion test fails when its filter is removed. Clients: web `tripStatus.test.ts`, iOS `TripNoticesTests` (mapping, malformed entries, end-of-day expiry, copy) | Not run on a dev deployment | Partial: current status passes in tests; explicit assignment history is not built |
-| D11 | Not in this milestone: route progress and alerts (Phase 8) | — | Not run |
+| D11 route loop | `routeProgress.test.ts` "follows the outbound leg of a loop" (no early arrival); `notifications.test.ts` "the outbound stop stays passed with its original times, and the return leg alerts only the return stop" (#61) | — | Pass |
 
 Phone internet loss is a client state. Web shows a "Connection lost" banner and never calls the position fresh while disconnected (`live.test.ts`). iOS does the same: while the phone reconnects, the status card says "Reconnecting — Your phone lost its connection" and never calls the position fresh (`TrackViewModelTests`, `StatusCopyTests`, `LivePresentationTests` connection-lost cases). Starting up is not treated as lost.
 
