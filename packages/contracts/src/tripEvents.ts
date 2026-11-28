@@ -123,35 +123,31 @@ export function localDate(atMs: number, timeZone: string): string {
   }).format(new Date(atMs));
 }
 
+const HOUR_MS = 60 * 60 * 1000;
+
 /**
- * The UTC instant `date` (`YYYY-MM-DD`) ends in `timeZone`: the next local
- * day's midnight. Handles 23- and 25-hour days at daylight-saving changes.
+ * The UTC instant `date` (`YYYY-MM-DD`) ends in `timeZone`: the first
+ * instant whose local date is later. Found by bisection on the local date,
+ * so it is right on 23- and 25-hour days and where local midnight is
+ * skipped (a change at 00:00) or repeated.
  */
 export function endOfLocalDayMs(date: string, timeZone: string): number {
   const m = DATE.exec(date);
   if (!m) throw new Error(`Not a YYYY-MM-DD date: ${date}`);
   const nextMidnightAsUtc = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + 1);
-  // Subtract the zone's offset; re-measure it at the result for a change near midnight.
-  let atMs = nextMidnightAsUtc - zoneOffsetMs(nextMidnightAsUtc, timeZone);
-  atMs = nextMidnightAsUtc - zoneOffsetMs(atMs, timeZone);
-  return atMs;
-}
-
-/** How far `timeZone`'s wall clock is ahead of UTC at `atMs`. */
-function zoneOffsetMs(atMs: number, timeZone: string): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    hourCycle: "h23",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).formatToParts(new Date(atMs));
-  const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((p) => p.type === type)?.value);
-  const wallAsUtc = Date.UTC(part("year"), part("month") - 1, part("day"), part("hour"), part("minute"), part("second"));
-  return wallAsUtc - Math.floor(atMs / 1000) * 1000;
+  const format = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });
+  const after = (atMs: number) => format.format(new Date(atMs)) > date;
+  // UTC offsets lie within -12 h and +14 h, so local time here is still `date`...
+  let lo = nextMidnightAsUtc - 15 * HOUR_MS;
+  // ...and here is already a later date.
+  let hi = nextMidnightAsUtc + 13 * HOUR_MS;
+  if (after(lo) || !after(hi)) throw new Error(`No end of ${date} found in ${timeZone}`);
+  while (hi - lo > 1) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (after(mid)) hi = mid;
+    else lo = mid;
+  }
+  return hi;
 }
 
 export type TripEventValidation =

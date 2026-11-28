@@ -80,7 +80,12 @@ describe("endOfLocalDayMs", () => {
     ["2026-11-01", "America/New_York", Date.UTC(2026, 10, 2, 5)],
     ["2026-11-25", "UTC", Date.UTC(2026, 10, 26)],
     ["2026-11-25", "Pacific/Kiritimati", Date.UTC(2026, 10, 25, 10)],
-  ])("%s in %s ends at the next local midnight", (date, zone, expected) => {
+    // Santiago skips local midnight on 6 September: 00:00 becomes 01:00 (-04 to -03).
+    ["2026-09-05", "America/Santiago", Date.UTC(2026, 8, 6, 4)],
+    // Santiago falls back at midnight on 5 April: 00:00 -03 becomes 23:00 -04 on the 4th, so the 4th runs 25 h.
+    ["2026-04-04", "America/Santiago", Date.UTC(2026, 3, 5, 4)],
+    ["2026-04-05", "America/Santiago", Date.UTC(2026, 3, 6, 4)],
+  ])("%s in %s ends when the next local date begins", (date, zone, expected) => {
     const end = endOfLocalDayMs(date, zone);
     expect(end).toBe(expected);
     expect(localDate(end - 1, zone)).toBe(date);
