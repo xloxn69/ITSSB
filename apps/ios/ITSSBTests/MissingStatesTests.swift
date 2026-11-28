@@ -182,6 +182,47 @@ final class MissingStatesTests: XCTestCase {
         XCTAssertTrue(cleared, "the stop and its directions disappear with access")
     }
 
+    /// Re-check P2: the screen My route actually pushes follows access. A
+    /// destination that copied the stop would keep a revoked stop and its directions.
+    func testPushedStopDetailsBecomeUnavailableWhenAccessEnds() async {
+        let source = MockLiveRunSource()
+        let model = MyRouteViewModel(source: source)
+        model.startIfNeeded()
+        _ = await eventually { source.assignmentsContinuation != nil }
+        source.assignmentsContinuation?.yield(.ready([PreviewFixtures.assignment]))
+        let id = PreviewFixtures.assignment.assignmentId
+        _ = await eventually { source.routeContinuation(id) != nil }
+        source.routeContinuation(id)?.yield(.ready(PreviewFixtures.route))
+        _ = await eventually { model.currentStop(id: PreviewFixtures.stop.stopId) != nil }
+
+        let screen = StopDetailsView.destination(model: model, stop: PreviewFixtures.route.assignedStop)
+        XCTAssertEqual(screen.content, .available(PreviewFixtures.stop, routeLabel: "Route 17 Morning"))
+
+        source.routeContinuation(id)?.yield(.accessUnavailable(.notPermitted))
+        let revoked = await eventually { screen.content == .noLongerAvailable }
+        XCTAssertTrue(revoked, "a revoked stop's map and directions leave the open screen")
+
+        model.stop()
+    }
+
+    func testPushedStopDetailsBecomeUnavailableWhenTheAssignmentIsRemoved() async {
+        let source = MockLiveRunSource()
+        let model = MyRouteViewModel(source: source)
+        model.startIfNeeded()
+        _ = await eventually { source.assignmentsContinuation != nil }
+        source.assignmentsContinuation?.yield(.ready([PreviewFixtures.assignment]))
+        let id = PreviewFixtures.assignment.assignmentId
+        _ = await eventually { source.routeContinuation(id) != nil }
+        source.routeContinuation(id)?.yield(.ready(PreviewFixtures.route))
+        let screen = StopDetailsView.destination(model: model, stop: PreviewFixtures.route.assignedStop)
+        let shown = await eventually { screen.content != .noLongerAvailable }
+        XCTAssertTrue(shown)
+        source.assignmentsContinuation?.yield(.ready([]))
+        let removed = await eventually { screen.content == .noLongerAvailable }
+        XCTAssertTrue(removed, "a removed assignment's stop leaves the open screen")
+        model.stop()
+    }
+
     /// The route subscriptions end when the whole My route flow is gone.
     func testReleasingMyRouteEndsItsSubscriptions() async {
         let source = MockLiveRunSource()

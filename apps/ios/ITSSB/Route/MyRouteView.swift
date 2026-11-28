@@ -64,7 +64,7 @@ struct MyRouteView: View {
                 LabeledContent("Student", value: assignment.studentDisplayName)
                 LabeledContent("Route", value: route.routeLabel)
                 NavigationLink {
-                    StopDetailsView(model: model, stopId: route.assignedStop.stopId)
+                    StopDetailsView.destination(model: model, stop: route.assignedStop)
                 } label: {
                     LabeledContent("Stop", value: route.assignedStop.label)
                 }
@@ -86,7 +86,7 @@ struct MyRouteView: View {
         }
         .font(AppFonts.body)
         .navigationDestination(isPresented: $showsStop) {
-            StopDetailsView(model: model, stopId: route.assignedStop.stopId)
+            StopDetailsView.destination(model: model, stop: route.assignedStop)
         }
     }
 
@@ -104,13 +104,32 @@ struct MyRouteView: View {
 /// ITSSB doesn't plan the walk or promise its timing. It reads the stop from
 /// the live route model, so losing access clears it at once.
 struct StopDetailsView: View {
+    /// What the screen shows. Derived from the live model on every read; never a copy.
+    enum Content: Equatable {
+        case available(AssignedStop, routeLabel: String)
+        /// Access was removed or the assignment changed: no map, no directions.
+        case noLongerAvailable
+    }
+
     let model: MyRouteViewModel
     let stopId: String
 
+    /// The only way My route opens this screen (link and screenshot path alike).
+    /// It keeps the stop's ID, not its coordinates, so access loss reaches it.
+    static func destination(model: MyRouteViewModel, stop: AssignedStop) -> StopDetailsView {
+        StopDetailsView(model: model, stopId: stop.stopId)
+    }
+
+    var content: Content {
+        guard let current = model.currentStop(id: stopId) else { return .noLongerAvailable }
+        return .available(current.stop, routeLabel: current.routeLabel)
+    }
+
     var body: some View {
-        if let current = model.currentStop(id: stopId) {
-            StopDetailsContent(stop: current.stop, routeLabel: current.routeLabel)
-        } else {
+        switch content {
+        case let .available(stop, routeLabel):
+            StopDetailsContent(stop: stop, routeLabel: routeLabel)
+        case .noLongerAvailable:
             ContentUnavailableView("Stop not available", systemImage: "lock.fill",
                                    description: Text("This account can no longer see this route."))
         }
