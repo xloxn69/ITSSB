@@ -214,7 +214,7 @@ Set a storage budget and monitor disk space, outbox age, and outbox count. Remov
 | `ITSSB_STORAGE_CRITICAL_FREE_MB` | 128 | Critical at or below this; must be below the warning |
 | `ITSSB_OUTBOX_WARN_PENDING` | 10000 | Warning at this many unsent positions (about 14 hours of recording) |
 | `ITSSB_OUTBOX_CRITICAL_PENDING` | 50000 | Critical at this many; must be above the warning |
-| `ITSSB_REDUCED_PUBLISH_INTERVAL_SECONDS` | 60 | Cadence while critical; must be longer than the publish interval |
+| `ITSSB_REDUCED_PUBLISH_INTERVAL_SECONDS` | 60, or 4 × the publish interval if that is longer | Cadence while critical; must be longer than the publish interval |
 | `ITSSB_ACKNOWLEDGED_RETENTION_HOURS` | 168 | Acknowledged rows kept this long while space is fine |
 
 - **Warning:** nothing changes in recording. `GET /health` has a `storage` section (`level`, `recording`, free and total bytes, pending count, each threshold, and the last cleanup), and the driver screen adds a **Recording** chip, for example "Space low: Storage getting full: 410 MB free (limit 512 MB)."

@@ -220,6 +220,11 @@ def _timezone(raw: str | None) -> str | None:
     return raw
 
 
+# Without an explicit setting, critical storage saves at most one position
+# per this many normal publish intervals (and never more often than 60 s).
+REDUCED_FACTOR = 4
+
+
 def _storage_limits(env: Mapping[str, str], publish_interval_s: float) -> StorageLimits:
     d = StorageLimits()
     warn_mb = _int(env, "ITSSB_STORAGE_WARN_FREE_MB", d.warn_free_bytes // MB, 1, 1_000_000)
@@ -230,8 +235,11 @@ def _storage_limits(env: Mapping[str, str], publish_interval_s: float) -> Storag
     crit_q = _int(env, "ITSSB_OUTBOX_CRITICAL_PENDING", d.critical_pending, 1, 10_000_000)
     if crit_q <= warn_q:
         raise ConfigError("ITSSB_OUTBOX_CRITICAL_PENDING must be above ITSSB_OUTBOX_WARN_PENDING")
+    # Unset, the reduced cadence follows the configured one, so a Pi that
+    # already publishes every 60 s or slower still starts after an upgrade.
+    default_reduced = max(d.reduced_interval_s, publish_interval_s * REDUCED_FACTOR)
     reduced = _float(
-        env, "ITSSB_REDUCED_PUBLISH_INTERVAL_SECONDS", d.reduced_interval_s, 1.0, 3600.0
+        env, "ITSSB_REDUCED_PUBLISH_INTERVAL_SECONDS", default_reduced, 1.0, 3600.0 * REDUCED_FACTOR
     )
     if reduced <= publish_interval_s:
         raise ConfigError(

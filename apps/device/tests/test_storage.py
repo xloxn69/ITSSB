@@ -291,3 +291,18 @@ def test_storage_defaults_and_redacted_view(tmp_path):
 def test_critical_must_be_stricter_than_warning(env, tmp_path):
     with pytest.raises(ConfigError):
         load_config(env, env_file=tmp_path / "missing.env")
+
+
+@pytest.mark.parametrize(
+    ("publish", "reduced"), [("5", 60.0), ("60", 240.0), ("300", 1200.0), ("3600", 14400.0)]
+)
+def test_an_existing_slow_cadence_still_starts_with_a_longer_reduced_one(
+    publish, reduced, tmp_path
+):
+    # A Pi already configured to publish every 60 s or slower must keep
+    # starting after this upgrade; the unset reduced cadence follows it.
+    cfg = load_config(
+        {"ITSSB_PUBLISH_INTERVAL_SECONDS": publish}, env_file=tmp_path / "missing.env"
+    )
+    assert cfg.storage_limits.reduced_interval_s == reduced
+    assert cfg.storage_limits.reduced_interval_s > cfg.publish_interval_s
