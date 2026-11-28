@@ -52,7 +52,7 @@ struct AppEnvironment {
         let session = SessionStore(auth: auth)
         // While still signed in: drop a pending notification tap and stop this
         // phone receiving the account's pushes.
-        session.beforeSignOut = NotificationRouter.signOutCleanup(router: .shared, registrar: registrar)
+        NotificationRouter.wireSignOut(session, router: .shared) { await registrar.deactivate() }
         return AppEnvironment(session: session, source: ConvexLiveRunSource(client: querying),
                               notifications: notifications, registrar: registrar,
                               enrollment: ConvexEnrollmentSource(client: client))

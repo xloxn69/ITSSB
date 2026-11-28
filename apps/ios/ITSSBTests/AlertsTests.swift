@@ -339,18 +339,4 @@ extension AlertsTests {
         XCTAssertTrue(model.saveFailed.isEmpty)
         model.stop()
     }
-
-    func testSignOutDropsAPendingNotificationTapAndStopsPushes() async {
-        let source = RecordingNotificationSource()
-        let registrar = PushRegistrar(source: source, authorizing: FixedPermission(value: .authorized),
-                                      ids: defaults(), environment: .sandbox) {}
-        await registrar.activate()
-        await registrar.didRegister(deviceToken: Data([0xab]))
-        let router = NotificationRouter()
-        router.requestedAssignmentId = "a_alex"  // A's tapped notification, not yet opened
-        let cleanup = NotificationRouter.signOutCleanup(router: router, registrar: registrar)
-        await cleanup()
-        XCTAssertNil(router.requestedAssignmentId, "account B must not open on A's tap")
-        XCTAssertNil(source.registrations.last?.token, "this phone stops receiving A's pushes")
-    }
 }

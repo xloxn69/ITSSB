@@ -180,17 +180,14 @@ final class NotificationRouter {
     static let shared = NotificationRouter()
     var requestedAssignmentId: String?
 
-    /// The tracking work to run before sign-out: drop a tap still waiting for
-    /// this account, so the next account never opens on it, then stop this
-    /// phone's pushes for the account (docs/13 §5 A10).
-    static func signOutCleanup(router: NotificationRouter,
-                               registrar: PushRegistrar?) -> @MainActor () async -> Void {
-        {
-            router.requestedAssignmentId = nil
-            await registrar?.deactivate()
-            // A tap that arrived while the disable was on its way belongs to this account too.
-            router.requestedAssignmentId = nil
-        }
+    /// Wires sign-out (docs/13 §5 A10). The pending tap is dropped by the
+    /// sign-out itself, when protected screens hide and again before sign-in
+    /// unlocks, never from the push cleanup: that may finish after the next
+    /// account has signed in and tapped its own notification.
+    static func wireSignOut(_ session: SessionStore, router: NotificationRouter,
+                            deactivatePush: @escaping @MainActor () async -> Void) {
+        session.clearAccountState = { router.requestedAssignmentId = nil }
+        session.beforeSignOut = deactivatePush
     }
 
     /// Reads only the opaque assignment ID from the payload.
