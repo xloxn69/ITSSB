@@ -1,4 +1,5 @@
 import {
+  type AddDriverResult,
   type CredentialIssuedResult,
   type ListMaintenanceResult,
   MAINTENANCE_REFUSAL_CODES,
@@ -16,6 +17,7 @@ import {
   type ListDriversResult,
   MAX_BUS_LABEL_LENGTH,
   MAX_DEVICE_LABEL_LENGTH,
+  MAX_PERSON_NAME_LENGTH,
   SCHEMA_VERSION,
 } from "@itssb/contracts";
 import { v } from "convex/values";
@@ -25,6 +27,7 @@ import { generateDeviceSecret, sha256Hex } from "./lib/deviceAuth";
 import { accessUnavailable, audit, denied, staffCaller } from "./lib/staff";
 import { boundedText, okResult, refusedResult, staffActionResult } from "./lib/staffResults";
 import { RAW_GPS_RETENTION_DAYS } from "./retention";
+import { UNLINKED_PREFIX } from "./users";
 
 // The Convex runtime provides `process.env`.
 declare const process: { env: Record<string, string | undefined> };
@@ -184,6 +187,49 @@ export const listDrivers = query({
       .map((u) => ({ userId: u._id as string, displayName: u.displayName }))
       .toSorted((a, b) => a.displayName.localeCompare(b.displayName));
     return { schemaVersion: SCHEMA_VERSION, status: "ready", serverNowMs: Date.now(), drivers };
+  },
+});
+
+/**
+ * Adds a driver person (docs/12 §3). Drivers unlock the bus touchscreen with
+ * a PIN and drive with an operating grant (driverGrants.ts), so they need no
+ * app sign-in: the row gets its own unlinked placeholder identity, which no
+ * verified sign-in can ever match. The ID is part of the placeholder because
+ * `users.by_token` lookups expect one row per value.
+ */
+export const addDriver = mutation({
+  args: { displayName: v.string() },
+  returns: v.union(
+    v.object({ schemaVersion: v.literal(SCHEMA_VERSION), status: v.literal("created"), serverNowMs: v.number(), userId: v.string() }),
+    v.object({
+      schemaVersion: v.literal(SCHEMA_VERSION),
+      status: v.literal("refused"),
+      serverNowMs: v.number(),
+      code: v.literal("invalid_name"),
+      message: v.string(),
+    }),
+    accessUnavailable,
+  ),
+  handler: async (ctx, { displayName }): Promise<AddDriverResult> => {
+    const caller = await staffCaller(ctx);
+    if (!caller.ok) {
+      await audit(ctx, caller.user, "driver.add", "users", undefined, "denied");
+      return denied(caller.reason);
+    }
+    const name = boundedText(displayName, MAX_PERSON_NAME_LENGTH);
+    if (!name) {
+      return {
+        schemaVersion: SCHEMA_VERSION,
+        status: "refused",
+        serverNowMs: Date.now(),
+        code: "invalid_name",
+        message: `Use 1 to ${MAX_PERSON_NAME_LENGTH} characters for the name.`,
+      };
+    }
+    const userId = await ctx.db.insert("users", { tokenIdentifier: `${UNLINKED_PREFIX}pending`, role: "driver", displayName: name });
+    await ctx.db.patch(userId, { tokenIdentifier: `${UNLINKED_PREFIX}${userId}` });
+    await audit(ctx, caller.user, "driver.add", "users", userId, "allowed", { source: "staff_web" });
+    return { schemaVersion: SCHEMA_VERSION, status: "created", serverNowMs: Date.now(), userId };
   },
 });
 

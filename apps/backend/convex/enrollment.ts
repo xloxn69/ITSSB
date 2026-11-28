@@ -462,7 +462,10 @@ export const revokeInvitation = mutation({
     }
     const id = ctx.db.normalizeId("scopedTokens", invitationId);
     const row = id ? await ctx.db.get(id) : null;
-    if (!row || row.purpose === "trip_check_in") return refusedDecision("not_found", "That invitation doesn't exist.");
+    // Check-in challenges end with their run; staff invitations have their own revoke.
+    if (!row || (row.purpose !== "route_enrollment" && row.purpose !== "guardian_link")) {
+      return refusedDecision("not_found", "That invitation doesn't exist.");
+    }
     if (!row.revoked) {
       await ctx.db.patch(row._id, { revoked: true });
       await audit(ctx, caller.user, "invitation.revoke", "scopedTokens", row._id, "allowed", { source: "staff_web" });
