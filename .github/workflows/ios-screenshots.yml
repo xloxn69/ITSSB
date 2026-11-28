@@ -1,7 +1,9 @@
 name: iOS screenshots
 
-# Simulator screenshots of every tracking screen state, from fictional DEBUG
-# scenarios. Download them from the run's "ios-screenshots" artifact.
+# Simulator screenshots of every screen state, from fictional DEBUG scenarios.
+# Light and dark run as two parallel jobs (one job grew past 30 minutes).
+# Download them from the run's "ios-screenshots-light" and
+# "ios-screenshots-dark" artifacts.
 on:
   workflow_dispatch:
   pull_request:
@@ -20,18 +22,25 @@ concurrency:
 
 jobs:
   screenshots:
-    name: Capture screen states
+    name: Capture screen states (${{ matrix.appearance }})
     runs-on: macos-latest
-    timeout-minutes: 30
+    # Each half builds (~11 min) and captures about 55 screens (~12 s each).
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        appearance: [light, dark]
     steps:
       - uses: actions/checkout@v5
       - name: Toolchain
         run: brew install xcodegen
       - name: Capture
         working-directory: apps/ios
+        env:
+          ITSSB_APPEARANCES: ${{ matrix.appearance }}
         run: xcodegen && bash scripts/screenshots.sh build/screenshots
       - uses: actions/upload-artifact@v4
         with:
-          name: ios-screenshots
+          name: ios-screenshots-${{ matrix.appearance }}
           path: apps/ios/build/screenshots/*.png
           retention-days: 30
