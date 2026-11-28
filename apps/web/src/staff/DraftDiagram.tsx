@@ -22,24 +22,16 @@ export function pathSegments<P>(path: P[], gapBeforeIndexes: readonly number[] =
   return out;
 }
 
+/** Radius of a numbered stop pin, in diagram units. */
+export const STOP_PIN_RADIUS = 22;
+
 /**
- * A recorded draft's path and numbered stops, without a map provider. The
- * ordered stop list beside it carries the same information as text. A
- * stretch where GPS was lost is dashed and labelled: not measured travel.
+ * The diagram's size and the projection from latitude/longitude to diagram
+ * units, fitted to the path and stops together. Null when nothing was recorded.
  */
-export function DraftDiagram({
-  path,
-  stops,
-  label,
-  gapBeforeIndexes = [],
-}: {
-  path: RoutePoint[];
-  stops: DraftStop[];
-  label: string;
-  gapBeforeIndexes?: number[];
-}) {
+export function draftDiagramLayout(path: RoutePoint[], stops: RoutePoint[]) {
   const points = [...path, ...stops];
-  if (points.length === 0) return <p className="muted">Nothing was recorded.</p>;
+  if (points.length === 0) return null;
   const lats = points.map((p) => p.latitude);
   const lons = points.map((p) => p.longitude);
   const minLat = Math.min(...lats);
@@ -57,6 +49,28 @@ export function DraftDiagram({
     x: ox + (p.longitude - minLon) * kx * scale,
     y: H - (oy + (p.latitude - minLat) * scale),
   });
+  return { W, H, project };
+}
+
+/**
+ * A recorded draft's path and numbered stops, without a map provider. The
+ * ordered stop list beside it carries the same information as text. A
+ * stretch where GPS was lost is dashed and labelled: not measured travel.
+ */
+export function DraftDiagram({
+  path,
+  stops,
+  label,
+  gapBeforeIndexes = [],
+}: {
+  path: RoutePoint[];
+  stops: DraftStop[];
+  label: string;
+  gapBeforeIndexes?: number[];
+}) {
+  const layout = draftDiagramLayout(path, stops);
+  if (!layout) return <p className="muted">Nothing was recorded.</p>;
+  const { W, H, project } = layout;
   const line = (pts: RoutePoint[]) =>
     pts
       .map(project)
@@ -81,7 +95,7 @@ export function DraftDiagram({
         const { x, y } = project(s);
         return (
           <g key={s.sequence}>
-            <circle className="stop-pin" cx={x} cy={y} r={22} />
+            <circle className="stop-pin" cx={x} cy={y} r={STOP_PIN_RADIUS} />
             <text x={x} y={y} className="stop-number" textAnchor="middle" dominantBaseline="central">
               {s.sequence + 1}
             </text>

@@ -157,6 +157,38 @@ struct TrackedRun: Equatable, Sendable {
     let assignedStop: AssignedStop
     /// Nil when absent or malformed; never repaired or guessed.
     var eta: RunEta?
+    /// The driver's delay report; nil when absent, expired on the server, or malformed.
+    var reportedDelay: ReportedDelay?
+}
+
+/// Why the driver reported a delay (packages/contracts RUN_REPORT_CATEGORIES).
+enum RunReportCategory: String, Equatable, Sendable, CaseIterable {
+    case traffic
+    case mechanical
+    case weather
+    case studentIncident = "student_incident"
+    case other
+
+    /// The words families see, shared with the web app.
+    var words: String {
+        switch self {
+        case .traffic: "traffic"
+        case .mechanical: "mechanical problem"
+        case .weather: "weather"
+        case .studentIncident: "student incident"
+        case .other: "other"
+        }
+    }
+}
+
+/// A driver's delay report on the active run (docs/08 §9.4). Never an arrival estimate.
+struct ReportedDelay: Equatable, Sendable {
+    let category: RunReportCategory
+    let minutes: Int?
+    /// When the driver made it on the bus.
+    let reportedAt: Date
+    /// Hidden once the server-aligned clock passes this.
+    let validUntil: Date
 }
 
 enum AccessUnavailableReason: String, Equatable, Sendable {

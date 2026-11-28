@@ -40,6 +40,12 @@ the named run's `run` state when it is one this fake started.
 (apps/backend/convex/runOps.ts): its positions are then rejected
 `RUN_CANCELLED` and health reports for it carry `state: "cancelled"`.
 
+Run reports follow docs/08 §9.4: a known grant, this run on one of its
+routes, one stored report per `requestId` and content (a resend returns
+`already_recorded`, other content is `request_id_conflict`). Every raw body
+is kept in `report_bodies`. `roster_stops` (per route version) adds the
+roster's optional `stops`.
+
 `GET /_stats` lists stored eventIds and every request's eventIds (test-only).
 Binds to 127.0.0.1 only. Never use it as a real backend.
 """
@@ -61,6 +67,7 @@ GRANT_PATHS = (
     "/device/v1/roster-actions",
     "/device/v1/route-drafts",
     "/device/v1/route-drafts/status",
+    "/device/v1/run-reports",
 )
 
 IDENTITY_FIELDS = (
@@ -101,6 +108,10 @@ class FakeBackend(ThreadingHTTPServer):
         self.route_drafts: dict[str, dict[str, Any]] = {}
         self.draft_bodies: list[bytes] = []  # every submit body that arrived
         self.health_reports: list[dict[str, Any]] = []
+        # Run reports (docs/08 §9.4): requestId -> (content without the grant, stored report).
+        self.run_reports: dict[str, tuple[str, dict[str, Any]]] = {}
+        self.report_bodies: list[bytes] = []
+        self.roster_stops: dict[str, list[dict[str, Any]]] = {}  # route version -> stops
         super().__init__(("127.0.0.1", port), _Handler)
 
     @property
@@ -319,8 +330,66 @@ class FakeBackend(ThreadingHTTPServer):
                 "runId": run_id,
                 "routeVersionId": route,
                 "students": students,
+                **({"stops": self.roster_stops[route]} if route in self.roster_stops else {}),
                 "serverNowMs": now,
             }
+
+    def run_report(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        now = int(time.time() * 1000)
+        rid = body.get("requestId")
+        if body.get("category") not in (
+            "traffic",
+            "mechanical",
+            "weather",
+            "student_incident",
+            "other",
+        ):
+            return _err(400, "INVALID_REQUEST")
+        content = json.dumps(
+            {k: v for k, v in body.items() if k != "driverOperatingGrant"}, sort_keys=True
+        )
+
+        def reject(code: str) -> tuple[int, dict[str, Any]]:
+            return 200, {
+                "schemaVersion": 1,
+                "requestId": rid,
+                "status": "rejected",
+                "code": code,
+                "message": f"fake: {code}",
+                "serverNowMs": now,
+            }
+
+        def ok(status: str, report: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+            return 200, {
+                "schemaVersion": 1,
+                "requestId": rid,
+                "status": status,
+                "report": report,
+                "serverNowMs": now,
+            }
+
+        with self.lock:
+            prior = self.run_reports.get(str(rid))
+            if prior is not None:
+                if prior[0] != content:
+                    return reject("request_id_conflict")
+                return ok("already_recorded", prior[1])
+            routes = self.grants.get(body.get("driverOperatingGrant", ""))
+            if routes is None:
+                return reject("grant_not_authorized")
+            route = self._route_of(body.get("runId"))
+            if route is None or route not in routes:
+                return reject("run_not_authorized")
+            report = {
+                "reportId": f"fake_report_{len(self.run_reports) + 1:03d}",
+                "runId": body["runId"],
+                "category": body["category"],
+                "expectedDelayMinutes": body.get("expectedDelayMinutes"),
+                "capturedAtMs": body.get("capturedAtMs"),
+                "receivedAtMs": now,
+            }
+            self.run_reports[str(rid)] = (content, report)
+            return ok("accepted", report)
 
     def roster_action(self, body: dict[str, Any]) -> dict[str, Any]:
         now = int(time.time() * 1000)
@@ -525,6 +594,9 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/device/v1/route-drafts":
             with srv.lock:
                 srv.draft_bodies.append(raw)
+        if self.path == "/device/v1/run-reports":
+            with srv.lock:
+                srv.report_bodies.append(raw)
         if srv.mode == "down":
             self._error(503, "TEMPORARILY_UNAVAILABLE")
             return
@@ -545,6 +617,8 @@ class _Handler(BaseHTTPRequestHandler):
             status, result = srv.route_draft(body)
         elif self.path == "/device/v1/route-drafts/status":
             status, result = srv.route_draft_status(body)
+        elif self.path == "/device/v1/run-reports":
+            status, result = srv.run_report(body)
         else:
             status, result = 200, srv.roster_action(body)
         if srv.mode == "drop_response":

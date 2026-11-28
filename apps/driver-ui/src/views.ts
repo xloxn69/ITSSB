@@ -144,6 +144,16 @@ export function dashboardView(o: Observed, nav: Nav, extra: (HTMLElement | null)
   );
 }
 
+/**
+ * D13's next-stop card. Route progress (which stop is next) is computed by
+ * the school server and is not sent to the bus, so the screen says so rather
+ * than claiming the device has no stops: it has them once the roster loads.
+ */
+export const NEXT_STOP = {
+  title: "Not shown while driving",
+  detail: "Which stop is next is worked out by the school server and is not sent to this screen. Once parked, At this stop shows the stop the bus is near.",
+} as const;
+
 /** D13: driving view. Read-only; no complex control is rendered at all. */
 export function drivingView(o: Observed, nav: Nav, extra: (HTMLElement | null)[] = []): HTMLElement {
   const inds = allIndicators(o);
@@ -160,8 +170,8 @@ export function drivingView(o: Observed, nav: Nav, extra: (HTMLElement | null)[]
         "div",
         { class: "card" },
         h("span", { class: "muted" }, "Next stop"),
-        h("span", { class: "big" }, "Not available"),
-        h("p", { class: "muted" }, "This device has no approved route stops for this run yet."),
+        h("span", { class: "big" }, NEXT_STOP.title),
+        h("p", { class: "muted" }, NEXT_STOP.detail),
       ),
       h(
         "div",

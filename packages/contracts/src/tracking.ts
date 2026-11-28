@@ -6,6 +6,7 @@
  * Every nullable field is sent explicitly as `null`, never omitted.
  */
 import type { GpsStatus, RunState, SCHEMA_VERSION } from "./index.js";
+import type { ReportedDelay } from "./runReports.js";
 
 /**
  * Provisional freshness policy (docs/08 §8.1, open decision in docs/17 §5).
@@ -116,6 +117,13 @@ export interface TrackedRun {
   nextStopId: string | null;
   assignedStop: AssignedStop;
   eta: Eta | null;
+  /**
+   * The driver's newest delay report on this run (docs/08 §9.4), or null.
+   * Optional so older backends still decode; this backend always sends it.
+   * Category and minutes only, never text, and never an arrival estimate:
+   * shown even when `eta` is null (docs/10 §5).
+   */
+  reportedDelay?: ReportedDelay | null;
 }
 
 /**

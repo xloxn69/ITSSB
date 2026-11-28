@@ -5,10 +5,12 @@ import {
   MAX_ROSTER_BODY_BYTES,
   MAX_ROUTE_DRAFT_BODY_BYTES,
   MAX_ROUTE_DRAFT_STATUS_BODY_BYTES,
+  MAX_RUN_REPORT_BODY_BYTES,
   routeDraftContent,
   validateRosterAction,
   validateRouteDraftStatusRequest,
   validateRouteDraftSubmission,
+  validateRunReport,
   MAX_TRIP_EVENT_BODY_BYTES,
   MAX_TELEMETRY_BODY_BYTES,
   SCHEMA_VERSION,
@@ -362,6 +364,33 @@ http.route({
       });
       return outcome.ok ? json(200, outcome.body) : requestError(outcome.status, outcome.code, outcome.message, false);
     });
+  }),
+});
+
+/**
+ * POST /device/v1/run-reports — a driver's delay or issue report, possibly
+ * queued offline (docs/08 §9.4). Fixed category and optional minutes only.
+ */
+http.route({
+  path: "/device/v1/run-reports",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    const parsed = await deviceGrantRequest(ctx, req, MAX_RUN_REPORT_BODY_BYTES);
+    if (!parsed.ok) return parsed.response;
+    const checked = validateRunReport(parsed.body);
+    if (!checked.ok) return requestError(400, "INVALID_REQUEST", checked.message, false);
+    return await guarded(async () =>
+      json(
+        200,
+        await ctx.runMutation(internal.runReports.submit, {
+          deviceId: parsed.deviceId,
+          credentialHash: parsed.credentialHash,
+          grantHash: parsed.grantHash,
+          report: checked.value,
+          nowMs: Date.now(),
+        }),
+      ),
+    );
   }),
 });
 

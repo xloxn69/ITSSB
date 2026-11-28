@@ -109,6 +109,12 @@ export const rosterResponse: RosterResponse = {
       },
     },
   ],
+  // Every approved stop, with students or not (the last one has none).
+  stops: [
+    { stopId: "demo_stop_001", label: "Oak & Pine", sequence: 0, latitude: 34.0951, longitude: -83.9998 },
+    { stopId: "demo_stop_002", label: "Maple Court", sequence: 1, latitude: 34.0978, longitude: -84.0012 },
+    { stopId: "demo_stop_003", label: "Cedar Loop", sequence: 2, latitude: 34.1003, longitude: -84.0031 },
+  ],
   serverNowMs: 1795608400000,
 };
 

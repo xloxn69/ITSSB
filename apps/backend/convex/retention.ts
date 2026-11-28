@@ -8,8 +8,9 @@ import { internalMutation, type MutationCtx } from "./_generated/server";
  * keeps raw positions for 30 days after a run ends; the school must approve
  * or change it before real records exist.
  *
- * What is deleted: `telemetryEvents` and the `liveState` row of runs that are
- * `completed` or `cancelled` and ended before the cutoff. What is kept: the
+ * What is deleted: `telemetryEvents`, the `liveState` row, and the driver's
+ * delay reports (`runReports`) of runs that are `completed` or `cancelled`
+ * and ended before the cutoff. What is kept: the
  * run record (state, times, route version, driver), the audit log, and every
  * active run or run without a recorded end. Each batch that deletes something
  * appends a system audit row, so cleanup is observable.
@@ -24,6 +25,7 @@ export const RUNS_SCANNED_PER_BATCH = 2000;
 export interface PurgeResult {
   deletedTelemetry: number;
   deletedLive: number;
+  deletedReports: number;
   done: boolean;
   /**
    * Resume point for the next batch: the creation time of the last run that
@@ -49,6 +51,7 @@ async function purge(
   let budget = batchSize;
   let deletedTelemetry = 0;
   let deletedLive = 0;
+  let deletedReports = 0;
   let scanned = 0;
   // Creation time of the last run fully handled; the next batch starts after it.
   let resumeAt: number | null = cursor ?? null;
@@ -77,6 +80,19 @@ async function purge(
         done = false;
         break;
       }
+      // Driver delay reports go with the run's positions, in the same budget.
+      const reports = await ctx.db
+        .query("runReports")
+        .withIndex("by_run", (q) => q.eq("runId", run._id))
+        .take(budget + 1);
+      const reportBatch = reports.slice(0, budget);
+      for (const row of reportBatch) await ctx.db.delete(row._id);
+      deletedReports += reportBatch.length;
+      budget -= reportBatch.length;
+      if (reports.length > reportBatch.length) {
+        done = false;
+        break;
+      }
       const live = await ctx.db
         .query("liveState")
         .withIndex("by_run", (q) => q.eq("runId", run._id))
@@ -88,19 +104,19 @@ async function purge(
     }
     resumeAt = run._creationTime;
   }
-  if (deletedTelemetry + deletedLive > 0) {
+  if (deletedTelemetry + deletedLive + deletedReports > 0) {
     await ctx.db.insert("auditLog", {
       actor: { kind: "system" },
       action: "retention.purgeRawGps",
       resourceType: "retention",
       // Fixed id, so the newest sweep is found by creation time.
       resourceId: "rawGps",
-      reason: `telemetry:${deletedTelemetry},live:${deletedLive}`,
+      reason: `telemetry:${deletedTelemetry},live:${deletedLive}${deletedReports > 0 ? `,reports:${deletedReports}` : ""}`,
       result: "allowed",
       atMs: nowMs,
     });
   }
-  return { deletedTelemetry, deletedLive, done, cursor: done ? null : resumeAt };
+  return { deletedTelemetry, deletedLive, deletedReports, done, cursor: done ? null : resumeAt };
 }
 
 const purgeArgs = {

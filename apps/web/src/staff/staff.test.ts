@@ -15,6 +15,7 @@ import {
   runActionsAvailable,
   serviceDateLabel,
   sweepSummary,
+  staffReportText,
 } from "./format";
 import { credentialOutcome, grantOutcome, mutationOutcome, queryState } from "./source";
 import { pathSegments } from "./DraftDiagram";
@@ -126,6 +127,7 @@ describe("fixture credential actions", () => {
 describe("sweepSummary", () => {
   it("says what a retention sweep deleted, and nothing for an unreadable record", () => {
     expect(sweepSummary("telemetry:1440,live:2")).toBe("1440 positions and 2 last-known positions deleted");
+    expect(sweepSummary("telemetry:3,live:1,reports:2")).toBe("3 positions, 1 last-known position and 2 driver delay reports deleted");
     expect(sweepSummary("telemetry:1,live:1")).toBe("1 position and 1 last-known position deleted");
     expect(sweepSummary("garbage")).toBeNull();
     expect(sweepSummary(null)).toBeNull();
@@ -376,5 +378,24 @@ describe("notificationJobFacts", () => {
       ["Created in the last 24 h", "18 accepted by Apple, 1 waiting to retry, 2 expired unsent"],
     ]);
     expect(notificationJobFacts({ ...n, truncated: true }, now, now, now)[0]![1]).toMatch(/^at least 2 waiting/);
+  });
+});
+
+describe("staff driver report text", () => {
+  const report = {
+    reportId: "demo_run_report_001",
+    runId: "demo_run_001",
+    category: "mechanical" as const,
+    expectedDelayMinutes: null,
+    capturedAtMs: 1_795_608_000_000,
+    receivedAtMs: 1_795_609_200_000,
+    driverName: "Dana Driver",
+  };
+
+  it("names the reason, the driver, and both times so an offline report reads as old", () => {
+    const t = staffReportText(report);
+    expect(t.startsWith("Mechanical problem, no delay estimate · Dana Driver · made ")).toBe(true);
+    expect(t).toContain("on the bus, received");
+    expect(staffReportText({ ...report, expectedDelayMinutes: 10, category: "traffic" })).toContain("Traffic, about 10 min late");
   });
 });

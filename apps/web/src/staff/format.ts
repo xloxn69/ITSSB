@@ -7,7 +7,9 @@ import {
   type DraftDetail,
   POSITION_AGING_AFTER_MS,
   POSITION_STALE_AFTER_MS,
+  RUN_REPORT_CATEGORY_LABELS,
   type RouteDirection,
+  type StaffRunReport,
 } from "@itssb/contracts";
 import type { Tone } from "../tracking/presentation";
 
@@ -19,6 +21,19 @@ export const DIRECTION_LABEL: Record<RouteDirection, string> = {
 export function dateTime(ms: number | null): string {
   if (ms === null) return "—";
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(ms);
+}
+
+/**
+ * A driver's delay or issue report for staff: the reason, the driver's
+ * minutes, who, and both times (made on the bus, received), so a report
+ * that waited offline reads as old.
+ */
+export function staffReportText(r: StaffRunReport): string {
+  const what = RUN_REPORT_CATEGORY_LABELS[r.category];
+  const reason = `${what.charAt(0).toUpperCase()}${what.slice(1)}`;
+  const minutes = r.expectedDelayMinutes === null ? "no delay estimate" : `about ${r.expectedDelayMinutes} min late`;
+  const who = r.driverName ?? "Driver";
+  return `${reason}, ${minutes} · ${who} · made ${dateTime(r.capturedAtMs)} on the bus, received ${dateTime(r.receivedAtMs)}`;
 }
 
 function ago(ms: number): string {
@@ -155,10 +170,12 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 
 /** "telemetry:12,live:1" from a retention sweep, in words; null when unreadable. */
 export function sweepSummary(deleted: string | null): string | null {
-  const m = deleted ? /^telemetry:(\d+),live:(\d+)$/.exec(deleted) : null;
+  const m = deleted ? /^telemetry:(\d+),live:(\d+)(?:,reports:(\d+))?$/.exec(deleted) : null;
   if (!m) return null;
-  const [positions, live] = [Number(m[1]), Number(m[2])];
-  return `${plural(positions, "position", "positions")} and ${plural(live, "last-known position", "last-known positions")} deleted`;
+  const [positions, live, reports] = [Number(m[1]), Number(m[2]), Number(m[3] ?? 0)];
+  const parts = [plural(positions, "position", "positions"), plural(live, "last-known position", "last-known positions")];
+  if (reports > 0) parts.push(plural(reports, "driver delay report", "driver delay reports"));
+  return `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)} deleted`;
 }
 
 /**

@@ -13,6 +13,10 @@ Rules enforced here, not in the browser:
 - stop coordinates come from this device's own fresh fix, never the request
 - submitting a draft for review queues it (draft_submit.py); it reads as
   submitted only after the server accepted it
+- a delay report queues it (run_reports.py); it reads as sent only after
+  the server accepted it
+- "stopped near a stop" comes from this device's own fresh fix and the
+  roster's approved stops; it never claims arrival
 - static files are served only from the built UI directory
 """
 
@@ -50,6 +54,8 @@ from .local_auth import (
 )
 from .models import Fix
 from .motion import FIX_FRESH_S, MotionJudge
+from .route_geometry import NEAR_STOP_M, nearest_stop
+from .run_reports import RunReportDesk
 from .status import StatusBoard
 from .students import StudentDesk
 from .trips import HttpRunStarter, HttpTripEvents, StartRunRequest, end_run, start_run_online
@@ -90,6 +96,7 @@ NOT_YET = {
     "showQr": "QR codes come from the school server, and this device has none set up.",
     "showStudents": "The roster comes from the school server, and this device has none set up.",
     "submitRoute": "Route review is on the school server, and this device has none set up.",
+    "reportDelay": "Reports go to the school server, and this device has none set up.",
 }
 
 
@@ -144,7 +151,10 @@ class DriverApi:
         service_timezone: str | None = None,
         students: StudentDesk | None = None,
         draft_desk: DraftDesk | None = None,
+        run_reports: RunReportDesk | None = None,
     ) -> None:
+        # Delay and issue reports (run_reports.py); None without a server.
+        self.run_reports = run_reports
         # Submitting drafts for review (draft_submit.py); None without a server.
         self.draft_desk = draft_desk
         # QR codes, roster and driver actions (students.py); None without a server.
@@ -294,6 +304,16 @@ class DriverApi:
                 if self.students is not None and session.driver is not None
                 else None
             )
+            # The driver's own reports, sync state included; only when unlocked.
+            reports = (
+                RunReportDesk.recent(
+                    db,
+                    self.now_ms(),
+                    {r.route_version_id for r in session.driver.route_versions},
+                )
+                if self.run_reports is not None and session.driver is not None
+                else None
+            )
         snap.update(
             {
                 "motion": self.judge.snapshot(),
@@ -309,6 +329,9 @@ class DriverApi:
                     "submitRoute": self.draft_desk.capability(session)
                     if self.draft_desk is not None
                     else {"available": False, "reason": NOT_YET["submitRoute"]},
+                    "reportDelay": StudentDesk.capability(session, run)
+                    if self.run_reports is not None
+                    else {"available": False, "reason": NOT_YET["reportDelay"]},
                 },
                 # Only for an unlocked driver: route drafts are protected.
                 "recording": recording,
@@ -322,6 +345,7 @@ class DriverApi:
                 "run": run,
                 "outbox": outbox,
                 "studentChanges": changes,
+                "runReports": reports,
             }
         )
         return snap
@@ -360,6 +384,12 @@ class DriverApi:
                     HTTPStatus.CONFLICT, "NOT_PARKED", "Stop safely and confirm parked first."
                 )
             return _json(*self.students.roster(session))
+        if path == "/api/stop" and self.students is not None:
+            if not self.judge.parked():
+                return _error(
+                    HTTPStatus.CONFLICT, "NOT_PARKED", "Stop safely and confirm parked first."
+                )
+            return self._stop(session)
         with self._db() as db:
             drafts = Drafts(db)
             if path == "/api/recordings":
@@ -449,6 +479,18 @@ class DriverApi:
                 return _json(*self.students.qr(session, data))
             return _json(*self.students.action(session, data, guard=self._require_parked))
 
+        if path == "/api/run-reports":
+            if self.run_reports is None:
+                return _error(HTTPStatus.CONFLICT, "NO_SERVER", NOT_YET["reportDelay"])
+            # Reporting takes attention: parked only, rechecked under the write lock.
+            if not self.judge.parked():
+                return _error(
+                    HTTPStatus.CONFLICT, "NOT_PARKED", "Stop safely and confirm parked first."
+                )
+            with self._db() as db:
+                reply = self.run_reports.report(db, session, data, guard=self._require_parked)
+            return _json(*reply)
+
         if path == "/api/recordings/review-status":
             # A read from the server with the driver's grant; no draft changes.
             if self.draft_desk is None:
@@ -529,6 +571,39 @@ class DriverApi:
                     return _json(code, body)
                 return _json(HTTPStatus.OK, drafts.summary(m.group(1)))
         return _error(HTTPStatus.NOT_FOUND, "NOT_FOUND", "Not found.")
+
+    def _stop(self, session: KioskSession) -> Response:
+        """D14: the run's roster with the approved stop this bus is parked
+        near, from the device's own fresh fix. "Near" is NEAR_STOP_M; it is
+        never an arrival, which only the server computes."""
+        assert self.students is not None  # noqa: S101 - checked by the caller
+        code, roster = self.students.roster(session)
+        if code != HTTPStatus.OK:
+            return _json(code, roster)
+        fix = self._fresh_fix()
+        near: dict[str, Any] | None = None
+        nearest: dict[str, Any] | None = None
+        if fix is not None:
+            found = nearest_stop(roster.get("stops") or [], fix.latitude, fix.longitude)
+            if found is not None:
+                stop, distance = found
+                nearest = {
+                    "stopId": stop.get("stopId"),
+                    "label": stop.get("label"),
+                    "sequence": stop.get("sequence"),
+                    "distanceM": round(distance),
+                }
+                near = nearest if distance <= NEAR_STOP_M else None
+        return _json(
+            HTTPStatus.OK,
+            {
+                **roster,
+                "position": "fresh" if fix is not None else "unknown",
+                "nearStop": near,
+                "nearestStop": nearest,
+                "nearRadiusM": NEAR_STOP_M,
+            },
+        )
 
     def _require_parked(self) -> None:
         if not self.judge.parked():

@@ -1,4 +1,5 @@
 import type { DeviceSnapshot, DraftDetail, DraftStop, DraftSummary } from "./snapshot.js";
+import type { RunReport, StopResponse } from "./stopViews.js";
 import type { DeviceQrCode, QrPurpose, RosterAction, RosterResponse } from "./students.js";
 
 /**
@@ -147,6 +148,9 @@ export const api = {
     }),
   qrCode: (purpose: QrPurpose) => post<DeviceQrCode>("/api/qr-codes", { purpose }),
   roster: () => get<RosterResponse>("/api/roster"),
+  stop: () => get<StopResponse>("/api/stop"),
+  report: (requestId: string, category: string, minutes: number | null) =>
+    post<{ report: RunReport }>("/api/run-reports", { requestId, category, minutes }),
   rosterAction: (body: Record<string, unknown>) => post<{ action: RosterAction }>("/api/roster-actions", body),
   endRun: (runId: string, requestId: string) =>
     post<{ completedLocally: boolean; endSync: string; message?: string }>(`/api/runs/${runId}/end`, { requestId }),

@@ -44,6 +44,7 @@ import type * as pushDelivery from "../pushDelivery.js";
 import type * as retention from "../retention.js";
 import type * as routes from "../routes.js";
 import type * as runOps from "../runOps.js";
+import type * as runReports from "../runReports.js";
 import type * as runs from "../runs.js";
 import type * as seed from "../seed.js";
 import type * as staffInvitations from "../staffInvitations.js";
@@ -96,6 +97,7 @@ declare const fullApi: ApiFromModules<{
   retention: typeof retention;
   routes: typeof routes;
   runOps: typeof runOps;
+  runReports: typeof runReports;
   runs: typeof runs;
   seed: typeof seed;
   staffInvitations: typeof staffInvitations;

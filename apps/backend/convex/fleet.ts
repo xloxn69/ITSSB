@@ -33,6 +33,7 @@ import { accessUnavailable, audit, denied, staffCaller } from "./lib/staff";
 import { boundedText, okResult, refusedResult, staffActionResult } from "./lib/staffResults";
 import { jobAgeSummary } from "./notificationJobs";
 import { RAW_GPS_RETENTION_DAYS } from "./retention";
+import { reportsForRun, staffReports } from "./runReports";
 import { UNLINKED_PREFIX } from "./users";
 
 // The Convex runtime provides `process.env`.
@@ -429,6 +430,25 @@ export const diagnostics = query({
               databaseBytes: nullable(v.number()),
             }),
           ),
+          lastRunReport: v.optional(
+            nullable(
+              v.object({
+                reportId: v.string(),
+                runId: v.string(),
+                category: v.union(
+                  v.literal("traffic"),
+                  v.literal("mechanical"),
+                  v.literal("weather"),
+                  v.literal("student_incident"),
+                  v.literal("other"),
+                ),
+                expectedDelayMinutes: nullable(v.number()),
+                capturedAtMs: v.number(),
+                receivedAtMs: v.number(),
+                driverName: nullable(v.string()),
+              }),
+            ),
+          ),
         }),
       ),
       notifications: v.object({
@@ -487,6 +507,7 @@ export const diagnostics = query({
         oldestPendingCapturedAtMs: health?.oldestPendingCapturedAtMs ?? null,
         lastRun: lastRun ? { runId: lastRun._id, state: lastRun.state, endedAtMs: lastRun.endedAtMs ?? null } : null,
         metrics: health ? deviceMetrics(health) : null,
+        lastRunReport: lastRun ? ((await staffReports(ctx, (await reportsForRun(ctx, lastRun._id)).slice(0, 1)))[0] ?? null) : null,
       });
     }
     devices.sort((a, b) => a.label.localeCompare(b.label));

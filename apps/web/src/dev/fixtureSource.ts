@@ -49,6 +49,7 @@ export const FIXTURE_SCENARIOS = [
   "two-students",
   "offline-no-run",
   "offline-live",
+  "reported-delay",
 ] as const;
 export type FixtureScenario = (typeof FIXTURE_SCENARIOS)[number];
 
@@ -133,6 +134,12 @@ function runFor(scenario: FixtureScenario, assignmentId: string): unknown {
     case "completed":
     case "cancelled":
       Object.assign(run, { state: scenario });
+      break;
+    case "reported-delay":
+      // The driver reported traffic three minutes ago; no ETA is available.
+      Object.assign(run, {
+        reportedDelay: { category: "traffic", minutes: 10, reportedAtMs: now - 3 * 60_000, validUntilMs: now + 57 * 60_000, source: "driver" },
+      });
       break;
   }
   const serviceNotice = scenario === "late-start-live" ? shiftedNotices(myRunLateStart, now).serviceNotice : null;

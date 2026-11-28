@@ -87,3 +87,25 @@ def simplify(
                 stack.append((s, far))
                 stack.append((far, e))
     return sorted(keep)
+
+
+# A bus parked within this distance of an approved stop's coordinate is
+# "near" it (docs/05 D14). It allows for where a bus pulls in relative to
+# the stop's pin and a few metres of fix error; it never claims arrival.
+NEAR_STOP_M = 75.0
+
+
+def nearest_stop(
+    stops: Sequence[dict], latitude: float, longitude: float
+) -> tuple[dict, float] | None:
+    """The closest stop (a roster stop dict with latitude/longitude) and its
+    distance in metres, or None when there are no stops."""
+    best: tuple[dict, float] | None = None
+    for stop in stops:
+        try:
+            d = distance_m(latitude, longitude, float(stop["latitude"]), float(stop["longitude"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if best is None or d < best[1]:
+            best = (stop, d)
+    return best

@@ -16,6 +16,7 @@ import {
 import { connectionNotice, reverifyOnForeground, type TrackContext, type TrackStore } from "../tracking/store";
 import type { ServiceNotice, TrackedRun } from "../tracking/model";
 import type { ServerClock } from "../tracking/clock";
+import { reportedDelayLine } from "../tracking/delay";
 import { AlertsPanel } from "./AlertsPanel";
 import { RouteDiagram } from "./RouteDiagram";
 
@@ -198,6 +199,7 @@ function Tracking({
   const eta = !connectionLost && presentation.kind === "live" ? etaView(run, clock, now) : null;
   const progress = stopProgressText(run);
   const { serviceNotice } = currentNotices(context.notices, clock, now);
+  const delay = reportedDelayLine(run, clock, now);
   return (
     <>
       <ContextHeader context={context} />
@@ -217,6 +219,7 @@ function Tracking({
               <p>{copy.detail}</p>
               {copy.age && <p className="muted age">{copy.age}</p>}
               {progress && <p>{progress}</p>}
+              {delay && <p className="age">{delay}</p>}
             </div>
           </section>
           {eta && (

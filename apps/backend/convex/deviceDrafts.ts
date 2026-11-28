@@ -26,7 +26,7 @@ import { insertAudit } from "./lib/staff";
  * credential still the one the request presented. A rotation or revocation
  * that commits between the HTTP lookup and this function refuses the call.
  */
-async function authorizedDevice(ctx: QueryCtx, deviceId: Id<"devices">, credentialHash: string) {
+export async function authorizedDevice(ctx: QueryCtx, deviceId: Id<"devices">, credentialHash: string) {
   const device = await ctx.db.get(deviceId);
   if (!device || !stillAuthorized(device, credentialHash)) throw new ConvexError({ code: "DEVICE_NOT_AUTHORIZED" });
   return device;

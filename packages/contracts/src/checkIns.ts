@@ -10,6 +10,7 @@
  */
 import type { SCHEMA_VERSION } from "./index.js";
 import type { TokenProblem } from "./enrollment.js";
+import type { StaffRunReport } from "./runReports.js";
 import type { AccessUnavailable } from "./tracking.js";
 
 type Envelope = { schemaVersion: typeof SCHEMA_VERSION; serverNowMs: number };
@@ -134,12 +135,28 @@ export interface RosterStudent {
   checkIn: CheckInRecord | null;
 }
 
+/** One approved stop of the run's route version, in travel order. */
+export interface RosterStop {
+  stopId: string;
+  label: string;
+  /** Travel order within the version, from 0. */
+  sequence: number;
+  latitude: number;
+  longitude: number;
+}
+
 export interface RosterResponse {
   schemaVersion: 1;
   runId: string;
   routeVersionId: string;
   /** Students in stop order. No addresses, no guardian details. */
   students: RosterStudent[];
+  /**
+   * Every approved stop of the run's route version, with students or not
+   * (docs/05 D14: "Stopped near <stop>" from the Pi's own fix). Optional so
+   * an older backend still decodes; the Pi treats a missing list as empty.
+   */
+  stops?: RosterStop[];
   serverNowMs: number;
 }
 
@@ -308,6 +325,8 @@ export type RunAttendanceResult =
       runState: "scheduled" | "active" | "completed" | "cancelled";
       startedAtMs: number | null;
       students: RunAttendanceStudent[];
+      /** Driver delay and issue reports on this run, newest first (docs/08 §9.4). */
+      reports?: StaffRunReport[];
     })
   | (Envelope & { status: "not_found" })
   | AccessUnavailable;

@@ -107,6 +107,7 @@ const SEED_GUARDED_TABLES = [
   "maintenanceWindows",
   "auditLog",
   "deviceHealth",
+  "runReports",
 ] as const satisfies readonly TableNames[];
 // Fails to compile if a schema table is missing from the list above.
 type MissingFromGuard = Exclude<TableNames, (typeof SEED_GUARDED_TABLES)[number]>;

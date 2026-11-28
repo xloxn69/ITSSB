@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "requestId": "6b5a4c3d-2e1f-4a0b-9c8d-7e6f5a4b3c2d",
+  "status": "rejected",
+  "code": "run_not_authorized",
+  "message": "This device is not authorized to report on that run.",
+  "serverNowMs": 1795608901000
+}

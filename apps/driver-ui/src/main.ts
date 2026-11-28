@@ -20,6 +20,7 @@ import { type ActionId, parked as parkedNow, STUDENT_SCREENS, type ScreenId, sel
 import type { DeviceSnapshot, DraftSummary, Observed } from "./snapshot.js";
 import { correctionView, detailView, emptyStudentUi, qrView, rosterView, type StudentController } from "./studentViews.js";
 import { type AttendanceStatus, type QrPurpose, type RosterAction, rosterRows, studentChangeLines, syncLabel } from "./students.js";
+import { emptyReportUi, reportLines, reportView, type ReportController, type StopController, type StopResponse, stopView } from "./stopViews.js";
 import { css } from "./styles.js";
 import { dashboardView, diagnosticsView, drivingView, type Nav, offlineView, startupView, statusBar } from "./views.js";
 
@@ -63,6 +64,12 @@ const ui: UiState = {
 
 /** QR codes and the roster (D15-D19). Cleared on lock: a locked screen keeps no roster. */
 let sui = emptyStudentUi();
+/** D14: where the parked bus is, from the device (its own fix and the run's stops). */
+let stop: StopResponse | null = null;
+let stopAt: number | null = null;
+let stopError: string | null = null;
+/** D20: the report being chosen. Its sync state comes from the snapshot. */
+let rep = emptyReportUi();
 let qrLoading = false;
 let qrLastTry = -Infinity;
 const QR_RETRY_MS = 5_000;
@@ -221,10 +228,14 @@ const ctl: Controller & Nav = {
   },
   lock() {
     sui = emptyStudentUi();
+    stop = null;
     void run(null, () => api.lock()).then(() => ctl.go(null));
   },
   confirmParked() {
-    void run(null, () => api.confirmParked(), "Parked confirmed.");
+    void run(null, () => api.confirmParked(), "Parked confirmed.").then((ok) => {
+      // Parked during the run: show the stop the bus is near (D14).
+      if (ok && snapshot?.run?.state === "active" && snapshot.session?.unlocked) openStop();
+    });
   },
   openDraft(d: DraftSummary) {
     ui.draftId = d.draftId;
@@ -418,6 +429,88 @@ function studentAction(key: string, body: Record<string, unknown>, after?: () =>
     });
 }
 
+// ── D14 stop and D20 delay report ───────────────────────────────────
+
+async function loadStop(): Promise<void> {
+  try {
+    const s = await api.stop();
+    stop = s;
+    stopAt = performance.now();
+    stopError = null;
+    // The same roster Show Students uses: one fetch, one cache on the device.
+    sui.roster = s;
+    sui.rosterAt = stopAt;
+    sui.rosterError = null;
+  } catch (err) {
+    if (err instanceof ApiError) {
+      stop = null; // refused or nothing cached: show no names at all
+      stopError = err.message;
+    } else {
+      stop = null; // a stop from an earlier answer may no longer be where the bus is
+      stopError = "No answer from the device, so the screen can't say which stop the bus is near.";
+    }
+  }
+}
+
+function openStop(): void {
+  requested = "D14";
+  // Never show the last stop while asking about this one: the bus may have moved.
+  stop = null;
+  stopAt = null;
+  stopError = null;
+  void loadStop().then(render);
+  render();
+}
+
+const stopCtl: StopController & ReportController = {
+  go(screen) {
+    if (screen === "D20") rep = { ...emptyReportUi(), category: rep.category, minutes: rep.minutes };
+    if (screen === "D14") {
+      openStop();
+      return;
+    }
+    ctl.go(screen);
+  },
+  openQr() {
+    ctl.action("showQr");
+  },
+  openStudents() {
+    ctl.action("showStudents");
+  },
+  setReport(patch) {
+    Object.assign(rep, patch);
+    rep.message = null;
+    render();
+  },
+  sendReport() {
+    const category = rep.category;
+    if (rep.busy || category === null) return;
+    const minutes = rep.minutes;
+    // One requestId per choice: a retry after no answer resends the same report.
+    const key = `report:${category}:${minutes ?? "none"}`;
+    rep.busy = true;
+    rep.message = { kind: "pending", text: "Saving on this device…" };
+    render();
+    void api
+      .report(ids.for(key), category, minutes)
+      .then(() => {
+        ids.answered(key);
+        rep = { ...emptyReportUi(), message: { kind: "pending", text: "Saved on this device. It shows as sent once the school server accepts it." } };
+      })
+      .catch((err: unknown) => {
+        if (!noAnswer(err)) ids.answered(key);
+        rep.message = {
+          kind: "problem",
+          text: err instanceof ApiError ? err.message : "No answer from the device. Tap Send again to retry the same report.",
+        };
+      })
+      .finally(() => {
+        rep.busy = false;
+        void poll();
+      });
+  },
+};
+
 const sctl: StudentController = {
   go(screen) {
     sui.message = null;
@@ -498,6 +591,18 @@ function dashboardControls(o: Observed): (HTMLElement | null)[] {
   lockBtn.addEventListener("click", () => (s.unlocked ? ctl.lock() : ctl.go("D04")));
   const extra: (HTMLElement | null)[] = [lockBtn, parkedControl(o, ctl, ui)];
   if (s.unlocked && o.snapshot?.run?.state === "active") {
+    // The stop screen and delay reports need the bus parked (the device checks too).
+    for (const [label, open] of [
+      ["At this stop", () => openStop()],
+      ["Report a delay", () => stopCtl.go("D20")],
+    ] as const) {
+      const b = document.createElement("button");
+      b.className = "btn";
+      b.textContent = label;
+      b.disabled = !parkedNow(o);
+      b.addEventListener("click", open);
+      extra.push(b);
+    }
     const end = document.createElement("button");
     end.className = "btn";
     end.textContent = "End run";
@@ -506,7 +611,7 @@ function dashboardControls(o: Observed): (HTMLElement | null)[] {
     extra.push(end);
   }
   // Student changes still waiting, and any rejection, even after the run ended.
-  for (const line of [cancelledBanner(o), ...studentChangeLines(o.snapshot?.studentChanges)]) {
+  for (const line of [cancelledBanner(o), ...studentChangeLines(o.snapshot?.studentChanges), ...reportLines(o.snapshot?.runReports)]) {
     if (!line) continue;
     const note = document.createElement("div");
     note.className = `banner lv-${line.level}`;
@@ -532,12 +637,21 @@ function render(): void {
     // A forced change (the bus moved, the service restarted) drops half-typed input.
     if (DETAIL_SCREENS.has(screen) && !DETAIL_SCREENS.has(shown)) void refreshDetail().then(render);
     if (screen === "D04") void fetchSession().then(render, () => undefined);
+    // Leaving D14 drops its answer: the next visit may be at another stop.
+    if (screen !== "D14") {
+      stop = null;
+      stopAt = null;
+    }
     // Leaving the QR screen (or being moved off it) drops the code from memory.
     if (screen !== "D15" && screen !== "D16") {
       sui.qr = null;
       sui.qrAt = null;
     }
-    if (!o.snapshot?.session?.unlocked) sui = emptyStudentUi();
+    if (!o.snapshot?.session?.unlocked) {
+      // A locked screen keeps no names: the roster and the stop's students go.
+      sui = emptyStudentUi();
+      stop = null;
+    }
     shown = screen;
   }
   const view = (() => {
@@ -569,6 +683,10 @@ function render(): void {
         return rosterView(sui, sctl, performance.now());
       case "D18":
         return detailView(sui, sctl, routeLabel());
+      case "D14":
+        return stopView(stop, stopError, stopCtl, stopAt === null ? 0 : performance.now() - stopAt);
+      case "D20":
+        return reportView(o, rep, stopCtl, deviceNowMs(o));
       case "D19":
         return correctionView(o, sui, sctl);
       case "D23":
@@ -614,7 +732,8 @@ async function poll(): Promise<void> {
     // Review decisions take minutes; ask about every half minute while shown.
     if (REVIEW_SCREENS.has(shown) && ++reviewPolls % 30 === 0) await refreshReview();
     // The roster and its queued changes, every few seconds while it is open.
-    if (STUDENT_SCREENS.has(shown) && shown !== "D15" && shown !== "D16" && ++polls % 3 === 0) await loadRoster();
+    if (shown === "D14" && ++polls % 3 === 0) await loadStop();
+    else if (STUDENT_SCREENS.has(shown) && !["D14", "D15", "D16", "D20"].includes(shown) && ++polls % 3 === 0) await loadRoster();
     if ((shown === "D15" || shown === "D16") && qrDue(performance.now())) void loadQr();
   } catch {
     pollFailed = true;

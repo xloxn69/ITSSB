@@ -13,6 +13,7 @@ import { correctionView, detailView, emptyStudentUi, qrView, rosterView, type St
 import { type DeviceQrCode, type RosterAction, type RosterResponse, studentChangeLines } from "../students.js";
 import type { StoragePart } from "../snapshot.js";
 import { dashboardView, diagnosticsView, drivingView, h, statusBar } from "../views.js";
+import { emptyReportUi, type ReportUi, reportView, type RunReport, type StopResponse, stopView } from "../stopViews.js";
 import { observed, snapshot } from "../testing.js";
 
 const RUN = "demo_run_001";
@@ -370,8 +371,82 @@ const diagnostics = (): HTMLElement => {
   return diagnosticsView(observed(s), { go: () => {}, action: () => {} });
 };
 
+// ── D14 stopped at a bus stop, D20 delay report ──
+const oak = { stopId: "demo_stop_001", label: "Oak & Pine", sequence: 0, distanceM: 14 };
+const stopBase = (): StopResponse => ({
+  ...roster([action({ requestId: "r5", assignmentId: "demo_assignment_003", sync: "pending" })]),
+  stops: [
+    { stopId: "demo_stop_001", label: "Oak & Pine", sequence: 0 },
+    { stopId: "demo_stop_002", label: "Maple Court", sequence: 1 },
+    { stopId: "demo_stop_003", label: "Cedar Park", sequence: 2 },
+  ],
+  position: "fresh",
+  nearStop: oak,
+  nearestStop: oak,
+  nearRadiusM: 75,
+});
+const stopStates: Record<string, StopResponse> = {
+  "stop-near": stopBase(),
+  "stop-far": { ...stopBase(), nearStop: null, nearestStop: { ...oak, label: "Maple Court", distanceM: 420 } },
+  "stop-unknown": { ...stopBase(), position: "unknown", nearStop: null, nearestStop: null },
+};
+const runReport = (over: Partial<RunReport>): RunReport => ({
+  requestId: "q1",
+  runId: RUN,
+  category: "traffic",
+  minutes: 10,
+  sync: "pending",
+  capturedAtMs: at(3),
+  resolvedAtMs: null,
+  attempts: 2,
+  waitingReason: null,
+  problem: null,
+  ...over,
+});
+const reportStates: Record<string, { ui: ReportUi; reports: RunReport[] }> = {
+  "report-choose": { ui: { ...emptyReportUi(), category: "traffic", minutes: 10 }, reports: [] },
+  "report-pending": {
+    ui: { ...emptyReportUi(), message: { kind: "pending", text: "Saved on this device. It shows as sent once the school server accepts it." } },
+    reports: [runReport({})],
+  },
+  "report-sent-refused": {
+    ui: emptyReportUi(),
+    reports: [
+      runReport({ requestId: "q2", category: "mechanical", minutes: null, sync: "sent", capturedAtMs: at(1), resolvedAtMs: at(1) }),
+      runReport({
+        requestId: "q3",
+        category: "weather",
+        minutes: 15,
+        sync: "refused",
+        capturedAtMs: at(20),
+        problem: "Your driver authorization had ended or was withdrawn before this reached the school server. Tell your transport office.",
+      }),
+    ],
+  },
+};
+const stopNav = { go: () => {}, openQr: () => {}, openStudents: () => {}, setReport: () => {}, sendReport: () => {} };
+const stopScreen = (): HTMLElement => {
+  const parkedRun = observed(
+    snapshot({
+      generatedAtMs: NOW,
+      gps: { status: "valid", gpsd: "connected", receivers: 1, lastReportAgeMs: 300, lastValidFixAgeMs: 400, lastValidFixCapturedAtMs: NOW - 400, lastValidFixMode: 3 },
+      run: { runId: RUN, state: "active" },
+      motion: { state: "stopped", parked: true },
+      session: { unlocked: true, driverName: "Dana Driver" },
+      runReports: reportStates[name]?.reports ?? [],
+    }),
+  );
+  const nav = { go: () => {}, action: () => {} };
+  const body = name.startsWith("stop")
+    ? stopView(stopStates[name] ?? null, null, stopNav, 0)
+    : reportView(parkedRun, reportStates[name]?.ui ?? emptyReportUi(), stopNav, NOW);
+  return h("div", {}, statusBar(parkedRun, nav), body);
+};
+
 const view = name.startsWith("diagnostics")
   ? diagnostics()
+  : name.startsWith("stop") || name.startsWith("report")
+  ? stopScreen()
   : name.startsWith("review")
   ? reviewState()
   : name === "dashboard-changes"
@@ -403,4 +478,6 @@ export const GALLERY_STATES = [
   "dashboard-cancelled",
   "summary-cancelled",
   "summary-cancelled-after-end",
+  ...Object.keys(stopStates),
+  ...Object.keys(reportStates),
 ];

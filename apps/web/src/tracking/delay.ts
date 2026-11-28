@@ -1,0 +1,22 @@
+/**
+ * The driver's delay report on the Track screen (docs/10 §5, docs/08 §9.4).
+ * Shown on an active run even without an arrival estimate, and never as
+ * one: the category, the driver's minutes, and how long ago it was made on
+ * the bus. Shown only once server time is verified (like the ETA), and
+ * hidden once that clock passes `validUntilMs`.
+ */
+import { reportedDelayText } from "@itssb/contracts";
+import { ageClockMs, type Instant, type ServerClock } from "./clock";
+import type { TrackedRun } from "./model";
+import { updatedText } from "./presentation";
+
+export function reportedDelayLine(run: TrackedRun, clock: ServerClock, now: Instant): string | null {
+  const d = run.reportedDelay;
+  // Only on verified server time: a cached result and a slow device clock
+  // would otherwise keep an expired report up with an understated age.
+  if (!d || run.state !== "active" || clock.kind !== "verified") return null;
+  const serverNow = ageClockMs(clock, now);
+  if (serverNow >= d.validUntilMs) return null;
+  const ago = updatedText(Math.max(0, serverNow - d.reportedAtMs)).replace(/^Updated /, "");
+  return `${reportedDelayText(d)} — reported ${ago}`;
+}
