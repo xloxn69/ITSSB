@@ -351,6 +351,7 @@ extension TrackViewModelTests {
         source.releaseReverify()
         await resume.value
 
+        _ = await eventually { source.assignmentSubscriptionCount == 2 }
         source.assignmentsContinuation?.yield(.ready([alex, jordan]))
         let kept = await eventually { model.selectedAssignmentId == "a_jordan" }
         XCTAssertTrue(kept, "the refresh doesn't switch back to the earlier student")
@@ -363,10 +364,13 @@ extension TrackViewModelTests {
         let resume = Task { await model.resumeFromBackground() }
         _ = await eventually { source.heldReverifies == 1 }
         model.retry()
-        XCTAssertEqual(source.assignmentSubscriptionCount, 2)
+        let retried = await eventually { source.assignmentSubscriptionCount == 2 }
+        XCTAssertTrue(retried)
         source.releaseReverify()
         await resume.value
-        XCTAssertEqual(source.assignmentSubscriptionCount, 2, "the refresh started before the retry is dropped")
+        // start() subscribes from a task, so give an unwanted restart time to show up.
+        let restartedAgain = await eventually(timeout: 0.3) { source.assignmentSubscriptionCount > 2 }
+        XCTAssertFalse(restartedAgain, "the refresh started before the retry is dropped")
     }
 
     func testResumeWhileStoppedDoesNothing() async {
