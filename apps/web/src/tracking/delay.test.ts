@@ -1,7 +1,7 @@
 import { type MyRunResult, REPORTED_DELAY_SHOWN_FOR_MS } from "@itssb/contracts";
 import { myRunReady, myRunReportedDelay } from "@itssb/contracts/fixtures";
 import { describe, expect, it } from "vitest";
-import { type Instant, type ServerClock, verifiedClock } from "./clock";
+import { type Instant, queryClock, type ServerClock, verifiedClock } from "./clock";
 import { reportedDelayLine } from "./delay";
 import { runSnapshot } from "./mapping";
 import type { TrackedRun } from "./model";
@@ -77,5 +77,14 @@ describe("reportedDelayLine", () => {
     expect(reportedDelayLine(noMinutes, clockAt(REPORTED + 1_000), at)).toBe(
       "Driver reported a delay (mechanical problem) — reported just now",
     );
+  });
+
+  it("is not shown on a cached result before server time is verified, even with a slow device clock", () => {
+    // The cached result says the server time is a minute after the report; the
+    // device clock is two hours behind, so unverified time would read as fresh.
+    const cached = queryClock(REPORTED + 60_000, at.wallMs);
+    const slow: Instant = { wallMs: at.wallMs - 2 * 60 * 60_000 + REPORTED_DELAY_SHOWN_FOR_MS, monoMs: at.monoMs };
+    expect(reportedDelayLine(run, cached, slow)).toBeNull();
+    expect(reportedDelayLine(run, cached, at)).toBeNull();
   });
 });

@@ -13,7 +13,7 @@ final class ReportedDelayTests: XCTestCase {
         }
         let dto: MyRunDTO = try JSONDecoder().decode(MyRunDTO.self, from: data)
         let snapshot: RunSnapshot = try DomainMapping.snapshot(from: dto, receivedAt: Date())
-        guard case let .ready(_, _, tracked, _) = snapshot else {
+        guard case let .ready(_, _, tracked, _, _) = snapshot else {
             throw XCTSkip("not ready")
         }
         return tracked
@@ -70,5 +70,18 @@ final class ReportedDelayTests: XCTestCase {
                        ["traffic", "mechanical", "weather", "student_incident", "other"])
         let none = ReportedDelay(category: .mechanical, minutes: nil, reportedAt: Date(), validUntil: Date())
         XCTAssertEqual(ReportedDelayPresentation.text(none), "Driver reported a delay (mechanical problem)")
+    }
+
+    func testNotShownBeforeServerTimeIsVerified() throws {
+        // A cached result: server time one minute after the report, unverified,
+        // with the phone clock far behind. Unverified time must never age it.
+        let run = try fixtureRun("myRun.reportedDelay")
+        let reportedAt = run.reportedDelay!.reportedAt
+        let cached = ServerClock(serverNow: reportedAt.addingTimeInterval(60),
+                                 receivedAt: reportedAt.addingTimeInterval(-7200),
+                                 isVerified: false, monotonicAt: nil)
+        XCTAssertNil(ReportedDelayPresentation.line(run: run, clock: cached,
+                                                    now: reportedAt.addingTimeInterval(-7200)))
+        XCTAssertNil(ReportedDelayPresentation.line(run: run, clock: cached, now: reportedAt.addingTimeInterval(60)))
     }
 }

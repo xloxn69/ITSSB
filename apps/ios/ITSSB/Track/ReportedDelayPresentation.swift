@@ -5,11 +5,13 @@ import Foundation
 /// the category, the driver's minutes, and how long ago it was made on the bus.
 enum ReportedDelayPresentation {
     /// "Driver reported a delay (traffic), about 10 min — reported 3 min ago", or nil
-    /// when there is none, the run is not active, or the server-aligned clock has
+    /// when there is none, the run is not active, server time is not verified, or the server-aligned clock has
     /// passed `validUntil`. Re-derived every second, so it disappears on its own.
     static func line(run: TrackedRun, clock: ServerClock, now: Date,
                      monotonicNow: ContinuousClock.Instant = .now) -> String? {
-        guard let delay = run.reportedDelay, run.state == .active else { return nil }
+        // Only on verified server time: a cached result and a slow phone clock
+        // would otherwise keep an expired report up with an understated age.
+        guard let delay = run.reportedDelay, run.state == .active, clock.isVerified else { return nil }
         let serverNow = clock.ageClock(at: now, monotonicNow: monotonicNow)
         guard serverNow < delay.validUntil else { return nil }
         let ago = AgeFormatter.updatedText(age: max(0, serverNow.timeIntervalSince(delay.reportedAt)))
