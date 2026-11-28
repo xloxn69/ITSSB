@@ -171,6 +171,7 @@ def test_health_is_unknown_before_the_first_measurement(clock):
         None,
         None,
     )
+    assert "unknown (free space unknown; ? waiting)" in render_page(board.snapshot())
 
 
 # ── Cleanup of acknowledged rows ─────────────────────────────────────

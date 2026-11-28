@@ -55,7 +55,8 @@ def _storage_line(st: dict[str, Any] | None) -> str:
         return "unknown"
     free = st["disk"]["freeBytes"]
     space = "free space unknown" if free is None else f"{free // 1_000_000} MB free"
-    line = f"{st['level']} ({space}; {st['queue']['pending']} waiting)"
+    pending = st["queue"]["pending"]
+    line = f"{st['level']} ({space}; {'?' if pending is None else pending} waiting)"
     if st["recording"] == "reduced":
         line += f"; recording reduced to one position every {st['reducedIntervalS']:g} s"
     return line
