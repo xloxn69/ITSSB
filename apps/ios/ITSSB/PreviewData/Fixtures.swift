@@ -156,6 +156,9 @@ struct PreviewLiveRunSource: LiveRunSource {
             switch scenario {
             case .loading, .accessUnavailable, .sessionExpired:
                 break
+            case .guardians where assignmentId == PreviewFixtures.guardianAssignments[1].assignmentId:
+                continuation.yield(.noActiveRun(assignmentId: assignmentId, routeVersionId: routeVersionId,
+                                                clock: .deviceOnly, notices: .none))
             case .live, .offline, .guardians:
                 ready(PreviewFixtures.run(position: PreviewFixtures.position(capturedSecondsAgo: 4)))
             case .eta, .alerts:
@@ -171,9 +174,6 @@ struct PreviewLiveRunSource: LiveRunSource {
             case .awaitingPosition: ready(PreviewFixtures.run(position: nil, gpsStatus: nil))
             case .gpsUnavailable: ready(PreviewFixtures.run(position: PreviewFixtures.position(capturedSecondsAgo: 20),
                                                             gpsStatus: .noFix))
-            case .guardians where assignmentId == PreviewFixtures.guardianAssignments[1].assignmentId:
-                continuation.yield(.noActiveRun(assignmentId: assignmentId, routeVersionId: routeVersionId,
-                                                clock: .deviceOnly, notices: .none))
             case .noActiveRun, .cancelled, .replacementPending, .completed, .noService, .lateStart:
                 continuation.yield(.noActiveRun(assignmentId: assignmentId, routeVersionId: routeVersionId,
                                                 clock: .deviceOnly, notices: PreviewFixtures.notices(scenario)))
