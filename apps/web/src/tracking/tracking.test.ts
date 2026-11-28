@@ -14,7 +14,7 @@ import { ageClockMs, type Instant, queryClock, type ServerClock, verifiedClock }
 import { MappingError, runSnapshot } from "./mapping";
 import { freshnessForAge, positionFreshness, type TrackedRun } from "./model";
 import { livePresentation, showsMarker, statusCopy, updatedText, whileDisconnected } from "./presentation";
-import { SessionExpiredError, TRANSPORT_FAILURE, TrackStore, type TrackingSource } from "./store";
+import { reverifyOnForeground, SessionExpiredError, TRANSPORT_FAILURE, TrackStore, type TrackingSource } from "./store";
 
 const ready = myRunReady as Extract<MyRunResult, { status: "ready" }>;
 const CAPTURED = ready.run.lastPosition?.capturedAtMs ?? 0;
@@ -246,6 +246,17 @@ class FakeSource implements TrackingSource {
   serverTime() {
     return this.serverTimeResult ?? Promise.reject(new Error("unavailable"));
   }
+  connectionCb: ((connected: boolean) => void) | null = null;
+  connection(onChange: (connected: boolean) => void) {
+    this.connectionCb = onChange;
+    return () => {
+      this.connectionCb = null;
+    };
+  }
+  /** Subscriptions still open: a stopped store must leave none. */
+  get openSubscriptions(): number {
+    return (this.assignmentsCb ? 1 : 0) + (this.connectionCb ? 1 : 0) + this.runCbs.size + this.routeCbs.size;
+  }
 }
 
 const TWO_STUDENTS = {
@@ -357,5 +368,132 @@ describe("TrackStore", () => {
     source.runCbs.get("demo_assignment_001")?.(myRunReady);
     await Promise.resolve();
     expect(store.state.kind === "tracking" && store.state.clock.kind).toBe("query");
+  });
+});
+
+/** Account B: a different family, signed in on the same browser after A. */
+const ACCOUNT_B = {
+  ...myAssignmentsReady,
+  assignments: [
+    {
+      assignmentId: "demo_assignment_b01",
+      relationship: "guardian",
+      studentDisplayName: "Riley Sample",
+      routeLabel: "Route 4 Afternoon",
+      stopLabel: "Birch & 9th",
+    },
+  ],
+};
+
+/** Account A signed in and tracking with verified time. */
+async function trackingAsA() {
+  const source = new FakeSource();
+  source.serverTimeResult = Promise.resolve(CAPTURED + 1_000);
+  const store = new TrackStore(source, now);
+  store.start();
+  source.assignmentsCb?.(myAssignmentsReady);
+  source.routeCbs.get("demo_assignment_001")?.(myRouteReady);
+  source.runCbs.get("demo_assignment_001")?.(myRunReady);
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(store.state.kind === "tracking" && store.state.clock.kind).toBe("verified");
+  return { source, store };
+}
+
+describe("sign-out and account switch (docs/13 §5 A10)", () => {
+  it("signing out releases A's subscriptions and leaves no A data", async () => {
+    const { source, store } = await trackingAsA();
+    store.stop();
+    expect(source.openSubscriptions).toBe(0);
+    expect(store.state).toEqual({ kind: "loading" });
+    expect(store.assignments).toEqual([]);
+    expect(store.selectedAssignmentId).toBeNull();
+    expect(store.connectionLost).toBe(false);
+  });
+
+  it("account B never sees A's assignment, run, route, or verified time", async () => {
+    const { source, store } = await trackingAsA();
+    const lateAssignments = source.assignmentsCb;
+    const lateRun = source.runCbs.get("demo_assignment_001");
+    store.stop();
+
+    // B signs in. Its server time hasn't answered yet.
+    source.serverTimeResult = new Promise(() => {});
+    store.start();
+    // Answers still on their way for A arrive after the switch.
+    lateAssignments?.(myAssignmentsReady);
+    lateRun?.(myRunReady);
+    expect(store.state).toEqual({ kind: "loading" });
+    expect(store.assignments).toEqual([]);
+
+    source.assignmentsCb?.(ACCOUNT_B);
+    expect(store.assignments.map((a) => a.assignmentId)).toEqual(["demo_assignment_b01"]);
+    expect(store.selectedAssignmentId).toBe("demo_assignment_b01");
+    expect(source.runCbs.has("demo_assignment_001")).toBe(false);
+    expect(store.state).toEqual({ kind: "loading" });
+
+    source.runCbs.get("demo_assignment_b01")?.({ ...ready, assignmentId: "demo_assignment_b01" });
+    expect(store.state).toMatchObject({
+      kind: "tracking",
+      context: { assignment: { studentDisplayName: "Riley Sample" }, route: null },
+    });
+    // A's verified time is gone: B is unverified until its own answer arrives.
+    expect(store.state.kind === "tracking" && store.state.clock.kind).toBe("query");
+  });
+});
+
+/** A minimal event target with a settable visibility, standing in for `document` and `window`. */
+class FakeTarget {
+  visibilityState = "visible";
+  private listeners = new Map<string, Set<() => void>>();
+  addEventListener(type: string, listener: () => void) {
+    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+    this.listeners.get(type)?.add(listener);
+  }
+  removeEventListener(type: string, listener: () => void) {
+    this.listeners.get(type)?.delete(listener);
+  }
+  fire(type: string) {
+    for (const listener of this.listeners.get(type) ?? []) listener();
+  }
+}
+
+describe("server time is re-measured when the page is shown again (docs/08 §8.1)", () => {
+  it("reverifies on becoming visible or on pageshow, never while hidden, and stops after cleanup", () => {
+    let calls = 0;
+    const doc = new FakeTarget();
+    const win = new FakeTarget();
+    const stop = reverifyOnForeground({ reverifyServerTime: () => (calls += 1) }, doc, win);
+    doc.visibilityState = "hidden";
+    doc.fire("visibilitychange");
+    expect(calls).toBe(0);
+    doc.visibilityState = "visible";
+    doc.fire("visibilitychange");
+    expect(calls).toBe(1);
+    win.fire("pageshow");
+    expect(calls).toBe(2);
+    stop();
+    doc.fire("visibilitychange");
+    win.fire("pageshow");
+    expect(calls).toBe(2);
+  });
+
+  it("a page shown again after a sleep drops verified time until it is measured again", async () => {
+    const source = new FakeSource();
+    source.serverTimeResult = Promise.resolve(CAPTURED + 1_000);
+    const store = new TrackStore(source, now);
+    const doc = new FakeTarget();
+    const win = new FakeTarget();
+    const stop = reverifyOnForeground(store, doc, win);
+    store.start();
+    source.assignmentsCb?.(myAssignmentsReady);
+    source.runCbs.get("demo_assignment_001")?.(myRunReady);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(store.state.kind === "tracking" && store.state.clock.kind).toBe("verified");
+    source.serverTimeResult = new Promise(() => {});
+    doc.fire("visibilitychange");
+    expect(store.state.kind === "tracking" && store.state.clock.kind).toBe("query");
+    stop();
   });
 });

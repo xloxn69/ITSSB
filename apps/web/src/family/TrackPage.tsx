@@ -10,7 +10,7 @@ import {
   stopProgressText,
   whileDisconnected,
 } from "../tracking/presentation";
-import { connectionNotice, type TrackContext, type TrackStore } from "../tracking/store";
+import { connectionNotice, reverifyOnForeground, type TrackContext, type TrackStore } from "../tracking/store";
 import type { TrackedRun } from "../tracking/model";
 import type { ServerClock } from "../tracking/clock";
 import { AlertsPanel } from "./AlertsPanel";
@@ -41,16 +41,9 @@ export function TrackPage({ store, onSignIn }: { store: TrackStore; onSignIn: ()
 
   useEffect(() => {
     store.start();
-    // A sleeping device can pause the monotonic clock: re-measure server time
-    // whenever the page is shown again (docs/08 §8.1).
-    const reverify = () => {
-      if (document.visibilityState === "visible") store.reverifyServerTime();
-    };
-    document.addEventListener("visibilitychange", reverify);
-    window.addEventListener("pageshow", reverify);
+    const stopReverifying = reverifyOnForeground(store, document, window);
     return () => {
-      document.removeEventListener("visibilitychange", reverify);
-      window.removeEventListener("pageshow", reverify);
+      stopReverifying();
       store.stop();
     };
   }, [store]);

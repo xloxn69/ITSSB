@@ -234,3 +234,118 @@ final class AlertsTests: XCTestCase {
         XCTAssertTrue(condition())
     }
 }
+
+/// Inbox and preferences the test drives by hand; saves wait until released.
+@MainActor
+private final class ScriptedNotificationSource: NotificationSource, @unchecked Sendable {
+    private(set) var inbox: AsyncThrowingStream<[AlertItem]?, Error>.Continuation?
+    private(set) var preferences: [String: AsyncThrowingStream<NotificationPreference?, Error>.Continuation] = [:]
+    private(set) var released: [String] = []
+    private var pendingSave: CheckedContinuation<NotificationPreference, Error>?
+
+    nonisolated func alerts() -> AsyncThrowingStream<[AlertItem]?, Error> {
+        let (stream, continuation) = AsyncThrowingStream<[AlertItem]?, Error>.makeStream()
+        continuation.onTermination = { [weak self] _ in Task { @MainActor in self?.released.append("alerts") } }
+        Task { @MainActor in self.inbox = continuation }
+        return stream
+    }
+
+    nonisolated func preference(assignmentId: String) -> AsyncThrowingStream<NotificationPreference?, Error> {
+        let (stream, continuation) = AsyncThrowingStream<NotificationPreference?, Error>.makeStream()
+        continuation.onTermination = { [weak self] _ in
+            Task { @MainActor in self?.released.append(assignmentId) }
+        }
+        Task { @MainActor in self.preferences[assignmentId] = continuation }
+        return stream
+    }
+
+    func savePreference(assignmentId: String, enabled: Bool, minutes: Int) async throws -> NotificationPreference {
+        try await withCheckedThrowingContinuation { pendingSave = $0 }
+    }
+
+    func finishSave(_ preference: NotificationPreference) {
+        pendingSave?.resume(returning: preference)
+        pendingSave = nil
+    }
+
+    var saveWaiting: Bool { pendingSave != nil }
+
+    nonisolated func registerDevice(installationId: String, token: String?, environment: PushEnvironment,
+                                    permission: PushPermission) async throws -> Bool { false }
+}
+
+/// docs/13 §5 A10: after sign-out nothing of account A reaches account B.
+extension AlertsTests {
+    private static let alex = AssignmentSummary(assignmentId: "a_alex", relationship: .guardian,
+                                                studentDisplayName: "Alex Example", routeLabel: "Route 17",
+                                                stopLabel: "Oak")
+    private static let jordan = AssignmentSummary(assignmentId: "a_jordan", relationship: .guardian,
+                                                  studentDisplayName: "Jordan Example", routeLabel: "Route 4",
+                                                  stopLabel: "Elm")
+
+    private static func preference(_ id: String, minutes: Int) -> NotificationPreference {
+        NotificationPreference(assignmentId: id, approachingEnabled: true, approachingMinutes: minutes, updatedAt: nil)
+    }
+
+    private func reach(_ condition: @MainActor () -> Bool, line: UInt = #line) async {
+        let reached = await eventually(condition)
+        XCTAssertTrue(reached, line: line)
+    }
+
+    func testSignOutThenAnotherAccountShowsNoAlertsOrPreferencesOfTheFirst() async {
+        let tracking = MockLiveRunSource()
+        let notifications = ScriptedNotificationSource()
+        let model = AlertsViewModel(tracking: tracking, notifications: notifications)
+
+        // Account A: Alex's alert and preference, with a save still on its way.
+        model.start()
+        await reach { tracking.assignmentsContinuation != nil && notifications.inbox != nil }
+        tracking.assignmentsContinuation?.yield(.ready([Self.alex]))
+        notifications.inbox?.yield([PreviewFixtures.alert()])
+        await reach { notifications.preferences["a_alex"] != nil }
+        notifications.preferences["a_alex"]?.yield(Self.preference("a_alex", minutes: 5))
+        await reach { model.preferences["a_alex"] != nil && !model.alerts.isEmpty }
+        let saving = Task { await model.save(assignmentId: "a_alex", enabled: true, minutes: 7) }
+        await reach { notifications.saveWaiting }
+
+        // Sign out: A's subscriptions end and the model holds nothing of A.
+        model.stop()
+        XCTAssertEqual(model.state, .loading)
+        XCTAssertTrue(model.assignments.isEmpty)
+        XCTAssertTrue(model.alerts.isEmpty)
+        XCTAssertTrue(model.preferences.isEmpty)
+        XCTAssertTrue(model.saving.isEmpty)
+        await reach { notifications.released.contains("alerts") && notifications.released.contains("a_alex") }
+
+        // Account B signs in; A's save answers late.
+        model.start()
+        await reach { tracking.assignmentSubscriptionCount == 2 }
+        tracking.assignmentsContinuation?.yield(.ready([Self.jordan]))
+        await reach { notifications.preferences["a_jordan"] != nil }
+        notifications.preferences["a_jordan"]?.yield(Self.preference("a_jordan", minutes: 10))
+        notifications.inbox?.yield([])
+        notifications.finishSave(Self.preference("a_alex", minutes: 7))
+        await saving.value
+        await reach { model.preferences["a_jordan"] != nil && model.state == .ready }
+        XCTAssertEqual(model.assignments, [Self.jordan])
+        XCTAssertEqual(Array(model.preferences.keys), ["a_jordan"])
+        XCTAssertTrue(model.alerts.isEmpty)
+        XCTAssertTrue(model.saving.isEmpty)
+        XCTAssertTrue(model.saveFailed.isEmpty)
+        model.stop()
+    }
+
+    func testSignOutDropsAPendingNotificationTapAndStopsPushes() async {
+        let source = RecordingNotificationSource()
+        let registrar = PushRegistrar(source: source, authorizing: FixedPermission(value: .authorized),
+                                      ids: defaults(), environment: .sandbox) {}
+        await registrar.activate()
+        await registrar.didRegister(deviceToken: Data([0xab]))
+        let router = NotificationRouter()
+        router.requestedAssignmentId = "a_alex"  // A's tapped notification, not yet opened
+        let cleanup = NotificationRouter.signOutCleanup(router: router, registrar: registrar)
+        await cleanup()
+        XCTAssertNil(router.requestedAssignmentId, "account B must not open on A's tap")
+        XCTAssertNil(source.registrations.last?.token, "this phone stops receiving A's pushes")
+    }
+}
