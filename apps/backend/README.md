@@ -70,7 +70,9 @@ staff account comes from the one command-line step below.
    web app, read your user ID from the Clerk dashboard, then create the first
    staff account linked to it:
    `bunx convex run users:bootstrapStaff '{"tokenIdentifier":"<issuer>|<Clerk user id>","displayName":"<your name>"}'`.
-   It refuses an identity that already has an account. Everything after that
+   It refuses an identity that already has an account, and refuses once any
+   staff account exists (a development deployment with `ITSSB_ALLOW_DEV_SEED`
+   set may add one more, because its seeded staff row cannot sign in). Everything after that
    happens in the staff console (`#/staff/…`): invite other staff
    (`#/staff/team`; they redeem the code under "Join as staff"), add drivers
    and issue their grants (`#/staff/drivers`), and add devices.

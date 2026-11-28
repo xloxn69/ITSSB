@@ -1,6 +1,6 @@
 import { localDate } from "@itssb/contracts";
 import { convexTest } from "convex-test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { sha256Hex } from "./lib/deviceAuth";
@@ -372,6 +372,32 @@ describe("users.bootstrapStaff", () => {
     expect((await t.run((ctx) => ctx.db.get(familyId)))?.role).toBe("family");
     await expect(t.mutation(internal.users.bootstrapStaff, { tokenIdentifier: "https://example.invalid|other01", displayName: "A" })).resolves.toBeTruthy();
     await expect(t.mutation(internal.users.bootstrapStaff, { tokenIdentifier: "https://example.invalid|other01", displayName: "A" })).rejects.toThrow(/IDENTITY_ALREADY_LINKED/);
+  });
+
+  it("refuses once any staff account exists, so a rerun never adds staff", async () => {
+    const t = convexTest(schema, modules);
+    await t.mutation(internal.users.bootstrapStaff, { tokenIdentifier: ID, displayName: "Riley Staff" });
+    const B = "https://example.invalid|user_fictional02";
+    await expect(t.mutation(internal.users.bootstrapStaff, { tokenIdentifier: B, displayName: "Lee" })).rejects.toThrow(/STAFF_ALREADY_EXISTS/);
+    expect(await t.run((ctx) => ctx.db.query("users").withIndex("by_token", (q) => q.eq("tokenIdentifier", B)).first())).toBeNull();
+    expect(await t.withIdentity({ tokenIdentifier: B }).query(api.fleet.listDrivers, {})).toMatchObject({ status: "access_unavailable" });
+    // An unlinked staff row counts too: staff exist, so the next one is invited.
+    const t2 = convexTest(schema, modules);
+    await t2.run((ctx) => ctx.db.insert("users", { tokenIdentifier: "unlinked:seed-staff", role: "staff", displayName: "Seed" }));
+    await expect(t2.mutation(internal.users.bootstrapStaff, { tokenIdentifier: B, displayName: "Lee" })).rejects.toThrow(/STAFF_ALREADY_EXISTS/);
+  });
+
+  it("on a development deployment that allows the fictional seed, may add one more", async () => {
+    vi.stubEnv("ITSSB_ALLOW_DEV_SEED", "true");
+    try {
+      const t = convexTest(schema, modules);
+      await t.run((ctx) => ctx.db.insert("users", { tokenIdentifier: "unlinked:seed-staff", role: "staff", displayName: "Seed" }));
+      await expect(
+        t.mutation(internal.users.bootstrapStaff, { tokenIdentifier: ID, displayName: "Riley Staff" }),
+      ).resolves.toBeTruthy();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it.each(["unlinked:abc", "test|staff", "https://example.invalid", "https://a|b|c", ""])("refuses the malformed identifier %j", async (bad) => {

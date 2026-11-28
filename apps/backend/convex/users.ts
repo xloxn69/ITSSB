@@ -2,6 +2,9 @@ import { MAX_PERSON_NAME_LENGTH } from "@itssb/contracts";
 import { ConvexError, v } from "convex/values";
 import { internalMutation } from "./_generated/server";
 
+// The Convex runtime provides `process.env`.
+declare const process: { env: Record<string, string | undefined> };
+
 /**
  * Placeholder `tokenIdentifier` for an approved person who has not signed in
  * yet. Convex identities are always `issuer|subject`, so it can never match.
@@ -62,7 +65,7 @@ export const linkIdentity = internalMutation({
  * through a staff invitation that an existing staff member issues.
  *
  * Refuses an identity already linked to anyone, so it never re-points or
- * promotes an existing account.
+ * promotes an existing account, and refuses once any staff account exists.
  */
 export const bootstrapStaff = internalMutation({
   args: { tokenIdentifier: v.string(), displayName: v.string() },
@@ -77,6 +80,17 @@ export const bootstrapStaff = internalMutation({
       .withIndex("by_token", (q) => q.eq("tokenIdentifier", tokenIdentifier))
       .first();
     if (taken) throw new ConvexError({ code: "IDENTITY_ALREADY_LINKED" });
+    // First account only: once staff exist, more staff join by invitation, so
+    // a rerun can never quietly add a staff member. A development deployment
+    // that allows the fictional seed may add one more, because its seeded
+    // staff row has no identity anyone can sign in with.
+    const anyStaff = await ctx.db
+      .query("users")
+      .withIndex("by_role", (q) => q.eq("role", "staff"))
+      .first();
+    if (anyStaff && process.env.ITSSB_ALLOW_DEV_SEED !== "true") {
+      throw new ConvexError({ code: "STAFF_ALREADY_EXISTS" });
+    }
     const userId = await ctx.db.insert("users", { tokenIdentifier, role: "staff", displayName: name });
     await ctx.db.insert("auditLog", {
       actor: { kind: "system" },
