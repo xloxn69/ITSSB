@@ -174,6 +174,8 @@ final class MissingStatesTests: XCTestCase {
         let shown = await eventually { model.currentStop(id: PreviewFixtures.stop.stopId) != nil }
         XCTAssertTrue(shown)
         model.startIfNeeded()
+        XCTAssertNotNil(model.currentStop(id: PreviewFixtures.stop.stopId),
+                        "returning from details doesn't restart and blank the route")
         XCTAssertEqual(source.assignmentSubscriptionCount, 1, "returning from details keeps the same subscriptions")
         source.routeContinuation(id)?.yield(.accessUnavailable(.notPermitted))
         let cleared = await eventually { model.currentStop(id: PreviewFixtures.stop.stopId) == nil }
