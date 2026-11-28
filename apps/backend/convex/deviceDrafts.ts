@@ -6,10 +6,11 @@ import {
   type RouteDraftSubmitResult,
   SCHEMA_VERSION,
 } from "@itssb/contracts";
-import { v } from "convex/values";
-import type { Doc } from "./_generated/dataModel";
-import { internalMutation, internalQuery } from "./_generated/server";
-import { currentGrant, liveDevice } from "./deviceRoster";
+import { ConvexError, v } from "convex/values";
+import type { Doc, Id } from "./_generated/dataModel";
+import { internalMutation, internalQuery, type QueryCtx } from "./_generated/server";
+import { currentGrant } from "./deviceRoster";
+import { stillAuthorized } from "./lib/deviceAuth";
 import { insertDraft } from "./routes";
 import { insertAudit } from "./lib/staff";
 
@@ -19,6 +20,17 @@ import { insertAudit } from "./lib/staff";
  * grant, current when the request arrives, identifies the driver. A stored
  * draft is always `submitted`: only staff approve (routes.approveDraft).
  */
+
+/**
+ * The device, rechecked inside this transaction: not revoked, and its
+ * credential still the one the request presented. A rotation or revocation
+ * that commits between the HTTP lookup and this function refuses the call.
+ */
+async function authorizedDevice(ctx: QueryCtx, deviceId: Id<"devices">, credentialHash: string) {
+  const device = await ctx.db.get(deviceId);
+  if (!device || !stillAuthorized(device, credentialHash)) throw new ConvexError({ code: "DEVICE_NOT_AUTHORIZED" });
+  return device;
+}
 
 function review(draft: Doc<"routeDrafts">): RouteDraftReview {
   return {
@@ -41,14 +53,16 @@ function review(draft: Doc<"routeDrafts">): RouteDraftReview {
 export const submit = internalMutation({
   args: {
     deviceId: v.id("devices"),
+    /** SHA-256 of the credential the request presented; rechecked here. */
+    credentialHash: v.string(),
     grantHash: v.string(),
     contentHash: v.string(),
     // Validated by validateRouteDraftSubmission in http.ts.
     submission: v.any(),
     nowMs: v.number(),
   },
-  handler: async (ctx, { deviceId, grantHash, contentHash, submission, nowMs }): Promise<RouteDraftSubmitResult> => {
-    const device = await liveDevice(ctx, deviceId);
+  handler: async (ctx, { deviceId, credentialHash, grantHash, contentHash, submission, nowMs }): Promise<RouteDraftSubmitResult> => {
+    const device = await authorizedDevice(ctx, deviceId, credentialHash);
     const s = submission as RouteDraftSubmission;
     const reject = (code: RouteDraftRejection, message: string): RouteDraftSubmitResult => ({
       schemaVersion: SCHEMA_VERSION,
@@ -131,9 +145,9 @@ type StatusFailure = { ok: false; status: 403; code: "GRANT_NOT_AUTHORIZED"; mes
 
 /** Review state of drafts this device submitted. Another device's draft reads as not_found. */
 export const status = internalQuery({
-  args: { deviceId: v.id("devices"), grantHash: v.string(), draftIds: v.array(v.string()), nowMs: v.number() },
-  handler: async (ctx, { deviceId, grantHash, draftIds, nowMs }): Promise<{ ok: true; body: RouteDraftStatusResponse } | StatusFailure> => {
-    const device = await liveDevice(ctx, deviceId);
+  args: { deviceId: v.id("devices"), credentialHash: v.string(), grantHash: v.string(), draftIds: v.array(v.string()), nowMs: v.number() },
+  handler: async (ctx, { deviceId, credentialHash, grantHash, draftIds, nowMs }): Promise<{ ok: true; body: RouteDraftStatusResponse } | StatusFailure> => {
+    const device = await authorizedDevice(ctx, deviceId, credentialHash);
     if (!(await currentGrant(ctx, grantHash, device, nowMs))) {
       return { ok: false, status: 403, code: "GRANT_NOT_AUTHORIZED", message: "The driver operating grant does not allow this." };
     }

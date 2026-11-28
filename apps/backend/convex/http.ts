@@ -192,12 +192,13 @@ async function deviceGrantRequest(
   req: Request,
   maxBytes: number = MAX_ROSTER_BODY_BYTES,
 ): Promise<
-  | { ok: true; deviceId: Id<"devices">; body: Record<string, unknown>; grantHash: string }
+  | { ok: true; deviceId: Id<"devices">; credentialHash: string; body: Record<string, unknown>; grantHash: string }
   | { ok: false; response: Response }
 > {
   const secret = parseBearer(req.headers.get("Authorization"));
   if (!secret) return { ok: false, response: requestError(401, "UNAUTHENTICATED", "Device credential required.", false) };
-  const deviceId = await ctx.runQuery(internal.devices.byCredentialHash, { credentialHash: await sha256Hex(secret) });
+  const credentialHash = await sha256Hex(secret);
+  const deviceId = await ctx.runQuery(internal.devices.byCredentialHash, { credentialHash });
   if (!deviceId) return { ok: false, response: requestError(401, "UNAUTHENTICATED", "Device credential rejected.", false) };
   const text = await req.text();
   if (new TextEncoder().encode(text).length > maxBytes) {
@@ -217,7 +218,7 @@ async function deviceGrantRequest(
     return { ok: false, response: requestError(400, "UNSUPPORTED_SCHEMA_VERSION", "Unsupported protocol version.", false) };
   }
   const grant = b.driverOperatingGrant;
-  return { ok: true, deviceId, body: b, grantHash: await sha256Hex(typeof grant === "string" ? grant : "") };
+  return { ok: true, deviceId, credentialHash, body: b, grantHash: await sha256Hex(typeof grant === "string" ? grant : "") };
 }
 
 async function guarded(run: () => Promise<Response>): Promise<Response> {
@@ -324,6 +325,7 @@ http.route({
         200,
         await ctx.runMutation(internal.deviceDrafts.submit, {
           deviceId: parsed.deviceId,
+          credentialHash: parsed.credentialHash,
           grantHash: parsed.grantHash,
           contentHash,
           submission: checked.value,
@@ -346,6 +348,7 @@ http.route({
     return await guarded(async () => {
       const outcome = await ctx.runQuery(internal.deviceDrafts.status, {
         deviceId: parsed.deviceId,
+        credentialHash: parsed.credentialHash,
         grantHash: parsed.grantHash,
         draftIds: checked.value.draftIds,
         nowMs: Date.now(),

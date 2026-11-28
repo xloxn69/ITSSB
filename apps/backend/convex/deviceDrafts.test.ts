@@ -369,3 +369,65 @@ describe("a submitted draft becomes the route a new run pins", () => {
     expect(version?.sourceDraftId).toBe(sent.draft.draftId);
   });
 });
+
+describe("credential rotated or revoked mid-request", () => {
+  // The HTTP action looks the credential up, then the mutation commits; a
+  // rotation that lands in between must refuse the request at commit.
+  it("submit and status refuse a credential rotated after the lookup", async () => {
+    const { t, deviceA } = await setup();
+    const presented = await sha256Hex(SECRET_A);
+    const sent = accepted(await submit(t, submission()));
+    await t.run((ctx) => ctx.db.patch(deviceA, { credentialHash: "rotated".padEnd(64, "0") }));
+    const body = submission({ requestId: "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", deviceDraftId: "1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e" });
+    await expect(
+      t.mutation(internal.deviceDrafts.submit, {
+        deviceId: deviceA,
+        credentialHash: presented,
+        grantHash: await sha256Hex(GRANT_A),
+        contentHash: "c".repeat(64),
+        submission: body,
+        nowMs: Date.now(),
+      }),
+    ).rejects.toThrow(/DEVICE_NOT_AUTHORIZED/);
+    await expect(
+      t.query(internal.deviceDrafts.status, {
+        deviceId: deviceA,
+        credentialHash: presented,
+        grantHash: await sha256Hex(GRANT_A),
+        draftIds: [sent.draft.draftId],
+        nowMs: Date.now(),
+      }),
+    ).rejects.toThrow(/DEVICE_NOT_AUTHORIZED/);
+    expect((await drafts(t)).length).toBe(1);
+    // The old secret over HTTP is refused too.
+    expect((await submit(t, body)).status).toBe(401);
+  });
+});
+
+describe("GPS gaps reach staff review", () => {
+  it("a point after a GPS loss is stored and flagged, even when the hop is short", async () => {
+    const { t } = await setup();
+    const staff = t.withIdentity({ tokenIdentifier: STAFF });
+    const s = submission();
+    // A 55 m interruption: under the 100 m distance warning, still not measured travel.
+    const path = [s.path[0]!, { ...s.path[1]!, latitude: 34.1005, gapBefore: true }];
+    const sent = accepted(await submit(t, { ...s, path }));
+    const got = await staff.query(api.routes.getDraft, { draftId: sent.draft.draftId });
+    if (got.status !== "ready") throw new Error("not ready");
+    expect(got.draft.gapBeforeIndexes).toEqual([1]);
+    expect(got.draft.checks).toContainEqual(expect.objectContaining({ code: "gap_in_recording", severity: "warning" }));
+    expect(got.draft.checks.find((c) => c.code === "gap_in_recording")?.message).toContain("1 time");
+    expect(got.draft.checks.some((c) => c.code === "path_gap")).toBe(false);
+  });
+
+  it("a recording without GPS loss has no gap check", async () => {
+    const { t } = await setup();
+    const staff = t.withIdentity({ tokenIdentifier: STAFF });
+    const s = submission();
+    const sent = accepted(await submit(t, { ...s, path: s.path.map((p) => ({ ...p, gapBefore: false })) }));
+    const got = await staff.query(api.routes.getDraft, { draftId: sent.draft.draftId });
+    if (got.status !== "ready") throw new Error("not ready");
+    expect(got.draft.gapBeforeIndexes).toEqual([]);
+    expect(got.draft.checks.some((c) => c.code === "gap_in_recording")).toBe(false);
+  });
+});
