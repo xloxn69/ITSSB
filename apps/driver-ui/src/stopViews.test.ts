@@ -14,6 +14,7 @@ import {
   stopHeading,
 } from "./stopViews.js";
 import { observed, snapshot } from "./testing.js";
+import { NEXT_STOP } from "./views.js";
 
 const RUN = "demo_run_001";
 const student = (id: string, name: string, stopId: string, seq: number) => ({
@@ -121,5 +122,12 @@ describe("D20 report a delay or issue", () => {
     expect(lines.map((l) => l.level)).toEqual(["warn", "problem"]);
     expect(lines[0]?.text).toBe("1 delay report is waiting to send to the school server.");
     expect(reportLines(null)).toEqual([]);
+  });
+});
+
+describe("D13 next stop", () => {
+  it("does not claim the device has no stops, and points to the stop screen", () => {
+    expect(`${NEXT_STOP.title} ${NEXT_STOP.detail}`).not.toMatch(/no (approved )?(route )?stops/i);
+    expect(NEXT_STOP.detail).toContain("At this stop");
   });
 });
