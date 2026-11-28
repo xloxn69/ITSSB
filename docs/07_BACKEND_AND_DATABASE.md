@@ -123,7 +123,7 @@ A human signs in using the selected identity provider. The backend derives ident
 
 A Pi uses a separate, high-entropy, revocable device credential. Issue it during approved provisioning and scope it to the device's current organization/bus assignment. Store the secret only in the protected device configuration; retain a verification representation and status on the server. Rotate it on compromise or reassignment. Never use a Convex deploy/admin key as a bus credential.
 
-Sensitive driver actions also require an authorized driver session. Possessing a device credential does not entitle the device to claim any driver ID. Use a short-lived server-issued driver operating grant after driver authentication. The Pi can cache a limited authorization for continuing an existing run; first-version new run starts remain online.
+Sensitive driver actions also require an authorized driver session. Possessing a device credential does not entitle the device to claim any driver ID. Use a short-lived server-issued driver operating grant after driver authentication. The Pi can cache a limited authorization for continuing an existing run; first-version new run starts remain online. Until the driver-session endpoint exists, staff issue each grant in the staff console for one driver, one device and approved route versions, and install it in the Pi's drivers file (docs/12 §13).
 
 The device HTTP action verifies credentials and validates request shape. The committing mutation rechecks current credential generation, assignment, and operating permission so that a credential revoked between parsing and commit cannot proceed based only on an old result.
 

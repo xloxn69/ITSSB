@@ -81,10 +81,13 @@ sudo chown root:itssb /etc/itssb/drivers.json
 sudo chmod 0640 /etc/itssb/drivers.json
 ```
 
-To let a driver start and end runs, issue a grant for this device, that
-driver and their route versions with the backend's internal
-`driverGrants:issue` (see apps/backend/README.md) and add `operatingGrant` and
-`routeVersions` as above. The grant is a secret: keep the file 0640 root:itssb.
+To let a driver start and end runs, issue a grant in the staff console
+(Drivers → Issue a grant) for this device, that driver and their routes. It
+shows the driver's whole entry once, with `driverId`, `displayName`,
+`operatingGrant` and `routeVersions` filled in; replace its `pinHash`
+placeholder with the `hash-pin` output (the service refuses the file until
+you do), and replace any older entry for that driver. The grant is a secret:
+keep the file 0640 root:itssb.
 Also set `ITSSB_SERVICE_TIMEZONE` (for example `America/New_York`) in
 `/etc/itssb/device.env`.
 
