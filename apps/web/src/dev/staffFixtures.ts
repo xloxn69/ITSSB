@@ -104,8 +104,9 @@ function initialState(variant: StaffVariant) {
     draft({
       draftId: "demo_draft_009",
       label: "Route 9 Morning",
-      path: shifted(0.004, -0.006),
-      gapBeforeIndexes: [2],
+      // GPS lost for a stretch: the points between were never recorded.
+      path: [...shifted(0.004, -0.006).slice(0, 140), ...shifted(0.004, -0.006).slice(200)],
+      gapBeforeIndexes: [140],
       stops: ["Birch & 2nd", "Cedar Park", "Elm Court"].map(stops).map((s) => ({ ...s, latitude: s.latitude + 0.004, longitude: s.longitude - 0.006 })),
       checks: [gpsLost],
     }),
