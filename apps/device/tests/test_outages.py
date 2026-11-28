@@ -16,6 +16,7 @@ import socket
 import subprocess
 import sys
 import threading
+from pathlib import Path
 
 import pytest
 from conftest import wait_until
@@ -40,51 +41,63 @@ def _hang_up(s: socket.socket) -> None:
 
 
 class LinkProxy:
-    """A TCP forwarder with a switch. `cut()` drops every open connection and
-    refuses to carry new ones, the way a dead cellular link behaves from the
-    Pi's side; `restore()` carries traffic again."""
+    """A TCP forwarder with a switch, standing in for the bus internet link.
+
+    `cut()` hangs up every open connection and stops listening, so a new
+    connect is refused at once, the way a dead route looks from the Pi
+    (like devtools/link_proxy.py); `restore()` listens on the same port
+    again. A connection accepted just before a cut never survives it."""
 
     def __init__(self, target_port: int) -> None:
         self.target_port = target_port
-        self.up = threading.Event()
-        self.up.set()
-        self._conns: list[socket.socket] = []
         self._lock = threading.Lock()
-        self._listener = socket.create_server(("127.0.0.1", 0))
-        self.port = self._listener.getsockname()[1]
-        threading.Thread(target=self._accept, daemon=True).start()
+        self._conns: list[socket.socket] = []
+        self._listener: socket.socket | None = None
+        self.port = 0
+        self.restore()
 
     def cut(self) -> None:
-        self.up.clear()
         with self._lock:
-            for c in self._conns:
-                with contextlib.suppress(OSError):
-                    c.close()
-            self._conns.clear()
+            listener, self._listener = self._listener, None
+            conns, self._conns = self._conns, []
+        if listener is not None:
+            _hang_up(listener)  # wakes the accept thread; the port now refuses
+        for c in conns:
+            _hang_up(c)
 
     def restore(self) -> None:
-        self.up.set()
+        with self._lock:
+            if self._listener is not None:
+                return
+            # Same port as before, so the device's configured origin still works.
+            # A failure to rebind fails the test loudly; it is never retried.
+            listener = socket.create_server(("127.0.0.1", self.port))
+            self.port = listener.getsockname()[1]
+            self._listener = listener
+        threading.Thread(target=self._accept, args=(listener,), daemon=True).start()
 
     def close(self) -> None:
         self.cut()
-        self._listener.close()
 
-    def _accept(self) -> None:
+    def _accept(self, listener: socket.socket) -> None:
         while True:
             try:
-                client, _ = self._listener.accept()
+                client, _ = listener.accept()
             except OSError:
-                return
-            if not self.up.is_set():
-                client.close()
-                continue
+                return  # cut: this listener is gone
             try:
                 upstream = socket.create_connection(("127.0.0.1", self.target_port))
             except OSError:
-                client.close()
+                _hang_up(client)
                 continue
             with self._lock:
-                self._conns += [client, upstream]
+                live = self._listener is listener  # not cut since this accept
+                if live:
+                    self._conns += [client, upstream]
+            if not live:
+                _hang_up(client)
+                _hang_up(upstream)
+                continue
             for a, b in ((client, upstream), (upstream, client)):
                 threading.Thread(target=self._pipe, args=(a, b), daemon=True).start()
 
@@ -96,9 +109,8 @@ class LinkProxy:
         except OSError:
             pass
         finally:
-            for s in (src, dst):
-                with contextlib.suppress(OSError):
-                    s.close()
+            _hang_up(src)
+            _hang_up(dst)
 
 
 @pytest.fixture
@@ -114,6 +126,7 @@ def bench(tmp_path, fake_gpsd):
     db.close()
     api_port = _free_port()
     procs: list[subprocess.Popen] = []
+    logs: list = []
 
     def spawn() -> subprocess.Popen:
         env = {
@@ -127,13 +140,18 @@ def bench(tmp_path, fake_gpsd):
             "ITSSB_DEVICE_API_ORIGIN": f"http://127.0.0.1:{link.port}",
             "ITSSB_DEVICE_TOKEN": TOKEN,
         }
+        # Output goes to a file, never an unread pipe: a full pipe would block
+        # the device's logging, and the log is printed when a test fails.
+        log = open(tmp_path / f"device-{len(logs)}.log", "w")  # noqa: SIM115 - closed at teardown
+        logs.append(log)
         p = subprocess.Popen(
             [sys.executable, "-m", "itssb_device", "run"],
             env=env,
-            stdout=subprocess.PIPE,
+            stdout=log,
             stderr=subprocess.STDOUT,
             text=True,
         )
+        p.log_path = log.name
         procs.append(p)
         assert wait_until(lambda: _health(api_port) is not None, timeout=10)
         return p
@@ -148,6 +166,13 @@ def bench(tmp_path, fake_gpsd):
     for p in procs:
         p.kill()
         p.communicate(timeout=10)
+    for log in logs:
+        log.close()
+        # Shown by pytest only when the test failed.
+        print(
+            f"--- {log.name} (tail) ---\n"
+            + "".join(Path(log.name).read_text().splitlines(True)[-60:])
+        )
     link.close()
     backend.stop()
 
@@ -179,19 +204,28 @@ def newest_sequence(b) -> int:
     return max(r["runSequence"] for r in local_rows(b))
 
 
-def stop(proc: subprocess.Popen, b) -> None:
-    """Stop new fixes, let the queue drain completely, then SIGTERM.
+def terminate(proc: subprocess.Popen) -> None:
+    proc.send_signal(signal.SIGTERM)
+    proc.communicate(timeout=20)
+    assert proc.returncode == 0, Path(proc.log_path).read_text()
 
-    Wait until the device has processed a no-fix report first: from then on
-    it holds no current fix and cannot save another observation. Without
-    that, a fix received just before the switch could be saved after the
-    queue looked drained, leaving one pending row at the end."""
+
+def stop(proc: subprocess.Popen, b) -> None:
+    """Stop recording, then drain whatever is still queued, deterministically.
+
+    A no-fix report clears the device's current fix, but a recorder tick that
+    read the fix just before can still save it a moment later, after the queue
+    looked drained. So: stop new fixes, stop this process (its threads finish
+    their step and exit), then start a drain boot. GPS reports no fix for its
+    whole life, so it can never save an observation; it only uploads the rows
+    already queued. Each test checks its own drain before calling this."""
     b.gpsd.mode = "nofix"
     assert wait_until(lambda: health_value(b, "gps", "lastRejectReason") is not None, timeout=10)
+    terminate(proc)
+    drain = b.spawn()
     assert wait_until(lambda: all(r["status"] == "acknowledged" for r in local_rows(b)), timeout=30)
-    proc.send_signal(signal.SIGTERM)
-    out, _ = proc.communicate(timeout=20)
-    assert proc.returncode == 0, out
+    assert health_value(b, "recorder", "observationsThisBoot") == 0
+    terminate(drain)
 
 
 def assert_delivered_exactly_once(b) -> None:
@@ -262,29 +296,40 @@ def test_d07_d08_bus_internet_loss_queues_locally_then_fresh_first(bench):
     proc = bench.spawn()
     assert wait_until(lambda: (health_value(bench, "outbox", "acknowledged") or 0) >= 2, timeout=15)
     bench.link.cut()  # D07: bus internet gone, GPS still valid
-    acked = health_value(bench, "outbox", "acknowledged")
+    # Anything sent before the cut holds runSequence <= this, even a batch
+    # that was in flight at the cut.
+    sent_by_cut = newest_sequence(bench)
     assert wait_until(lambda: health_value(bench, "backend", "status") != "ok", timeout=15)
     ok_at_cut = health_value(bench, "backend", "lastOkAtMs")
-    assert wait_until(lambda: (health_value(bench, "outbox", "pending") or 0) >= 4, timeout=15)
+    assert wait_until(
+        lambda: sum(r["status"] == "pending" for r in local_rows(bench)) >= 4, timeout=15
+    )
     snap = bench.health()
+    rows = local_rows(bench)
     assert snap["gps"]["status"] == "valid"
     assert snap["backend"]["status"] != "ok"
     assert snap["backend"]["lastOkAtMs"] == ok_at_cut  # no fabricated sync
-    assert snap["outbox"]["acknowledged"] <= acked + 1  # an in-flight batch at most
+    # Recording went on locally, and nothing recorded after the cut reached
+    # the backend while the link was down.
+    assert max(r["runSequence"] for r in rows) > sent_by_cut
+    assert max(e["runSequence"] for e in bench.backend.events.values()) <= sent_by_cut
+    # Only what the backend really holds is acknowledged locally.
+    acknowledged = {r["eventId"] for r in rows if r["status"] == "acknowledged"}
+    assert acknowledged <= set(bench.backend.events)
     assert snap["outbox"]["oldestPendingCapturedAtMs"] is not None  # visibly behind
-    requests_during_outage = len(bench.backend.requests)
 
-    backlog_end = newest_sequence(bench)
+    backlog_end = newest_sequence(bench)  # newest pending at reconnect
+    first_after = len(bench.backend.requests)
     bench.link.restore()  # D08: reconnect with a backlog
     assert wait_until(lambda: delivered_through(bench, backlog_end), timeout=45)
-    first_after = bench.backend.requests[requests_during_outage]["eventIds"]
-    newest_then = max(
-        (e for e in bench.backend.events.values() if e["eventId"] in first_after),
-        key=lambda e: e["runSequence"],
-    )
-    # Fresh tracking first: the first batch after reconnect leads with the
-    # newest observation it carried, not the oldest backlog row.
-    assert first_after[0] == newest_then["eventId"]
+    batch = bench.backend.requests[first_after]["eventIds"]
+    seqs = [bench.backend.events[e]["runSequence"] for e in batch]
+    # Fresh tracking first: the first batch after reconnect leads with an
+    # observation at least as new as everything pending at reconnect (a fix
+    # saved after the restore may lead instead), and it is the newest one
+    # that batch carried; history drains behind it.
+    assert seqs[0] >= backlog_end
+    assert seqs[0] == max(seqs)
     stop(proc, bench)
     assert_delivered_exactly_once(bench)
 
@@ -292,8 +337,13 @@ def test_d07_d08_bus_internet_loss_queues_locally_then_fresh_first(bench):
 def test_d02_lost_responses_never_duplicate(bench):
     bench.backend.mode = "drop_response"  # server commits; answer never arrives
     proc = bench.spawn()
-    assert wait_until(lambda: len(bench.backend.events) >= 3, timeout=15)
-    assert health_value(bench, "outbox", "acknowledged") == 0  # nothing claimed
+    # Wait for the requirement itself, not for a count of events that needs
+    # several backoff rounds: some eventId went out in two failed uploads.
+    assert wait_until(
+        lambda: max((r["attempts"] for r in local_rows(bench)), default=0) >= 2, timeout=15
+    )
+    assert bench.backend.events  # the server did commit
+    assert not [r for r in local_rows(bench) if r["status"] == "acknowledged"]  # nothing claimed
     bench.backend.mode = "ok"
     last = newest_sequence(bench)
     assert wait_until(lambda: delivered_through(bench, last), timeout=45)
