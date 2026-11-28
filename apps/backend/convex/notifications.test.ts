@@ -905,3 +905,53 @@ describe("acceptance: the inbox needs a sign-in", () => {
     expect(result).toMatchObject({ status: "access_unavailable", reason: "unauthenticated" });
   });
 });
+
+describe("access answers for a caller with no approved person", () => {
+  // A verified sign-in that staff have not linked yet (a pending family) must
+  // hear `not_permitted`, as tracking does (#28); `unauthenticated` would tell
+  // the app to sign in again, and signing in again changes nothing.
+  const UNLINKED = "test|unlinked";
+  const calls = (s: Setup) =>
+    [
+      ["myAlerts", (t: Setup["t"]) => t.query(api.notifications.myAlerts, {})],
+      ["myPreference", (t: Setup["t"]) => t.query(api.notifications.myPreference, { assignmentId: s.assignmentId })],
+      [
+        "setPreferences",
+        (t: Setup["t"]) =>
+          t.mutation(api.notifications.setPreferences, {
+            requestId: crypto.randomUUID(),
+            assignmentId: s.assignmentId,
+            approachingEnabled: true,
+            approachingMinutes: 5,
+          }),
+      ],
+      [
+        "registerDevice",
+        (t: Setup["t"]) =>
+          t.mutation(api.notifications.registerDevice, {
+            installationId: crypto.randomUUID(),
+            apnsToken: TOKEN_A,
+            environment: "sandbox",
+            permission: "authorized",
+          }),
+      ],
+    ] as const;
+
+  it("a signed-in but unlinked caller is not_permitted and nothing is stored", async () => {
+    const s = await setup();
+    for (const [name, call] of calls(s)) {
+      const r = await call(s.t.withIdentity({ tokenIdentifier: UNLINKED }) as Setup["t"]);
+      expect({ name, r }).toMatchObject({ name, r: { status: "access_unavailable", reason: "not_permitted" } });
+    }
+    expect(await s.t.run((ctx) => ctx.db.query("pushTokens").collect())).toEqual([]);
+    expect(await s.t.run((ctx) => ctx.db.query("notificationPreferences").collect())).toEqual([]);
+  });
+
+  it("a signed-out caller is unauthenticated", async () => {
+    const s = await setup();
+    for (const [name, call] of calls(s)) {
+      const r = await call(s.t);
+      expect({ name, r }).toMatchObject({ name, r: { status: "access_unavailable", reason: "unauthenticated" } });
+    }
+  });
+});

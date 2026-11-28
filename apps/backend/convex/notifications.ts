@@ -14,7 +14,7 @@ import {
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, type QueryCtx, query } from "./_generated/server";
-import { getTrackableAssignment, getUser } from "./lib/authz";
+import { getTrackableAssignment, getUser, missingUserReason } from "./lib/authz";
 
 /**
  * Family notification functions (docs/08 §9). The account is always the
@@ -83,7 +83,7 @@ export const myPreference = query({
   ),
   handler: async (ctx, { assignmentId }): Promise<MyPreferenceResult> => {
     const user = await getUser(ctx);
-    if (!user) return denied("unauthenticated");
+    if (!user) return denied(await missingUserReason(ctx));
     const access = await getTrackableAssignment(ctx, user, assignmentId);
     if (!access) return denied("not_permitted");
     const row = await preferenceRow(ctx, user, access.assignment);
@@ -115,7 +115,7 @@ export const setPreferences = mutation({
   ),
   handler: async (ctx, args): Promise<SetPreferencesResult> => {
     const user = await getUser(ctx);
-    if (!user) return denied("unauthenticated");
+    if (!user) return denied(await missingUserReason(ctx));
     const access = await getTrackableAssignment(ctx, user, args.assignmentId);
     if (!access) return denied("not_permitted");
     const nowMs = Date.now();
@@ -182,7 +182,7 @@ export const registerDevice = mutation({
   ),
   handler: async (ctx, args): Promise<RegisterDeviceResult> => {
     const user = await getUser(ctx);
-    if (!user) return denied("unauthenticated");
+    if (!user) return denied(await missingUserReason(ctx));
     const nowMs = Date.now();
     const bad = (message: string): RegisterDeviceResult => ({
       schemaVersion: SCHEMA_VERSION,
@@ -262,7 +262,7 @@ export const myAlerts = query({
   ),
   handler: async (ctx): Promise<MyAlertsResult> => {
     const user = await getUser(ctx);
-    if (!user) return denied("unauthenticated");
+    if (!user) return denied(await missingUserReason(ctx));
     const rows = await ctx.db
       .query("alerts")
       .withIndex("by_user_created", (q) => q.eq("userId", user._id))
