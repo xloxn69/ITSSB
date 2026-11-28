@@ -83,8 +83,23 @@ export function unlockOfferedWhileStopped(o: Observed): boolean {
     runActive(o) &&
     !parked(o) &&
     !driverUnlocked(o) &&
-    o.snapshot?.motion?.state === "stopped"
+    o.snapshot?.motion?.state === "stopped" &&
+    stoppedFromFreshFix(o)
   );
+}
+
+/** The device's own GPS freshness limit (status.py GPS_FRESH_S). */
+export const UNLOCK_FIX_FRESH_MS = 5_000;
+
+/**
+ * "Stopped" only counts while the fix behind it is fresh now: its age when the
+ * snapshot was made plus the time since. A stalled poll must not keep PIN
+ * entry open on a bus that may have started moving.
+ */
+function stoppedFromFreshFix(o: Observed): boolean {
+  const gps = o.snapshot?.gps;
+  if (gps?.status !== "valid" || gps.lastValidFixAgeMs == null || o.elapsedMs == null) return false;
+  return gps.lastValidFixAgeMs + o.elapsedMs <= UNLOCK_FIX_FRESH_MS;
 }
 
 export function selectScreen(o: Observed, requested: ScreenId | null): ScreenId {

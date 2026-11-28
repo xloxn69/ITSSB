@@ -84,7 +84,17 @@ describe("moving-view lockout", () => {
     // After a lock or a service restart mid-run the session is locked; parking
     // needs an unlocked driver, so without this the bus was stuck on D13.
     const locked = { unlocked: false, driverName: null };
-    const stopped = observed(ready({ run: activeRun, session: locked, motion: { state: "stopped", parked: false } }));
+    const fix = (ageMs: number): DeviceSnapshot["gps"] => ({
+      status: "valid",
+      gpsd: "connected",
+      receivers: 1,
+      lastReportAgeMs: ageMs,
+      lastValidFixAgeMs: ageMs,
+      lastValidFixCapturedAtMs: 1_795_608_000_000 - ageMs,
+    });
+    const at = (ageMs: number, elapsedMs = 0, gps = fix(ageMs)) =>
+      observed(ready({ run: activeRun, session: locked, gps, motion: { state: "stopped", parked: false } }), elapsedMs);
+    const stopped = at(400);
     expect(unlockOfferedWhileStopped(stopped)).toBe(true);
     expect(selectScreen(stopped, "D04")).toBe("D04");
     expect(selectScreen(stopped, "D05")).toBe("D13");
@@ -98,7 +108,15 @@ describe("moving-view lockout", () => {
     const open = observed(ready({ run: activeRun, motion: { state: "stopped", parked: false } }));
     expect(unlockOfferedWhileStopped(open)).toBe(false);
     // A stale snapshot is never trusted.
-    expect(unlockOfferedWhileStopped(observed(ready({ run: activeRun, session: locked, motion: { state: "stopped", parked: false } }), 10_000))).toBe(false);
+    expect(unlockOfferedWhileStopped(at(400, 10_000))).toBe(false);
+    // Nor a stopped reading whose fix has aged past the device's 5 s limit,
+    // counting the time since the snapshot (a stalled poll).
+    expect(unlockOfferedWhileStopped(at(4_000, 1_000))).toBe(true);
+    expect(unlockOfferedWhileStopped(at(4_000, 1_001))).toBe(false);
+    expect(selectScreen(at(4_000, 1_001), "D04")).toBe("D13");
+    expect(unlockOfferedWhileStopped(at(5_001))).toBe(false);
+    // No valid fix at all: never.
+    expect(unlockOfferedWhileStopped(at(400, 0, { ...fix(400), status: "no_fix" as const }))).toBe(false);
   });
 
   it("parked with an active run opens the dashboard", () => {
