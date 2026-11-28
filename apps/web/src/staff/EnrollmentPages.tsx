@@ -18,7 +18,7 @@ import {
   TOKEN_LINK_PATHS,
 } from "@itssb/contracts";
 import { useState } from "react";
-import { DIRECTION_LABEL, dateTime } from "./format";
+import { DIRECTION_LABEL, dateTime, staffReportText } from "./format";
 import type { StaffSource } from "./source";
 import { Empty, Loaded, Outcome, type Ready, useMutation, useStaffQuery } from "./ui";
 
@@ -610,6 +610,16 @@ export function RunAttendancePage({ source, runId }: { source: StaffSource; runI
               {run.runState === "active" ? "Running now" : run.runState === "completed" ? "Finished" : run.runState} · started{" "}
               {dateTime(run.startedAtMs)}
             </p>
+            {run.reports && run.reports.length > 0 && (
+              <div className="stack">
+                <h2>Driver reports</h2>
+                {run.reports.map((r) => (
+                  <p key={r.reportId} className="small">
+                    {staffReportText(r)}
+                  </p>
+                ))}
+              </div>
+            )}
             {run.students.length === 0 ? (
               <Empty text="No students are assigned to this route." />
             ) : (

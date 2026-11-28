@@ -11,7 +11,9 @@ import {
   GPS_STATUSES,
   type GpsStatus,
   MAX_FUTURE_SKEW_MS,
+  RUN_REPORT_CATEGORIES,
   RUN_STATES,
+  type ReportedDelay,
   type RunState,
   SCHEMA_VERSION,
   STOP_STATUSES,
@@ -151,6 +153,27 @@ export function eta(raw: unknown): RunEta | null {
   }
 }
 
+/** Null for a missing or malformed report; the rest of the run stays usable. Category only, never text. */
+export function reportedDelay(raw: unknown): ReportedDelay | null {
+  if (raw === null || raw === undefined) return null;
+  try {
+    const d = obj(raw, "reportedDelay");
+    const reportedAtMs = timestamp(d.reportedAtMs, "reportedDelay.reportedAtMs");
+    const validUntilMs = timestamp(d.validUntilMs, "reportedDelay.validUntilMs");
+    if (validUntilMs <= reportedAtMs || d.source !== "driver") return null;
+    const minutes = d.minutes === null ? null : safeWhole(d.minutes, "reportedDelay.minutes");
+    return {
+      category: oneOf(d.category, RUN_REPORT_CATEGORIES, "reportedDelay.category"),
+      minutes,
+      reportedAtMs,
+      validUntilMs,
+      source: "driver",
+    };
+  } catch {
+    return null;
+  }
+}
+
 function stop(raw: unknown, requireStatus: boolean): AssignedStop {
   const s = obj(raw, "assignedStop");
   let status: StopStatus = "unknown";
@@ -181,6 +204,7 @@ function run(raw: unknown, serverNowMs: number): TrackedRun {
     assignedStop: stop(r.assignedStop, true),
     nextStopId: typeof r.nextStopId === "string" ? r.nextStopId : null,
     eta: eta(r.eta),
+    reportedDelay: reportedDelay(r.reportedDelay),
   };
 }
 

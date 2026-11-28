@@ -6,6 +6,7 @@
 import {
   type AccessUnavailableReason,
   type GpsStatus,
+  type ReportedDelay,
   POSITION_AGING_AFTER_MS,
   POSITION_STALE_AFTER_MS,
   type RunState,
@@ -80,6 +81,8 @@ export interface TrackedRun {
   nextStopId: string | null;
   /** Null when absent or malformed; never repaired or guessed. */
   eta: RunEta | null;
+  /** The driver's delay report (docs/08 §9.3); absent from older backends. Never an ETA. */
+  reportedDelay?: ReportedDelay | null;
 }
 
 /** Today's finished trip on this route (docs/08 §8). Never has a position. */

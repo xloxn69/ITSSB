@@ -28,6 +28,7 @@ import {
   notificationJobFacts,
   runActionsAvailable,
   serviceDateLabel,
+  staffReportText,
   sweepSummary,
 } from "./format";
 import {
@@ -862,6 +863,12 @@ function DiagnosticsPage({ source }: { source: StaffSource }) {
                           <dt key={`${k}-k`}>{k}</dt>,
                           <dd key={`${k}-v`}>{v}</dd>,
                         ])}
+                        {d.lastRunReport && (
+                          <>
+                            <dt>Latest driver report</dt>
+                            <dd>{staffReportText(d.lastRunReport)}</dd>
+                          </>
+                        )}
                       </dl>
                     </article>
                   );

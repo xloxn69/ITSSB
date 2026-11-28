@@ -303,6 +303,20 @@ export function enrollmentAnswer(state: State, name: string, args: Record<string
         runState: run.state,
         startedAtMs: run.startedAtMs,
         students: state.attendance.get(run.runId) ?? [],
+        reports:
+          run.runId === "demo_run_001"
+            ? [
+                {
+                  reportId: "demo_run_report_001",
+                  runId: run.runId,
+                  category: "traffic",
+                  expectedDelayMinutes: 10,
+                  capturedAtMs: Date.now() - 6 * 60_000,
+                  receivedAtMs: Date.now() - 6 * 60_000 + 900,
+                  driverName: "Dana Driver",
+                },
+              ]
+            : [],
       });
     }
     case "audit:list":
