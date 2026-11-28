@@ -212,4 +212,51 @@ describe("retention.purgeRawGps", () => {
     expect(await counts(t, big)).toMatchObject({ telemetry: 0, live: 0 });
     expect(await counts(t, next)).toMatchObject({ telemetry: 0, live: 0 });
   });
+  it("deletes driver delay reports with the positions of an expired run, in the same budget, and keeps recent ones", async () => {
+    const { t, deviceId } = await setup();
+    const old = await run(t, deviceId, "completed", NOW - RAW_GPS_RETENTION_MS - DAY, 2);
+    const recent = await run(t, deviceId, "completed", NOW - RAW_GPS_RETENTION_MS + DAY, 1);
+    await t.run(async (ctx) => {
+      const driverUserId = await ctx.db.insert("users", { tokenIdentifier: "test|driver", role: "driver", displayName: "Dana" });
+      const grantId = await ctx.db.insert("driverGrants", {
+        tokenHash: "h",
+        deviceId,
+        driverUserId,
+        routeVersionIds: [],
+        issuedAtMs: NOW - 40 * DAY,
+        expiresAtMs: NOW - 39 * DAY,
+        revoked: false,
+      });
+      for (const [runId, n] of [
+        [old, 3],
+        [recent, 1],
+      ] as const) {
+        for (let i = 0; i < n; i++) {
+          await ctx.db.insert("runReports", {
+            runId,
+            deviceId,
+            driverUserId,
+            grantId,
+            requestId: `${runId}-${i}`,
+            category: "traffic",
+            expectedDelayMinutes: 10,
+            capturedAtMs: NOW - 40 * DAY,
+            receivedAtMs: NOW - 40 * DAY,
+          });
+        }
+      }
+    });
+    const reports = (runId: Id<"runs">) =>
+      t.run(async (ctx) => (await ctx.db.query("runReports").withIndex("by_run", (q) => q.eq("runId", runId)).collect()).length);
+    // Budget 4: two positions, then two of the three reports; the next batch finishes the run.
+    const first = await t.mutation(internal.retention.purgeRawGps, { nowMs: NOW, batchSize: 4 });
+    expect(first).toMatchObject({ deletedTelemetry: 2, deletedReports: 2, done: false });
+    expect(await reports(old)).toBe(1);
+    const second = await t.mutation(internal.retention.purgeRawGps, { nowMs: NOW, batchSize: 4 });
+    expect(second).toMatchObject({ deletedReports: 1, done: true });
+    expect(await reports(old)).toBe(0);
+    expect(await reports(recent)).toBe(1);
+    const audit = await t.run(async (ctx) => (await ctx.db.query("auditLog").collect()).map((a) => a.reason));
+    expect(audit).toContain("telemetry:2,live:0,reports:2");
+  });
 });

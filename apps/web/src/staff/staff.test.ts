@@ -127,6 +127,7 @@ describe("fixture credential actions", () => {
 describe("sweepSummary", () => {
   it("says what a retention sweep deleted, and nothing for an unreadable record", () => {
     expect(sweepSummary("telemetry:1440,live:2")).toBe("1440 positions and 2 last-known positions deleted");
+    expect(sweepSummary("telemetry:3,live:1,reports:2")).toBe("3 positions, 1 last-known position and 2 driver delay reports deleted");
     expect(sweepSummary("telemetry:1,live:1")).toBe("1 position and 1 last-known position deleted");
     expect(sweepSummary("garbage")).toBeNull();
     expect(sweepSummary(null)).toBeNull();
@@ -377,6 +378,8 @@ describe("notificationJobFacts", () => {
       ["Created in the last 24 h", "18 accepted by Apple, 1 waiting to retry, 2 expired unsent"],
     ]);
     expect(notificationJobFacts({ ...n, truncated: true }, now, now, now)[0]![1]).toMatch(/^at least 2 waiting/);
+  });
+});
 
 describe("staff driver report text", () => {
   const report = {

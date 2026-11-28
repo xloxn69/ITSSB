@@ -170,10 +170,12 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 
 /** "telemetry:12,live:1" from a retention sweep, in words; null when unreadable. */
 export function sweepSummary(deleted: string | null): string | null {
-  const m = deleted ? /^telemetry:(\d+),live:(\d+)$/.exec(deleted) : null;
+  const m = deleted ? /^telemetry:(\d+),live:(\d+)(?:,reports:(\d+))?$/.exec(deleted) : null;
   if (!m) return null;
-  const [positions, live] = [Number(m[1]), Number(m[2])];
-  return `${plural(positions, "position", "positions")} and ${plural(live, "last-known position", "last-known positions")} deleted`;
+  const [positions, live, reports] = [Number(m[1]), Number(m[2]), Number(m[3] ?? 0)];
+  const parts = [plural(positions, "position", "positions"), plural(live, "last-known position", "last-known positions")];
+  if (reports > 0) parts.push(plural(reports, "driver delay report", "driver delay reports"));
+  return `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)} deleted`;
 }
 
 /**
