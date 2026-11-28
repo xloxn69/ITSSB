@@ -5,6 +5,7 @@ import SwiftUI
 struct ITSSBApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var environment = AppEnvironment.make()
+    @AppStorage(DisplayPreferenceKey.appearance) private var appearance = AppAppearance.system.rawValue
 
     private var debugEnrollmentScreen: FamilyScreen? {
         #if DEBUG
@@ -19,7 +20,8 @@ struct ITSSBApp: App {
             AppRootView(session: environment.session, source: environment.source,
                         notifications: environment.notifications, registrar: environment.registrar,
                         initialTab: environment.initialTab, enrollment: environment.enrollment,
-                        enrollmentScreen: debugEnrollmentScreen)
+                        enrollmentScreen: debugEnrollmentScreen, showsWelcome: environment.showsWelcome)
+                .preferredColorScheme(AppAppearance(rawValue: appearance)?.colorScheme)
                 .onAppear { AppDelegate.registrar = environment.registrar }
         }
     }

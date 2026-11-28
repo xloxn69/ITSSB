@@ -1,9 +1,10 @@
 #if DEBUG
+@preconcurrency import AVFoundation
 import Foundation
 
 /// Fictional enrollment answers for previews and screenshots only.
 struct PreviewEnrollmentSource: EnrollmentSource {
-    enum Variant: String, Sendable { case normal, offline, guardian, noTrip, recorded, empty }
+    enum Variant: String, Sendable { case normal, offline, guardian, noTrip, recorded, empty, cameraDenied }
     var variant: Variant = .normal
 
     static let stops = [
@@ -82,6 +83,11 @@ import SwiftUI
 /// DEBUG-only screen states for `-ITSSBEnrollmentScreen` screenshots: each
 /// builds the real view and drives its real view model with fictional input.
 @MainActor
+extension CameraPermission {
+    /// The camera turned off in Settings, for the camera-denied screenshot.
+    static let previewDenied = CameraPermission(status: { .denied }, hasCamera: { true }, request: { false })
+}
+
 enum PreviewScreens {
     @ViewBuilder
     static func view(_ screen: FamilyScreen, source: any EnrollmentSource) -> some View {
@@ -95,7 +101,9 @@ enum PreviewScreens {
         case .checkInRoute:
             CheckInView(model: CheckInViewModel(source: source,
                                                 assignment: OwnAssignment(id: "demo_assignment_001",
-                                                                          routeLabel: "Route 17 Morning")))
+                                                                          routeLabel: "Route 17 Morning")),
+                        camera: (source as? PreviewEnrollmentSource)?.variant == .cameraDenied
+                            ? .previewDenied : .system)
         case .checkInAccepted:
             DrivenCheckIn(model: CheckInViewModel(source: source,
                                                   assignment: OwnAssignment(id: "demo_assignment_001",

@@ -7,17 +7,34 @@ import UIKit
 struct AlertsView: View {
     @State private var model: AlertsViewModel
     let registrar: PushRegistrar?
+    let tracking: any LiveRunSource
+    /// Opened alert IDs (I21).
+    @State private var path: [String] = []
 
     init(tracking: any LiveRunSource, notifications: any NotificationSource, registrar: PushRegistrar?) {
         _model = State(initialValue: AlertsViewModel(tracking: tracking, notifications: notifications))
         self.registrar = registrar
+        self.tracking = tracking
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             content
                 .navigationTitle("Alerts")
+                .navigationDestination(for: String.self) { alertId in
+                    if let alert = model.alerts.first(where: { $0.alertId == alertId }) {
+                        AlertDetailView(alert: alert,
+                                        assignment: model.assignments.first { $0.assignmentId == alert.assignmentId },
+                                        tracking: tracking)
+                    }
+                }
         }
+        #if DEBUG
+        // `-ITSSBOpen alert` opens the first alert (I21), for screenshots.
+        .onChange(of: model.alerts.first?.alertId) { _, id in
+            if DebugLaunch.opens == "alert", path.isEmpty, let id { path = [id] }
+        }
+        #endif
         .onAppear { model.start() }
         .onDisappear { model.stop() }
         .task { await registrar?.refresh() }
@@ -54,7 +71,9 @@ struct AlertsView: View {
                             .font(AppFonts.callout)
                             .foregroundStyle(AppColors.textSecondary)
                     }
-                    ForEach(model.alerts) { AlertRow(alert: $0) }
+                    ForEach(model.alerts) { alert in
+                        NavigationLink(value: alert.alertId) { AlertRow(alert: alert) }
+                    }
                 }
             }
         }

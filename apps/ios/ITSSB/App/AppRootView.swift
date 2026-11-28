@@ -11,6 +11,10 @@ struct AppRootView: View {
     var initialTab: AppTab = .track
     var enrollment: (any EnrollmentSource)?
     var enrollmentScreen: FamilyScreen?
+    /// False for sign-in screenshot scenarios that start past Welcome.
+    var showsWelcome = true
+    /// Once per launch: "Sign in again" from Track goes straight to sign-in.
+    @State private var welcomeDismissed = false
 
     var body: some View {
         Group {
@@ -25,7 +29,12 @@ struct AppRootView: View {
             case .signedOut(.signInUnavailable):
                 SignInNotConfiguredView()
             case .signedOut(.notSignedIn):
-                SignInView(session: session)
+                if WelcomeGate.shows(state: session.state, step: session.step, message: session.message,
+                                     isWorking: session.isWorking, dismissed: welcomeDismissed || !showsWelcome) {
+                    WelcomeView { welcomeDismissed = true }
+                } else {
+                    SignInView(session: session)
+                }
             case .signedIn:
                 // "Sign in again" from Track ends the rejected session and returns to sign-in.
                 SignedInTabs(source: source, notifications: notifications, registrar: registrar,
@@ -33,6 +42,7 @@ struct AppRootView: View {
                              enrollment: enrollment, enrollmentScreen: enrollmentScreen) {
                     Task { await session.signOut() }
                 }
+                .onAppear { welcomeDismissed = true }
             }
         }
         .background(AppColors.background)
@@ -47,7 +57,7 @@ enum AppTab: Hashable {
     case track, route, alerts, account
 }
 
-/// The four V1 tabs (docs/06 §5). Track, Alerts, and Account are implemented.
+/// The four V1 tabs (docs/06 §5).
 struct SignedInTabs: View {
     let source: any LiveRunSource
     let notifications: any NotificationSource
@@ -82,7 +92,7 @@ struct SignedInTabs: View {
                 .tag(AppTab.track)
             Group {
                 if let enrollment {
-                    FamilyActionsView(source: enrollment, initialScreen: enrollmentScreen)
+                    FamilyActionsView(source: enrollment, tracking: source, initialScreen: enrollmentScreen)
                 } else {
                     ComingSoon(title: "My Route")
                 }
