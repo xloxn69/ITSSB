@@ -16,6 +16,7 @@ import { stillAuthorized } from "./lib/deviceAuth";
 import { isApprovedForNewRuns } from "./lib/routeVersions";
 import { stopJobsForRun } from "./notificationJobs";
 import { linkReplacement } from "./runOps";
+import { cancelledAt } from "./telemetry";
 
 /**
  * Online run start and end (docs/07 §8, docs/08 §6), committed in one
@@ -29,7 +30,14 @@ export const MAX_START_AGE_MS = 6 * 60 * 60 * 1000;
 
 export type TripEventOutcome =
   | { ok: true; body: TripEventAccepted }
-  | { ok: false; status: 400 | 403 | 409; code: TripEventErrorCode; message: string };
+  | {
+      ok: false;
+      status: 400 | 403 | 409;
+      code: TripEventErrorCode;
+      message: string;
+      /** Only with RUN_NOT_ACTIVE for a run staff cancelled (docs/08 §6). */
+      cancelled?: { runState: "cancelled"; cancelledAtMs: number | null };
+    };
 
 const fail = (
   status: 400 | 403 | 409,
@@ -231,6 +239,17 @@ async function endRun(
   if (grant.expiresAtMs <= nowMs) return GRANT_DENIED;
   const routeVersionId = ctx.db.normalizeId("routeVersions", run.routeVersionId);
   if (!routeVersionId || !grant.routeVersionIds.includes(routeVersionId)) return GRANT_DENIED;
+  if (run.state === "cancelled") {
+    // The driver ended a run staff had already cancelled: say so, so the Pi
+    // shows it as cancelled by the school (docs/13 D14). Own run only (above).
+    return {
+      ok: false,
+      status: 409,
+      code: "RUN_NOT_ACTIVE",
+      message: "The school cancelled this run.",
+      cancelled: { runState: "cancelled", cancelledAtMs: cancelledAt(run) },
+    };
+  }
   if (run.state !== "active") return fail(409, "RUN_NOT_ACTIVE", "This run has already ended.");
 
   if (r.capturedAtMs > nowMs + MAX_FUTURE_SKEW_MS || r.capturedAtMs < (run.startCapturedAtMs ?? 0)) {

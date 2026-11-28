@@ -184,11 +184,41 @@ const cancelledRun: EndedRun = {
   positionsAccepted: 409,
   positionsRejected: 3,
 };
-const cancelledO = observed(snapshot({ run: null, session: { unlocked: true, driverName: "Dana Driver" }, lastEndedRun: cancelledRun, generatedAtMs: NOW }));
+// What the Pi reports a few minutes later: GPS still lost, online, the
+// driver unlocked, actions as the device offers them with no active run.
+const cancelledSnapshot = (lastEndedRun: EndedRun) =>
+  snapshot({
+    generatedAtMs: NOW,
+    gps: { status: "no_fix", gpsd: "connected", receivers: 1, lastReportAgeMs: 600, lastValidFixAgeMs: 540_000, lastValidFixCapturedAtMs: at(9), lastValidFixMode: 3 },
+    network: { status: "online", detail: null, lastCheckedAtMs: NOW - 4_000, lastOnlineAtMs: NOW - 4_000 },
+    backend: { status: "ok", detail: null, lastOkAtMs: NOW - 4_000 },
+    outbox: { pending: 0, acknowledged: 409, rejected: 3, oldestPendingCapturedAtMs: null },
+    run: null,
+    motion: { state: "unknown", parked: false },
+    session: { unlocked: true, driverName: "Dana Driver" },
+    capabilities: {
+      recordRoute: { available: true },
+      startRoute: { available: true },
+      showQr: { available: false, reason: "Start a run first. Codes and the roster belong to the active run." },
+      showStudents: { available: false, reason: "Start a run first. Codes and the roster belong to the active run." },
+      submitRoute: { available: true },
+    },
+    lastEndedRun,
+  });
+const cancelledO = observed(cancelledSnapshot(cancelledRun));
+// The race: the driver ended on the bus after staff cancelled, before the Pi heard.
+const cancelledAfterEndO = observed(
+  cancelledSnapshot({ ...cancelledRun, driverEndedAtMs: at(2), endSync: "rejected", endError: "RUN_NOT_ACTIVE", endAttempts: 2 }),
+);
+const button = (label: string, primary = false) => h("button", { class: primary ? "btn primary" : "btn" }, label);
 const cancelledDashboard = () => {
+  const nav = { go: () => {}, action: () => {} };
   const line = cancelledBanner(cancelledO);
-  return dashboardView(cancelledO, { go: () => {}, action: () => {} }, line ? [h("div", { class: `banner lv-${line.level}` }, line.text)] : []);
+  // The same controls main.ts adds: Lock, the banner, and Last trip.
+  const controls = [button("Lock"), line ? h("div", { class: `banner lv-${line.level}` }, line.text) : null, button("Last trip")];
+  return h("div", {}, statusBar(cancelledO, nav), dashboardView(cancelledO, nav, controls));
 };
+const cancelledSummary = (so: typeof cancelledO) => h("div", {}, statusBar(so, { go: () => {}, action: () => {} }), summaryView(so, draftUi(null), draftCtl));
 // D12: low space (warning) and nearly full (critical, recording reduced), during a run.
 const MB = 1_000_000;
 const storageFor = (level: "warning" | "critical"): StoragePart => ({
@@ -349,7 +379,9 @@ const view = name.startsWith("diagnostics")
   : name === "dashboard-cancelled"
   ? cancelledDashboard()
   : name === "summary-cancelled"
-  ? summaryView(cancelledO, draftUi(null), draftCtl)
+  ? cancelledSummary(cancelledO)
+  : name === "summary-cancelled-after-end"
+  ? cancelledSummary(cancelledAfterEndO)
   : name === "storage-warning" || name === "storage-critical"
   ? storageScreen(name === "storage-warning" ? "warning" : "critical")
   : name.startsWith("qr")
@@ -370,4 +402,5 @@ export const GALLERY_STATES = [
   "diagnostics-unavailable",
   "dashboard-cancelled",
   "summary-cancelled",
+  "summary-cancelled-after-end",
 ];

@@ -31,8 +31,14 @@ function json(status: number, body: unknown): Response {
   });
 }
 
-function requestError(status: number, code: string, message: string, retryable: boolean) {
-  return json(status, { schemaVersion: SCHEMA_VERSION, error: { code, message, retryable } });
+function requestError(
+  status: number,
+  code: string,
+  message: string,
+  retryable: boolean,
+  extra: Record<string, unknown> = {},
+) {
+  return json(status, { schemaVersion: SCHEMA_VERSION, error: { code, message, retryable, ...extra } });
 }
 
 function isDeviceNotAuthorized(error: unknown): boolean {
@@ -130,7 +136,7 @@ http.route({
         nowMs: Date.now(),
       });
       if (outcome.ok) return json(200, outcome.body);
-      return requestError(outcome.status, outcome.code, outcome.message, false);
+      return requestError(outcome.status, outcome.code, outcome.message, false, outcome.cancelled);
     } catch (error) {
       if (isDeviceNotAuthorized(error)) {
         return requestError(401, "UNAUTHENTICATED", "Device credential rejected.", false);

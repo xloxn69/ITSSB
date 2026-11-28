@@ -2,6 +2,7 @@
 cancelled (docs/13 D14). Real HTTP against the fake backend, FICTIONAL data."""
 
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ from itssb_device.local_auth import hash_pin
 from itssb_device.models import Fix
 from itssb_device.recorder import Recorder
 from itssb_device.status import StatusBoard
+from itssb_device.trips import EndRetryThread
 from itssb_device.uploader import HttpTransport, Uploader
 
 TOKEN = "fake-dev-token"  # noqa: S105 - obviously fake
@@ -188,4 +190,67 @@ def test_pruning_keeps_the_cancelled_runs_rows_for_its_summary(tmp_path):
     assert db.cancel_run_locally("demo_run_001", T0, T0, "health")
     assert db.prune_acknowledged(T0 + 10**9, 100) == 0
     assert db.last_ended_run()["positionsAccepted"] == 1
+    db.close()
+
+
+def test_driver_ends_after_staff_cancel_before_the_pi_hears(tmp_path, pin_hash, backend):
+    """The review's race: staff cancel, the driver ends on the Pi (link down),
+    then the Pi hears. The summary must say cancelled, keep the driver's
+    attempt, and survive a restart."""
+    env, run_id = started(tmp_path, pin_hash, backend)
+    cancelled_at = backend.cancel_run(run_id)
+    backend.mode = "down"
+    code, body = env.post(f"/api/runs/{run_id}/end", {"requestId": rid()})
+    assert (code, body["endSync"]) == (200, "pending")
+    assert env.status()["lastEndedRun"]["endedBy"] == "driver"  # nothing heard yet
+
+    backend.mode = "ok"
+    db = env.db()
+    EndRetryThread(env.db_path, events_for(backend), threading.Event(), now_ms=lambda: T0).tick(db)
+    db.close()
+
+    summary = env.status()["lastEndedRun"]
+    assert summary["endedBy"] == "school"
+    assert summary["cancelledAtMs"] == cancelled_at
+    assert summary["driverEndedAtMs"] >= T0  # the driver's attempt is kept
+    assert (summary["endSync"], summary["endError"]) == ("rejected", "RUN_NOT_ACTIVE")
+    again = Database(env.db_path)  # restart
+    assert again.last_ended_run()["endedBy"] == "school"
+    assert again.conn.execute("SELECT state FROM local_runs").fetchone()["state"] == "cancelled"
+    again.close()
+
+
+def test_a_cancelled_answer_to_the_end_itself_says_so(tmp_path, pin_hash, backend):
+    env, run_id = started(tmp_path, pin_hash, backend)
+    backend.cancel_run(run_id)
+    code, body = env.post(f"/api/runs/{run_id}/end", {"requestId": rid()})
+    assert (code, body["endSync"]) == (200, "rejected")
+    assert body["message"] == "The school had already cancelled this run."
+    assert body["summary"]["endedBy"] == "school"
+
+
+def test_a_queued_position_reconciles_a_driver_ended_run(tmp_path, pin_hash, backend):
+    env, run_id = started(tmp_path, pin_hash, backend)
+    db = env.db()
+    fix_at(env, T0 + 1_000)
+    assert recorder(env, db).tick()
+    cancelled_at = backend.cancel_run(run_id)
+    backend.mode = "down"
+    env.park()
+    env.post("/api/motion/parked")
+    assert env.post(f"/api/runs/{run_id}/end", {"requestId": rid()})[0] == 200
+    backend.mode = "ok"
+    assert uploader(db, backend).upload_once() == "ok"
+    assert db.last_ended_run()["endedBy"] == "school"
+    assert db.last_ended_run()["cancelledAtMs"] == cancelled_at
+    db.close()
+
+
+def test_an_accepted_end_is_never_turned_into_a_cancellation(tmp_path):
+    db = Database(tmp_path / "d.db")
+    db.save_run("demo_run_001", "active")
+    payload = db.end_run_locally("demo_run_001", rid(), GRANT, T0)
+    db.resolve_end_request(payload["requestId"], "accepted", None, T0)
+    assert not db.cancel_run_locally("demo_run_001", T0, T0, "health")
+    assert db.last_ended_run()["endedBy"] == "driver"
     db.close()

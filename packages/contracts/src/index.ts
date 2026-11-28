@@ -88,7 +88,18 @@ export interface TelemetryResponse {
 
 export interface RequestError {
   schemaVersion: typeof SCHEMA_VERSION;
-  error: { code: string; message: string; retryable: boolean };
+  error: {
+    code: string;
+    message: string;
+    retryable: boolean;
+    /**
+     * Only on a trip-event `RUN_NOT_ACTIVE` for the device's own run that
+     * staff cancelled (docs/08 §6): the Pi records the run as cancelled by
+     * the school even if the driver ended it first. Absent from older backends.
+     */
+    runState?: "cancelled";
+    cancelledAtMs?: number | null;
+  };
 }
 
 export * from "./validate.js";

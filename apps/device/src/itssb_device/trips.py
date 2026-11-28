@@ -147,6 +147,9 @@ class TripEventResult:
     state: str | None = None
     code: str | None = None
     http_status: int | None = None
+    # A rejected end for a run staff cancelled (docs/08 §6): "cancelled".
+    run_state: str | None = None
+    cancelled_at_ms: int | None = None
 
 
 class HttpTripEvents:
@@ -186,8 +189,14 @@ class HttpTripEvents:
             return TripEventResult(
                 "unknown", code=code or f"HTTP_{resp.status}", http_status=resp.status
             )
+        cancelled = isinstance(err, dict) and err.get("runState") == "cancelled"
+        at = err.get("cancelledAtMs") if cancelled else None
         return TripEventResult(
-            "rejected", code=code or f"HTTP_{resp.status}", http_status=resp.status
+            "rejected",
+            code=code or f"HTTP_{resp.status}",
+            http_status=resp.status,
+            run_state="cancelled" if cancelled else None,
+            cancelled_at_ms=at if isinstance(at, int) and not isinstance(at, bool) else None,
         )
 
 
@@ -229,6 +238,9 @@ def send_end(
         # Kept with its reason for review; the local completion stands.
         db.resolve_end_request(payload["requestId"], "rejected", r.code, now_ms)
         log.error("run end rejected: runId=%s code=%s", payload["runId"], r.code)
+        if r.run_state == "cancelled":
+            # Staff cancelled it before the driver's end arrived (docs/13 D14).
+            db.cancel_run_locally(payload["runId"], r.cancelled_at_ms, now_ms, "end_answer")
     else:
         db.resolve_end_request(payload["requestId"], None, r.code, now_ms)
         log.warning("run end not answered (%s); will resend the same requestId", r.code)

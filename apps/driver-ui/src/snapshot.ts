@@ -230,6 +230,8 @@ export interface EndedRun {
   /** For `school`: when staff cancelled it (null if the server gave no time), and when this bus heard. */
   cancelledAtMs?: number | null;
   cancelNotedAtMs?: number;
+  /** For `school`: the driver also ended it on the bus at this time, before hearing (that end was refused). */
+  driverEndedAtMs?: number;
   endedAtMs: number;
   /** `not_needed`: cancelled by the school, so there is no end to send. */
   endSync: "pending" | "accepted" | "rejected" | "not_needed";

@@ -87,7 +87,7 @@ MIGRATIONS: list[str] = [
         run_id TEXT PRIMARY KEY REFERENCES local_runs(run_id),
         cancelled_at_ms INTEGER,
         noted_at_ms INTEGER NOT NULL,
-        source TEXT NOT NULL CHECK (source IN ('health','telemetry'))
+        source TEXT NOT NULL CHECK (source IN ('health','telemetry','end_answer'))
     );
     """,
 ]
@@ -353,13 +353,17 @@ class Database:
         self, run_id: str, cancelled_at_ms: int | None, noted_at_ms: int, source: str
     ) -> bool:
         """The server says the school cancelled this run (docs/13 D14). In ONE
-        transaction: end it locally as `cancelled` and record when. Only the
-        named run, and only while it is active here; nothing is sent to the
-        server and no queued row changes (the server decides each one).
-        Returns True if this call ended it."""
+        transaction: mark it `cancelled` locally and record when. Only the
+        named run, and only while it is active here, or completed by the
+        driver with an end the server has not accepted (staff cancelled first;
+        the end request stays as the audit of the driver's attempt). Nothing is
+        sent to the server and no queued row changes (the server decides each
+        one). Returns True if this call recorded it."""
         with self.transaction() as tx:
             ended = tx.execute(
-                "UPDATE local_runs SET state='cancelled' WHERE run_id=? AND state='active'",
+                "UPDATE local_runs SET state='cancelled' WHERE run_id=? AND (state='active' "
+                "OR (state='completed' AND NOT EXISTS (SELECT 1 FROM run_end_requests e "
+                "WHERE e.run_id=local_runs.run_id AND e.status='accepted')))",
                 (run_id,),
             ).rowcount
             if ended:
@@ -379,7 +383,9 @@ class Database:
     def last_ended_run(self) -> dict | None:
         """The most recently ended run and its sync state, for the trip summary.
         `endedBy` is `driver` (ended here, end sent to the server) or `school`
-        (cancelled by staff; nothing to send, `endSync` is `not_needed`)."""
+        (cancelled by staff). A school cancellation wins over a driver's end the
+        server never accepted; that attempt stays visible as `driverEndedAtMs`
+        with its `endSync`. With no driver attempt, `endSync` is `not_needed`."""
         last = self.conn.execute(LAST_ENDED_RUN_SQL).fetchone()
         if last is None:
             return None
@@ -403,7 +409,10 @@ class Database:
             "SELECT status, last_error, attempts, payload FROM run_end_requests WHERE run_id=?",
             (run_id,),
         ).fetchone()
-        if end is not None:
+        c = self.conn.execute(
+            "SELECT cancelled_at_ms, noted_at_ms FROM run_cancellations WHERE run_id=?", (run_id,)
+        ).fetchone()
+        if c is None and end is not None:
             return {
                 "runId": run_id,
                 "endedBy": "driver",
@@ -413,10 +422,7 @@ class Database:
                 "endAttempts": end["attempts"],
                 **positions,
             }
-        c = self.conn.execute(
-            "SELECT cancelled_at_ms, noted_at_ms FROM run_cancellations WHERE run_id=?", (run_id,)
-        ).fetchone()
-        return {
+        summary = {
             "runId": run_id,
             "endedBy": "school",
             "endedAtMs": c["noted_at_ms"] if c["cancelled_at_ms"] is None else c["cancelled_at_ms"],
@@ -427,6 +433,14 @@ class Database:
             "endAttempts": 0,
             **positions,
         }
+        if end is not None:
+            summary.update(
+                driverEndedAtMs=json.loads(end["payload"])["capturedAtMs"],
+                endSync=end["status"],
+                endError=end["last_error"],
+                endAttempts=end["attempts"],
+            )
+        return summary
 
     # ── Observations ──────────────────────────────────────────────────
 

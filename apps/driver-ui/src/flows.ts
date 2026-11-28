@@ -704,7 +704,10 @@ export function summaryChecks(e: EndedRun): [string, string, string][] {
   const positions: [string, string, string] = ["Positions", positionsLevel(e), positionsText(e)];
   if (e.endedBy === "school") {
     // Nothing was ended or sent from this bus: no "Completed" and no "End synced".
-    return [["Cancelled by the school", "warn", `${cancelledText(e)} Recording stopped on this bus; nothing to send.`], positions];
+    const cancelled: [string, string, string] = ["Cancelled by the school", "warn", `${cancelledText(e)} Recording stopped on this bus.`];
+    if (e.driverEndedAtMs === undefined) return [cancelled, positions];
+    // The driver ended it here before the bus heard; keep that attempt visible.
+    return [cancelled, ["Ended on this bus", "warn", `You ended it at ${clock(e.driverEndedAtMs)}, after the school had cancelled it. The school server kept the cancellation.`], positions];
   }
   const sync: [string, string] =
     e.endSync === "accepted"

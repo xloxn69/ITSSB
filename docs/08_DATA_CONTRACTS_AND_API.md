@@ -218,7 +218,7 @@ Trip-event failures use the request-level error body (§5):
 | `403` | `RUN_NOT_AUTHORIZED` | Unknown run or another device's run (deliberately indistinguishable). |
 | `409` | `REQUEST_ID_CONFLICT` | Same `requestId`, different content. |
 | `409` | `ACTIVE_RUN_CONFLICT` | The device or route version already has an active run. |
-| `409` | `RUN_NOT_ACTIVE` | The run was already ended by a different request. |
+| `409` | `RUN_NOT_ACTIVE` | The run was already ended by a different request, or staff cancelled it. For a cancellation the error adds `runState: "cancelled"` and `cancelledAtMs` (fixture `tripEvent.endRun.runCancelled.json`), so a Pi whose driver ended the run before hearing records it as cancelled by the school. |
 | `413` | `BODY_TOO_LARGE` | Body above 8 KiB. |
 
 Canonical fixtures: `packages/contracts/fixtures/tripEvent.*.json`. The iOS app does not call this endpoint. Before upload, atomically mark the local run completed, freeze its final sequence boundary, and persist its end command/outbox record using the serialized database writer. Telemetry insertion re-checks active state inside its own transaction. The backend verifies that the grant belongs to the authenticated device and authorized driver, covers the intended run and operation, and meets the applicable validity/revocation rules. A device credential alone does not authorize ending a run. The sequence boundary helps reconcile earlier captured telemetry that arrives later; it is checked against the authenticated stream and plausible timing.

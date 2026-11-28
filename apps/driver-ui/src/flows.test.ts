@@ -59,6 +59,14 @@ describe("run cancelled by the school (docs/13 D14)", () => {
     expect(rows[1]?.[2]).toContain("2 rejected");
   });
 
+  it("shows the cancellation first when the driver ended it before the bus heard", () => {
+    const driverEndedAtMs = cancelledAtMs + 60_000;
+    const rows = summaryChecks({ ...cancelled, driverEndedAtMs, endSync: "rejected", endError: "RUN_NOT_ACTIVE" });
+    expect(rows.map(([label]) => label)).toEqual(["Cancelled by the school", "Ended on this bus", "Positions"]);
+    const ended = new Date(driverEndedAtMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    expect(rows[1]?.[2]).toContain(`You ended it at ${ended}, after the school had cancelled it.`);
+  });
+
   it("still shows a driver-ended run as completed", () => {
     const rows = summaryChecks({ ...base, positionsRecorded: 1, positionsWaiting: 0 });
     expect(rows.map(([label]) => label)).toEqual(["Completed on this device", "End synced", "Positions"]);

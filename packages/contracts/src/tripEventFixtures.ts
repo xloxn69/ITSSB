@@ -59,10 +59,23 @@ export const tripEventActiveRunConflict: RequestError = {
   },
 };
 
+/** An end for a run staff had already cancelled (docs/08 §6). */
+export const tripEventEndRunCancelled: RequestError = {
+  schemaVersion: 1,
+  error: {
+    code: "RUN_NOT_ACTIVE",
+    message: "The school cancelled this run.",
+    retryable: false,
+    runState: "cancelled",
+    cancelledAtMs: 1795611000000,
+  },
+};
+
 export const tripEventFixtureFiles = {
   "tripEvent.startRun.request": startRunRequest,
   "tripEvent.startRun.accepted": startRunAccepted,
   "tripEvent.endRun.request": endRunRequest,
   "tripEvent.endRun.accepted": endRunAccepted,
   "tripEvent.activeRunConflict": tripEventActiveRunConflict,
+  "tripEvent.endRun.runCancelled": tripEventEndRunCancelled,
 } as const;

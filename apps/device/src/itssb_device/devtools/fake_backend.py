@@ -204,8 +204,8 @@ class FakeBackend(ThreadingHTTPServer):
         rid, kind = body.get("requestId"), body.get("type")
         content = json.dumps(body, sort_keys=True)
 
-        def err(status: int, code: str) -> tuple[int, dict[str, Any]]:
-            return status, {"schemaVersion": 1, "error": {"code": code, "message": code}}
+        def err(status: int, code: str, **extra: Any) -> tuple[int, dict[str, Any]]:
+            return status, {"schemaVersion": 1, "error": {"code": code, "message": code, **extra}}
 
         with self.lock:
             if rid in self.trip_requests:
@@ -230,6 +230,13 @@ class FakeBackend(ThreadingHTTPServer):
                 run = self.runs.get(run_id)
                 if run is None or run["route"] not in routes:
                     return err(403, "RUN_NOT_AUTHORIZED")
+                if run["state"] == "cancelled":
+                    return err(
+                        409,
+                        "RUN_NOT_ACTIVE",
+                        runState="cancelled",
+                        cancelledAtMs=run["cancelledAtMs"],
+                    )
                 if run["state"] != "active":
                     return err(409, "RUN_NOT_ACTIVE")
                 run["state"], run["endedAtMs"] = "completed", now

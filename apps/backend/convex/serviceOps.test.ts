@@ -153,6 +153,41 @@ describe("runOps.cancelRun", () => {
     expect(await t.run((ctx) => ctx.db.query("telemetryEvents").collect())).toEqual([]);
   });
 
+  it("answers a driver's end of a run staff already cancelled with the cancellation", async () => {
+    const { t, staff, route } = await setup();
+    // Bus B's own run, ended by its driver after staff cancelled it.
+    await t.run(async (ctx) => {
+      const active = await ctx.db.query("runs").collect();
+      for (const r of active) await ctx.db.patch(r._id, { state: "completed" });
+    });
+    const started = await startOn(t, SECRET_B, GRANT_B, route);
+    const runB = started.body.runId as Id<"runs">;
+    await staff.mutation(api.runOps.cancelRun, { runId: runB, reason: "Bus broke down at Elm St" });
+    const cancelledAtMs = (await getRun(t, runB))?.cancelledAtMs;
+    const res = await t.fetch("/device/v1/trip-events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${SECRET_B}` },
+      body: JSON.stringify({
+        schemaVersion: 1,
+        requestId: crypto.randomUUID(),
+        type: "endRun",
+        driverOperatingGrant: GRANT_B,
+        runId: runB,
+        capturedAtMs: Date.now() - 500,
+        lastRunSequence: null,
+      }),
+    });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: unknown }).error).toEqual({
+      code: "RUN_NOT_ACTIVE",
+      message: expect.any(String),
+      retryable: false,
+      runState: "cancelled",
+      cancelledAtMs,
+    });
+    expect(await getRun(t, runB)).toMatchObject({ state: "cancelled" });
+  });
+
   it("never tells another bus that a run it doesn't own was cancelled", async () => {
     const { t, staff, runId } = await setup();
     await staff.mutation(api.runOps.cancelRun, { runId, reason: "Weather" });
