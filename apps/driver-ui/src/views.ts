@@ -196,6 +196,48 @@ export function drivingView(o: Observed, nav: Nav, extra: (HTMLElement | null)[]
   );
 }
 
+export const NOT_AVAILABLE = "not available on this device";
+export const NOT_REPORTED = "not reported by this device software";
+
+const mb = (bytes: number | null | undefined) =>
+  bytes === null || bytes === undefined
+    ? NOT_AVAILABLE
+    : bytes >= 1e9
+      ? `${(bytes / 1e9).toFixed(2)} GB`
+      : `${(bytes / 1e6).toFixed(1)} MB`;
+
+/**
+ * D21 measurements (docs/13 §10): upload retries, memory, temperature and
+ * database size. An older service omits them ("not reported"); a value this
+ * Pi cannot read is null ("not available"). Nothing is shown as zero or
+ * healthy by default.
+ */
+export function measurementRows(o: Observed): [string, string][] {
+  const s = o.snapshot;
+  if (!s) return [];
+  const u = s.upload;
+  const sys = s.system;
+  const uploads: [string, string][] = u
+    ? [
+        ["Upload failures in a row", String(u.consecutiveFailures)],
+        ["Upload retries since start", String(u.retriesSinceStart)],
+        [
+          "Last upload error",
+          u.lastErrorClass === null ? "none since start" : `${u.lastErrorClass}, ${formatAge(ageOfTimestamp(u.lastErrorAtMs, o))}`,
+        ],
+      ]
+    : [["Upload retries", NOT_REPORTED]];
+  const system: [string, string][] = sys
+    ? [
+        ["Service memory", mb(sys.processRssBytes)],
+        ["Memory available", mb(sys.memAvailableBytes)],
+        ["CPU temperature", sys.cpuTemperatureC == null ? NOT_AVAILABLE : `${sys.cpuTemperatureC.toFixed(1)} °C`],
+        ["Database size", mb(sys.databaseBytes)],
+      ]
+    : [["Memory, temperature, database", NOT_REPORTED]];
+  return [...uploads, ...system];
+}
+
 /** D21: GPS and device diagnostics. Read-only; no coordinates are shown. */
 export function diagnosticsView(o: Observed, nav: Nav): HTMLElement {
   const s = o.snapshot;
@@ -220,6 +262,7 @@ export function diagnosticsView(o: Observed, nav: Nav): HTMLElement {
             ? "not measured yet"
             : `${formatBytes(s.storage.disk.freeBytes)} (warning below ${formatBytes(s.storage.disk.warnFreeBytes)}, reduced recording below ${formatBytes(s.storage.disk.criticalFreeBytes)})`,
         ],
+        ...measurementRows(o),
         ["Run", runLabel(o)],
       ]
     : [];

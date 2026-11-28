@@ -235,6 +235,48 @@ export interface DeviceDiagnostics {
   pendingCount: number | null;
   oldestPendingCapturedAtMs: number | null;
   lastRun: { runId: string; state: "scheduled" | "active" | "completed" | "cancelled"; endedAtMs: number | null } | null;
+  /**
+   * Measurements from the latest heartbeat (docs/13 §10). `null` when that
+   * heartbeat had none (device software from before them, or no heartbeat).
+   * A `null` value inside means the device cannot measure it.
+   */
+  metrics: DeviceMetrics | null;
+}
+
+export interface DeviceMetrics {
+  /** Server receipt of the heartbeat these values came from. */
+  receivedAtMs: number;
+  uploadConsecutiveFailures: number | null;
+  /** Since the device software last started; resets on restart. */
+  uploadRetriesSinceStart: number | null;
+  lastUploadErrorClass: string | null;
+  processRssBytes: number | null;
+  memAvailableBytes: number | null;
+  cpuTemperatureC: number | null;
+  databaseBytes: number | null;
+}
+
+export const NOTIFICATION_JOB_STATES = [
+  "pending",
+  "in_progress",
+  "provider_accepted",
+  "retryable_failure",
+  "permanent_failure",
+  "expired",
+  "cancelled",
+] as const;
+export type NotificationJobState = (typeof NOTIFICATION_JOB_STATES)[number];
+
+/** Push outbox health (docs/10 §9): how long jobs wait, and how they ended. */
+export interface NotificationJobAge {
+  /** Creation time of the oldest job still waiting to send (`pending` or `retryable_failure`); null when none. */
+  oldestWaitingCreatedAtMs: number | null;
+  waitingCount: number;
+  /** Jobs created in the last `windowMs`, by their current state. */
+  windowMs: number;
+  countsByState: Record<NotificationJobState, number>;
+  /** True when a scan hit its cap: the counts are lower bounds. */
+  truncated: boolean;
 }
 
 export interface Diagnostics {
@@ -247,6 +289,7 @@ export interface Diagnostics {
   };
   retention: { rawGpsDays: number; lastSweepAtMs: number | null; lastSweepDeleted: string | null };
   devices: DeviceDiagnostics[];
+  notifications: NotificationJobAge;
 }
 
 export type DiagnosticsResult = Ready<Diagnostics> | AccessUnavailable;

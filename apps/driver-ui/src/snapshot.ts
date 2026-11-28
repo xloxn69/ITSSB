@@ -66,6 +66,23 @@ export interface StoragePart {
   queue: { level: StorageLevel; pending: number | null; warnPending: number; criticalPending: number };
 }
 
+/** Telemetry upload attempts since the device software started (docs/13 §10). */
+export interface UploadPart {
+  consecutiveFailures: number;
+  retriesSinceStart: number;
+  /** An exception class name or `http_NNN`; kept after recovery. */
+  lastErrorClass: string | null;
+  lastErrorAtMs: number | null;
+}
+
+/** Read when the snapshot was made; null = this device cannot measure it. */
+export interface SystemPart {
+  processRssBytes: number | null;
+  memAvailableBytes: number | null;
+  cpuTemperatureC: number | null;
+  databaseBytes: number | null;
+}
+
 export interface RecorderPart {
   lastRecordedAtMs?: number | null;
   observationsThisBoot?: number;
@@ -184,6 +201,10 @@ export interface DeviceSnapshot {
   outbox: OutboxPart;
   run: RunPart | null;
   recorder?: RecorderPart;
+  /** Absent on older device software. */
+  upload?: UploadPart;
+  /** Absent on older device software. */
+  system?: SystemPart;
   /** Absent on older device software: no claim about space is made. */
   storage?: StoragePart;
   /** Absent on device software that does not report motion: treated as unknown. */

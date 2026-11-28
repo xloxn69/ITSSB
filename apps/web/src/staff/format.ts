@@ -1,5 +1,9 @@
 import {
+  type DeviceMetrics,
   type DeviceSummary,
+  NOTIFICATION_JOB_STATES,
+  type NotificationJobAge,
+  type NotificationJobState,
   type DraftDetail,
   POSITION_AGING_AFTER_MS,
   POSITION_STALE_AFTER_MS,
@@ -48,6 +52,91 @@ export function contactStatus(
   if (age >= POSITION_STALE_AFTER_MS) return { text: `Not reporting: last contact ${ago(age)}`, tone: "stale" };
   if (age >= POSITION_AGING_AFTER_MS) return { text: `Last contact ${ago(age)}`, tone: "aging" };
   return { text: `Reporting: last contact ${ago(age)}`, tone: "fresh" };
+}
+
+/** Server-aligned age (docs/12 §3): a slow browser clock can only make it older. */
+function alignedAge(atMs: number, serverNowMs: number, receivedAtWallMs: number, wallNowMs: number): number {
+  const aligned = serverNowMs + (wallNowMs - receivedAtWallMs);
+  return Math.max(0, wallNowMs - atMs, aligned - atMs);
+}
+
+/** The heartbeat had no measurements: the device software predates them. */
+export const METRICS_NOT_REPORTED = "Not reported by this device's software";
+/** The device reported the field as null: it cannot measure it. */
+export const METRIC_NOT_AVAILABLE = "Not available on this device";
+
+const megabytes = (bytes: number | null) =>
+  bytes === null
+    ? METRIC_NOT_AVAILABLE
+    : bytes >= 1e9
+      ? `${(bytes / 1e9).toFixed(2)} GB`
+      : `${(bytes / 1e6).toFixed(1)} MB`;
+
+/**
+ * Device measurements for the Diagnostics page (docs/13 §10), each with the
+ * age of the heartbeat it came from. Never fills a gap with zero. "Since
+ * start" means since the device software last started; it resets on restart.
+ */
+export function deviceMetricFacts(
+  m: DeviceMetrics | null,
+  serverNowMs: number,
+  receivedAtWallMs: number,
+  wallNowMs: number,
+  heartbeatSeen = true,
+): [string, string][] {
+  if (m === null) return [["Measurements", heartbeatSeen ? METRICS_NOT_REPORTED : "No heartbeat received"]];
+  const age = alignedAge(m.receivedAtMs, serverNowMs, receivedAtWallMs, wallNowMs);
+  const failures =
+    m.uploadConsecutiveFailures === null
+      ? METRIC_NOT_AVAILABLE
+      : m.uploadConsecutiveFailures === 0
+        ? "None now"
+        : plural(m.uploadConsecutiveFailures, "failure in a row", "failures in a row");
+  return [
+    ["Measured", `${ago(age)}, from the latest heartbeat`],
+    ["Upload failures", failures],
+    [
+      "Upload retries since start",
+      m.uploadRetriesSinceStart === null ? METRIC_NOT_AVAILABLE : String(m.uploadRetriesSinceStart),
+    ],
+    ["Last upload error", m.lastUploadErrorClass ?? "None since start"],
+    ["Service memory", megabytes(m.processRssBytes)],
+    ["Memory available", megabytes(m.memAvailableBytes)],
+    ["CPU temperature", m.cpuTemperatureC === null ? METRIC_NOT_AVAILABLE : `${m.cpuTemperatureC.toFixed(1)} °C`],
+    ["Database size", megabytes(m.databaseBytes)],
+  ];
+}
+
+const JOB_STATE_LABEL: Record<NotificationJobState, string> = {
+  pending: "waiting",
+  in_progress: "sending",
+  provider_accepted: "accepted by Apple",
+  retryable_failure: "waiting to retry",
+  permanent_failure: "failed",
+  expired: "expired unsent",
+  cancelled: "cancelled",
+};
+
+/** Push outbox age and recent outcomes, for staff (docs/10 §9). */
+export function notificationJobFacts(
+  n: NotificationJobAge,
+  serverNowMs: number,
+  receivedAtWallMs: number,
+  wallNowMs: number,
+): [string, string][] {
+  const atLeast = n.truncated ? "at least " : "";
+  const oldest =
+    n.oldestWaitingCreatedAtMs === null
+      ? "Nothing waiting"
+      : `${atLeast}${n.waitingCount} waiting; oldest created ${ago(alignedAge(n.oldestWaitingCreatedAtMs, serverNowMs, receivedAtWallMs, wallNowMs))}`;
+  const counts = NOTIFICATION_JOB_STATES.filter((s) => n.countsByState[s] > 0).map(
+    (s) => `${n.countsByState[s]} ${JOB_STATE_LABEL[s]}`,
+  );
+  const hours = Math.round(n.windowMs / 3_600_000);
+  return [
+    ["Waiting to send", oldest],
+    [`Created in the last ${hours} h`, counts.length ? `${atLeast}${counts.join(", ")}` : "None"],
+  ];
 }
 
 /** Approval is offered only for a waiting draft with no blocking check. */

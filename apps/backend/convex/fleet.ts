@@ -8,7 +8,11 @@ import {
   type MaintenanceWindow,
   MAX_MAINTENANCE_MS,
   MAX_STAFF_REASON_LENGTH,
+  DEVICE_HEALTH_METRIC_KEYS,
   type DeviceDiagnostics,
+  type DeviceMetrics,
+  NOTIFICATION_JOB_STATES,
+  type NotificationJobState,
   type DiagnosticsResult,
   type CredentialRefusalCode,
   type DeviceSummary,
@@ -22,10 +26,12 @@ import {
 } from "@itssb/contracts";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
+import type { Doc } from "./_generated/dataModel";
 import { action, internalMutation, mutation, query } from "./_generated/server";
 import { generateDeviceSecret, sha256Hex } from "./lib/deviceAuth";
 import { accessUnavailable, audit, denied, staffCaller } from "./lib/staff";
 import { boundedText, okResult, refusedResult, staffActionResult } from "./lib/staffResults";
+import { jobAgeSummary } from "./notificationJobs";
 import { RAW_GPS_RETENTION_DAYS } from "./retention";
 import { UNLINKED_PREFIX } from "./users";
 
@@ -411,8 +417,32 @@ export const diagnostics = query({
               endedAtMs: nullable(v.number()),
             }),
           ),
+          metrics: nullable(
+            v.object({
+              receivedAtMs: v.number(),
+              uploadConsecutiveFailures: nullable(v.number()),
+              uploadRetriesSinceStart: nullable(v.number()),
+              lastUploadErrorClass: nullable(v.string()),
+              processRssBytes: nullable(v.number()),
+              memAvailableBytes: nullable(v.number()),
+              cpuTemperatureC: nullable(v.number()),
+              databaseBytes: nullable(v.number()),
+            }),
+          ),
         }),
       ),
+      notifications: v.object({
+        oldestWaitingCreatedAtMs: nullable(v.number()),
+        waitingCount: v.number(),
+        windowMs: v.number(),
+        countsByState: v.object(
+          Object.fromEntries(NOTIFICATION_JOB_STATES.map((s) => [s, v.number()])) as Record<
+            NotificationJobState,
+            ReturnType<typeof v.number>
+          >,
+        ),
+        truncated: v.boolean(),
+      }),
     }),
     accessUnavailable,
   ),
@@ -456,6 +486,7 @@ export const diagnostics = query({
         pendingCount: health?.pendingCount ?? null,
         oldestPendingCapturedAtMs: health?.oldestPendingCapturedAtMs ?? null,
         lastRun: lastRun ? { runId: lastRun._id, state: lastRun.state, endedAtMs: lastRun.endedAtMs ?? null } : null,
+        metrics: health ? deviceMetrics(health) : null,
       });
     }
     devices.sort((a, b) => a.label.localeCompare(b.label));
@@ -479,9 +510,25 @@ export const diagnostics = query({
         lastSweepDeleted: sweep?.reason ?? null,
       },
       devices,
+      notifications: await jobAgeSummary(ctx, Date.now()),
     };
   },
 });
+
+/** The heartbeat's measurements, or null when it carried none (older Pi software). */
+function deviceMetrics(h: Doc<"deviceHealth">): DeviceMetrics | null {
+  if (!DEVICE_HEALTH_METRIC_KEYS.some((k) => h[k] !== undefined)) return null;
+  return {
+    receivedAtMs: h.statusReceivedAtMs ?? h.receivedAtMs,
+    uploadConsecutiveFailures: h.uploadConsecutiveFailures ?? null,
+    uploadRetriesSinceStart: h.uploadRetriesSinceStart ?? null,
+    lastUploadErrorClass: h.lastUploadErrorClass ?? null,
+    processRssBytes: h.processRssBytes ?? null,
+    memAvailableBytes: h.memAvailableBytes ?? null,
+    cpuTemperatureC: h.cpuTemperatureC ?? null,
+    databaseBytes: h.databaseBytes ?? null,
+  };
+}
 
 // ── Maintenance windows (docs/14 §5) ──────────────────────────────────
 //

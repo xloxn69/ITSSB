@@ -1,6 +1,6 @@
-import { deviceHealthNoFix } from "@itssb/contracts/fixtures";
+import { deviceHealthNoFix, deviceHealthWithMetrics } from "@itssb/contracts/fixtures";
 import { convexTest } from "convex-test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import { sha256Hex } from "./lib/deviceAuth";
 import schema from "./schema";
@@ -9,6 +9,7 @@ const modules = import.meta.glob("./**/*.ts");
 const SECRET = "fake-health-device-secret-0000000000000"; // fictional
 const OTHER_SECRET = "fake-other-device-secret-000000000000000"; // fictional
 const STUDENT = "test|student";
+const STAFF = "test|staff";
 
 type T = ReturnType<typeof convexTest>;
 
@@ -18,6 +19,7 @@ async function setup({ runStartedAgoMs = 60_000 } = {}) {
   const [hashA, hashB] = await Promise.all([sha256Hex(SECRET), sha256Hex(OTHER_SECRET)]);
   const ids = await t.run(async (ctx) => {
     const user = await ctx.db.insert("users", { tokenIdentifier: STUDENT, role: "family", displayName: "Sam" });
+    await ctx.db.insert("users", { tokenIdentifier: STAFF, role: "staff", displayName: "Riley Staff" });
     const routeVersionId = await ctx.db.insert("routeVersions", { label: "Route 17 Morning", path: [] });
     const stopId = await ctx.db.insert("stops", { routeVersionId, label: "Oak & Pine", latitude: 34.1, longitude: -83.9 });
     const studentId = await ctx.db.insert("students", { displayName: "Sam Example", userId: user });
@@ -41,6 +43,19 @@ const report = (overrides: Record<string, unknown> = {}) => ({
   capturedAtMs: Date.now() - 100,
   ...overrides,
 });
+
+const metricsReport = (overrides: Record<string, unknown> = {}) => ({
+  ...deviceHealthWithMetrics,
+  capturedAtMs: Date.now() - 100,
+  ...overrides,
+});
+
+async function storedMetrics(t: T, deviceId: string) {
+  const row = await t.run(async (ctx) => ctx.db.query("deviceHealth").collect());
+  const mine = row.find((r) => r.deviceId === deviceId);
+  if (!mine) throw new Error("no health row");
+  return mine;
+}
 
 async function post(t: T, secret: string | null, body: unknown) {
   const res = await t.fetch("/device/v1/health", {
@@ -136,7 +151,7 @@ describe("POST /device/v1/health", () => {
     await post(t, SECRET, report({ gpsStatus: "valid" }));
     const first = (await myRun(t, assignmentId)).lastDeviceContactAtMs!;
     // Pi clock stepped back (e.g. NTP correction): status ignored, contact kept.
-    await new Promise((r) => setTimeout(r, 5));
+    vi.setSystemTime(Date.now() + 5_000);
     await post(t, SECRET, report({ gpsStatus: "no_fix", capturedAtMs: Date.now() - 60_000 }));
     const run = await myRun(t, assignmentId);
     expect(run.gpsStatus).toBe("valid");
@@ -161,7 +176,7 @@ describe("POST /device/v1/health", () => {
     const { t, assignmentId, deviceId } = await setup();
     await post(t, SECRET, report({ gpsStatus: "no_fix" }));
     const old = (await myRun(t, assignmentId)).lastDeviceContactAtMs!;
-    await new Promise((r) => setTimeout(r, 5));
+    vi.setSystemTime(Date.now() + 5_000);
     await post(t, SECRET, report({ gpsStatus: "no_fix", capturedAtMs: Date.now() }));
     await t.mutation(internal.health.expire, { deviceId, receivedAtMs: old });
     expect((await myRun(t, assignmentId)).gpsStatus).toBe("no_fix");
@@ -174,6 +189,81 @@ describe("POST /device/v1/health", () => {
       t.mutation(internal.health.record, { deviceId, report: report(), nowMs: Date.now() }),
     ).rejects.toThrow(/DEVICE_NOT_AUTHORIZED/);
     expect((await myRun(t, assignmentId)).lastDeviceContactAtMs).toBeNull();
+  });
+
+  it("an older Pi's heartbeat without measurements is still accepted and stores none", async () => {
+    const { t, assignmentId, deviceId } = await setup();
+    const res = await post(t, SECRET, report());
+    expect(res.status).toBe(200);
+    expect((await myRun(t, assignmentId)).gpsStatus).toBe("no_fix");
+    expect((await storedMetrics(t, deviceId)).cpuTemperatureC).toBeUndefined();
+  });
+
+  it("stores the measurements; a later report without them clears them", async () => {
+    const { t, deviceId } = await setup();
+    expect((await post(t, SECRET, metricsReport())).status).toBe(200);
+    expect(await storedMetrics(t, deviceId)).toMatchObject({
+      uploadConsecutiveFailures: 2,
+      uploadRetriesSinceStart: 17,
+      lastUploadErrorClass: "http_503",
+      processRssBytes: 42_225_664,
+      memAvailableBytes: 1_232_457_728,
+      cpuTemperatureC: 48.3,
+      databaseBytes: 3_158_016,
+    });
+    // Rolled back to older software: nothing from the previous report stays.
+    expect((await post(t, SECRET, report({ capturedAtMs: Date.now() }))).status).toBe(200);
+    expect((await storedMetrics(t, deviceId)).processRssBytes).toBeUndefined();
+  });
+
+  it("refuses a report whose measurements are malformed", async () => {
+    const { t } = await setup();
+    const res = await post(t, SECRET, metricsReport({ cpuTemperatureC: 900 }));
+    expect(res.status).toBe(400);
+    expect(await t.run(async (ctx) => ctx.db.query("deviceHealth").collect())).toEqual([]);
+  });
+
+  it("measurements reach staff diagnostics with their receipt time, and never families", async () => {
+    const { t, assignmentId, deviceId } = await setup();
+    const before = Date.now();
+    await post(t, SECRET, metricsReport({ cpuTemperatureC: null, processRssBytes: null }));
+    const staff = await t.withIdentity({ tokenIdentifier: STAFF }).query(api.fleet.diagnostics, {});
+    if (staff.status !== "ready") throw new Error(staff.status);
+    const mine = staff.devices.find((d) => d.deviceId === deviceId)!;
+    expect(mine.metrics).toMatchObject({
+      uploadRetriesSinceStart: 17,
+      cpuTemperatureC: null, // the Pi could not measure it: null, not a number
+      processRssBytes: null,
+      databaseBytes: 3_158_016,
+    });
+    expect(mine.metrics!.receivedAtMs).toBeGreaterThanOrEqual(before);
+    expect(staff.devices.find((d) => d.deviceId !== deviceId)!.metrics).toBeNull();
+
+    // Families get their run without any device measurement.
+    const family = JSON.stringify(await myRun(t, assignmentId));
+    for (const key of ["uploadRetriesSinceStart", "databaseBytes", "memAvailableBytes", "lastUploadErrorClass"]) {
+      expect(family).not.toContain(key);
+    }
+    // And the staff query refuses everyone else.
+    expect(await t.withIdentity({ tokenIdentifier: STUDENT }).query(api.fleet.diagnostics, {})).toMatchObject({
+      status: "access_unavailable",
+      reason: "not_permitted",
+    });
+    expect(await t.query(api.fleet.diagnostics, {})).toMatchObject({ status: "access_unavailable" });
+  });
+
+  it("a delayed report keeps the measurements' own receipt time", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { t, deviceId } = await setup();
+    const capturedAtMs = Date.now() - 100;
+    await post(t, SECRET, metricsReport({ capturedAtMs }));
+    const first = await storedMetrics(t, deviceId);
+    vi.setSystemTime(Date.now() + 5_000);
+    await post(t, SECRET, metricsReport({ capturedAtMs: capturedAtMs - 1_000 })); // replaces nothing
+    const after = await storedMetrics(t, deviceId);
+    expect(after.receivedAtMs).toBeGreaterThan(first.receivedAtMs); // still counts as contact
+    expect(after.statusReceivedAtMs).toBe(first.statusReceivedAtMs);
+    vi.useRealTimers();
   });
 
   it("refuses a missing, wrong, or revoked credential", async () => {

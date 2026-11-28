@@ -38,6 +38,7 @@ from urllib.parse import urlsplit
 from . import __version__
 from .config import Config
 from .database import Database
+from .metrics import SYSTEM_KEYS
 from .status import StatusBoard, wall_ms
 from .sync import (
     MAX_BACKOFF_MS,
@@ -62,6 +63,22 @@ PROBE_INTERVAL_S = 30.0
 # often so fresh tracking resumes within seconds of the link coming back
 # (docs/13 D08).
 OFFLINE_PROBE_INTERVAL_S = 5.0
+# A backend older than the measurement fields refuses unknown keys (400
+# INVALID_REQUEST). Then send only the base report for this long before
+# offering the full one again, so contact and GPS status keep landing.
+HEALTH_BASE_ONLY_MS = 30 * 60_000
+# Health keys every backend accepts (docs/08 §7, before the measurements).
+BASE_HEALTH_KEYS = (
+    "schemaVersion",
+    "bootId",
+    "capturedAtMs",
+    "appVersion",
+    "runId",
+    "gpsStatus",
+    "lastValidFixAtMs",
+    "pendingCount",
+    "oldestPendingCapturedAtMs",
+)
 
 
 _NO_ROUTE_ERRNOS = {errno.ENETUNREACH, errno.EHOSTUNREACH, errno.ENETDOWN}
@@ -208,6 +225,7 @@ class Uploader:
         # 401/403, 413, 429, 5xx) keeps its backoff.
         self.pause_reason: str | None = None
         self.failures = 0  # consecutive request-level failures
+        self.health_base_only_until_ms = 0
 
     def _batch(self, now: int) -> tuple[list[str], bytes] | None:
         payloads = self.db.pending_payloads(now, limit=self.batch_limit, newest_first=True)
@@ -261,11 +279,14 @@ class Uploader:
             log.warning(
                 "upload of %d events failed (%s); will retry same eventIds", len(sent), exc.reason
             )
+            self.board.upload_attempt(exc.reason)
             self._fail(sent, now, "unreachable" if exc.backend == "unreachable" else "server")
             return "transport_error"
 
         self.board.network("online")
         code = _error_code(resp)
+        if resp.status != 200:
+            self.board.upload_attempt(f"http_{resp.status}")
         if resp.status == 200:
             try:
                 results = json.loads(resp.body)["results"]
@@ -274,9 +295,11 @@ class Uploader:
                 results = [r for r in results if isinstance(r, dict)]
             except (ValueError, KeyError, TypeError):
                 self.board.backend("bad_response", "unparseable 200 body", 200)
+                self.board.upload_attempt("bad_response")
                 self._fail(sent, now)
                 return "bad_response"
             summary = apply_results(self.db, sent, results, now, jitter=self._jitter)
+            self.board.upload_attempt(None)
             self.failures = 0
             self.pause_reason = None
             self.batch_limit = min(self.max_events, self.batch_limit * 2)
@@ -325,13 +348,40 @@ class Uploader:
             "lastValidFixAtMs": snap["gps"]["lastValidFixCapturedAtMs"],
             "pendingCount": counts["pending"],
             "oldestPendingCapturedAtMs": counts["oldestPendingCapturedAtMs"],
+            # Measurements for staff diagnostics (docs/13 §10); null = not
+            # measurable on this device, never a guess.
+            "uploadConsecutiveFailures": snap["upload"]["consecutiveFailures"],
+            "uploadRetriesSinceStart": snap["upload"]["retriesSinceStart"],
+            "lastUploadErrorClass": snap["upload"]["lastErrorClass"],
+            **{k: snap["system"].get(k) for k in SYSTEM_KEYS},
         }
 
     def send_health(self) -> str:
         """One heartbeat. Independent of the outbox: failing never touches
         queued rows or the upload pause, and reaching the backend counts as
         proof the internet is back."""
-        body = json.dumps(self.health_report(), separators=(",", ":")).encode()
+        report = self.health_report()
+        full = self._now_ms() >= self.health_base_only_until_ms
+        if not full:
+            report = {k: report[k] for k in BASE_HEALTH_KEYS}
+        outcome, resp = self._post_health(report)
+        if (
+            full
+            and resp is not None
+            and resp.status == 400
+            and _error_code(resp) == "INVALID_REQUEST"
+        ):
+            # Probably a backend from before the measurement fields: resend
+            # the base report now and stay base-only for a while.
+            log.warning("health: measurements refused; sending the base report")
+            self.health_base_only_until_ms = self._now_ms() + HEALTH_BASE_ONLY_MS
+            outcome, resp = self._post_health({k: report[k] for k in BASE_HEALTH_KEYS})
+        if outcome == "rejected" and resp is not None:
+            log.warning("health: HTTP %s (%s)", resp.status, _error_code(resp))
+        return outcome
+
+    def _post_health(self, report: dict[str, Any]) -> tuple[str, HttpResponse | None]:
+        body = json.dumps(report, separators=(",", ":")).encode()
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self._token}",
@@ -341,12 +391,9 @@ class Uploader:
             resp = self.transport.post(HEALTH_PATH, body, headers)
         except TransportError as exc:
             self.board.network(exc.network, None if exc.network == "online" else exc.reason)
-            return "transport_error"
+            return "transport_error", None
         self._link_back()
-        if resp.status == 200:
-            return "ok"
-        log.warning("health: HTTP %s (%s)", resp.status, _error_code(resp))
-        return "rejected"
+        return ("ok" if resp.status == 200 else "rejected"), resp
 
     def _link_back(self) -> None:
         """We reached the backend host: end a could-not-connect pause."""

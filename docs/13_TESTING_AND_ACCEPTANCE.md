@@ -109,6 +109,8 @@ Measure detours, GPS outages, and unusual delays separately. Uncertainty ranges 
 
 Track observed capture-to-server delay, current position age, reconnect recovery time, upload retry count, queue growth, memory use, CPU temperature, disk growth, restarts, and notification job age. With a 2GB Pi, test the actual browser and background-service combination over the intended operating duration.
 
+Where to read them: the Pi's health (`/health`, driver screen D21) and every heartbeat carry upload failures in a row, retries since the device software started, the last error class, service memory, memory available, CPU temperature and database size (docs/08 §7); a value the Pi cannot read is `null` ("not available on this device"). Staff Diagnostics shows the latest heartbeat's values per device with their age, queue depth and oldest pending item, restarts (as a new `bootId`), and push job age: the oldest job still waiting to send and 24 h counts by state. Delay and reconnect time still come from the drill tools and the backend's receipt times.
+
 Use realistic fixture volume and viewer counts before deciding capacity. The proposed five-second observation cadence is not a latency guarantee or a cellular bill estimate. Distinguish application payload from protocol overhead, map traffic, replay, updates, and per-viewer downloads.
 
 Avoid invented universal pass limits. Agree on pilot targets from the actual service requirements, record them before the test, and report measured values with conditions. Functional invariants such as no unauthorized disclosure or no duplicate logical start remain strict gates.

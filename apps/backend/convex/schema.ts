@@ -149,6 +149,20 @@ export default defineSchema({
     lastValidFixAtMs: v.union(v.number(), v.null()),
     pendingCount: v.number(),
     oldestPendingCapturedAtMs: v.union(v.number(), v.null()),
+    /**
+     * Receipt of the report these values came from. `receivedAtMs` also moves
+     * on a delayed report that replaces nothing. Absent on rows from before.
+     */
+    statusReceivedAtMs: v.optional(v.number()),
+    // Measurements (docs/13 §10); absent when the Pi's software predates them,
+    // null when the Pi cannot measure them. Staff diagnostics only.
+    uploadConsecutiveFailures: v.optional(v.number()),
+    uploadRetriesSinceStart: v.optional(v.number()),
+    lastUploadErrorClass: v.optional(v.union(v.string(), v.null())),
+    processRssBytes: v.optional(v.union(v.number(), v.null())),
+    memAvailableBytes: v.optional(v.union(v.number(), v.null())),
+    cpuTemperatureC: v.optional(v.union(v.number(), v.null())),
+    databaseBytes: v.optional(v.union(v.number(), v.null())),
   }).index("by_device", ["deviceId"]),
 
   /** Compact current position per run; what clients subscribe to. */

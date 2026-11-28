@@ -1,6 +1,7 @@
 import { convexTest } from "convex-test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "./_generated/api";
+import type { Doc } from "./_generated/dataModel";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -120,5 +121,120 @@ describe("fleet.diagnostics", () => {
       status: "access_unavailable",
       reason: "not_permitted",
     });
+  });
+});
+
+describe("fleet.diagnostics measurements", () => {
+  it("a heartbeat without measurements (older Pi software) reads as not reported, never zeros", async () => {
+    const { t } = await setup();
+    const result = await t.withIdentity({ tokenIdentifier: STAFF }).query(api.fleet.diagnostics, {});
+    if (result.status !== "ready") throw new Error(result.status);
+    expect(result.devices.map((d) => d.metrics)).toEqual([null, null]);
+  });
+});
+
+describe("fleet.diagnostics notification job age", () => {
+  const HOUR = 60 * 60 * 1000;
+  const NOW = 1_795_700_000_000;
+
+  afterEach(() => vi.useRealTimers());
+
+  async function withJobs(jobs: { agoMs: number; state: Doc<"notificationJobs">["state"] }[]) {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW - 30 * HOUR);
+    const s = await setup();
+    const base = await s.t.run(async (ctx) => {
+      const userId = await ctx.db.insert("users", { tokenIdentifier: "test|family", role: "family", displayName: "Sam" });
+      const routeVersionId = await ctx.db.insert("routeVersions", { label: "Route 17", path: [] });
+      const stopId = await ctx.db.insert("stops", { routeVersionId, label: "Oak & Pine", latitude: 34.1, longitude: -83.9 });
+      const studentId = await ctx.db.insert("students", { displayName: "Sam Example", userId });
+      const assignmentId = await ctx.db.insert("assignments", { studentId, routeVersionId, stopId, status: "approved" });
+      const pushTokenId = await ctx.db.insert("pushTokens", {
+        userId,
+        installationId: "install-1",
+        token: "fake-token",
+        environment: "sandbox",
+        permission: "authorized",
+        active: true,
+        updatedAtMs: NOW,
+      });
+      return { userId, stopId, assignmentId, pushTokenId };
+    });
+    for (const [i, job] of jobs.entries()) {
+      vi.setSystemTime(NOW - job.agoMs); // _creationTime is the transaction's time
+      await s.t.run(async (ctx) => {
+        const { userId, stopId, assignmentId, pushTokenId } = base;
+        const alertId = await ctx.db.insert("alerts", {
+          logicalKey: `k${i}`,
+          type: "approaching",
+          userId,
+          assignmentId,
+          runId: s.activeRun,
+          stopId,
+          createdAtMs: NOW - job.agoMs,
+          predictedArrivalAtMs: NOW,
+          predictionGeneratedAtMs: NOW - job.agoMs,
+          sourceEventId: `e${i}`,
+        });
+        await ctx.db.insert("notificationJobs", {
+          alertId,
+          userId,
+          runId: s.activeRun,
+          pushTokenId,
+          state: job.state,
+          attempts: 0,
+          nextAttemptAtMs: NOW,
+          expiresAtMs: NOW + HOUR,
+          updatedAtMs: NOW,
+        });
+      });
+    }
+    vi.setSystemTime(NOW);
+    return s;
+  }
+
+  it("reports the oldest waiting job and 24 h counts by state", async () => {
+    const { t } = await withJobs([
+      { agoMs: 26 * HOUR, state: "provider_accepted" }, // outside the window
+      { agoMs: 3 * HOUR, state: "retryable_failure" }, // oldest waiting
+      { agoMs: 2 * HOUR, state: "in_progress" }, // sending, not waiting
+      { agoMs: HOUR, state: "pending" },
+      { agoMs: HOUR, state: "provider_accepted" },
+      { agoMs: 10 * 60_000, state: "permanent_failure" },
+    ]);
+    const result = await t.withIdentity({ tokenIdentifier: STAFF }).query(api.fleet.diagnostics, {});
+    if (result.status !== "ready") throw new Error(result.status);
+    expect(result.notifications).toEqual({
+      oldestWaitingCreatedAtMs: NOW - 3 * HOUR,
+      waitingCount: 2,
+      windowMs: 24 * HOUR,
+      countsByState: {
+        pending: 1,
+        in_progress: 1,
+        provider_accepted: 1,
+        retryable_failure: 1,
+        permanent_failure: 1,
+        expired: 0,
+        cancelled: 0,
+      },
+      truncated: false,
+    });
+    const text = JSON.stringify(result.notifications);
+    expect(text).not.toContain("fake-token");
+  });
+
+  it("a stuck job older than the window still sets the oldest waiting age", async () => {
+    const { t } = await withJobs([{ agoMs: 27 * HOUR, state: "pending" }]);
+    const result = await t.withIdentity({ tokenIdentifier: STAFF }).query(api.fleet.diagnostics, {});
+    if (result.status !== "ready") throw new Error(result.status);
+    expect(result.notifications.oldestWaitingCreatedAtMs).toBe(NOW - 27 * HOUR);
+    expect(result.notifications.countsByState.pending).toBe(0); // created before the window
+  });
+
+  it("with no jobs, nothing is waiting", async () => {
+    const { t } = await withJobs([]);
+    const result = await t.withIdentity({ tokenIdentifier: STAFF }).query(api.fleet.diagnostics, {});
+    if (result.status !== "ready") throw new Error(result.status);
+    expect(result.notifications).toMatchObject({ oldestWaitingCreatedAtMs: null, waitingCount: 0, truncated: false });
   });
 });

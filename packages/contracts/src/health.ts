@@ -39,7 +39,41 @@ export interface DeviceHealthReport {
   pendingCount: number;
   /** Capture time of the oldest unacknowledged row, or `null`. */
   oldestPendingCapturedAtMs: number | null;
+
+  // Measurements for staff diagnostics (docs/13 §10). Optional: a Pi from
+  // before them omits every one. `null` means the Pi cannot measure it.
+  /** Telemetry requests that failed in a row; 0 after a success. */
+  uploadConsecutiveFailures?: number;
+  /** Failed telemetry requests since the device software started. */
+  uploadRetriesSinceStart?: number;
+  /** Class of the last failure (an exception name or `http_NNN`), kept after recovery. */
+  lastUploadErrorClass?: string | null;
+  /** Resident memory of the device service. */
+  processRssBytes?: number | null;
+  /** Memory the Pi's kernel reports as available. */
+  memAvailableBytes?: number | null;
+  /** SoC temperature, °C, one decimal. */
+  cpuTemperatureC?: number | null;
+  /** SQLite database plus write-ahead log. */
+  databaseBytes?: number | null;
 }
+
+/** The measurement keys, all optional (an older Pi sends none). */
+export const DEVICE_HEALTH_METRIC_KEYS = [
+  "uploadConsecutiveFailures",
+  "uploadRetriesSinceStart",
+  "lastUploadErrorClass",
+  "processRssBytes",
+  "memAvailableBytes",
+  "cpuTemperatureC",
+  "databaseBytes",
+] as const;
+
+/** Bounds a temperature must fall in; anything else is a broken sensor. */
+export const MIN_CPU_TEMPERATURE_C = -40;
+export const MAX_CPU_TEMPERATURE_C = 150;
+/** An exception class name or `http_NNN`: never a message, host or path. */
+const ERROR_CLASS = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
 
 /** HTTP 200 body. The backend assigns `receivedAtMs`. */
 export interface DeviceHealthAccepted {
@@ -68,7 +102,14 @@ const KEYS = new Set([
   "lastValidFixAtMs",
   "pendingCount",
   "oldestPendingCapturedAtMs",
+  ...DEVICE_HEALTH_METRIC_KEYS,
 ]);
+const isCount = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
+const isTemperature = (v: unknown) =>
+  v === null ||
+  (typeof v === "number" && Number.isFinite(v) && v >= MIN_CPU_TEMPERATURE_C && v <= MAX_CPU_TEMPERATURE_C);
+const absentOr = (r: Record<string, unknown>, key: string, ok: (v: unknown) => boolean) =>
+  !(key in r) || ok(r[key]);
 
 /**
  * Validates a health report. `nowMs` is the receiver's clock; a report from
@@ -95,5 +136,15 @@ export function validateDeviceHealthReport(input: unknown, nowMs: number): Devic
     return invalid("Timestamps must be epoch milliseconds or null.");
   }
   if (!isMs(r.pendingCount)) return invalid("pendingCount must be a non-negative integer.");
+  for (const key of ["uploadConsecutiveFailures", "uploadRetriesSinceStart"]) {
+    if (!absentOr(r, key, isCount)) return invalid(`${key} must be a non-negative integer.`);
+  }
+  for (const key of ["processRssBytes", "memAvailableBytes", "databaseBytes"]) {
+    if (!absentOr(r, key, (v) => v === null || isCount(v))) return invalid(`${key} must be bytes or null.`);
+  }
+  if (!absentOr(r, "lastUploadErrorClass", (v) => v === null || (typeof v === "string" && ERROR_CLASS.test(v)))) {
+    return invalid("lastUploadErrorClass must be an error class name or null.");
+  }
+  if (!absentOr(r, "cpuTemperatureC", isTemperature)) return invalid("cpuTemperatureC must be a plausible temperature or null.");
   return { ok: true, report: r as unknown as DeviceHealthReport };
 }

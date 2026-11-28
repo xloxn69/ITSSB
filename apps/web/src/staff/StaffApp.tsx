@@ -22,8 +22,10 @@ import {
   contactStatus,
   DIRECTION_LABEL,
   dateTime,
+  deviceMetricFacts,
   driversFileEntry,
   maintenanceWindow,
+  notificationJobFacts,
   runActionsAvailable,
   serviceDateLabel,
   sweepSummary,
@@ -785,10 +787,10 @@ function DiagnosticsPage({ source }: { source: StaffSource }) {
     <section className="card stack">
       <h1>Diagnostics</h1>
       <p className="muted small">
-        Run IDs, contact ages and versions for support. No positions, addresses or credentials are shown here.
+        Run IDs, contact ages, versions and device measurements for support. No positions, addresses or credentials are shown here.
       </p>
       <Loaded state={state}>
-        {({ deployment, retention, devices, serverNowMs }) => (
+        {({ deployment, retention, devices, notifications, serverNowMs }) => (
           <div className="stack">
             <dl className="facts">
               <dt>Backend release</dt>
@@ -805,6 +807,13 @@ function DiagnosticsPage({ source }: { source: StaffSource }) {
                   ? "Nothing deleted yet"
                   : `${dateTime(retention.lastSweepAtMs)}: ${sweepSummary(retention.lastSweepDeleted) ?? "details unreadable"}`}
               </dd>
+            </dl>
+            <h2>Notifications</h2>
+            <dl className="facts">
+              {notificationJobFacts(notifications, serverNowMs, receivedAtWallMs, now).flatMap(([k, v]) => [
+                <dt key={`${k}-k`}>{k}</dt>,
+                <dd key={`${k}-v`}>{v}</dd>,
+              ])}
             </dl>
             {devices.length === 0 ? (
               <Empty text="No devices are enrolled yet." />
@@ -849,6 +858,10 @@ function DiagnosticsPage({ source }: { source: StaffSource }) {
                             "No runs"
                           )}
                         </dd>
+                        {deviceMetricFacts(d.metrics, serverNowMs, receivedAtWallMs, now, d.softwareVersion !== null).flatMap(([k, v]) => [
+                          <dt key={`${k}-k`}>{k}</dt>,
+                          <dd key={`${k}-v`}>{v}</dd>,
+                        ])}
                       </dl>
                     </article>
                   );
@@ -856,7 +869,8 @@ function DiagnosticsPage({ source }: { source: StaffSource }) {
               </div>
             )}
             <p className="muted small">
-              Software and upload queue come from each device&apos;s latest heartbeat; read them with its contact age.
+              Software, upload queue and measurements come from each device&apos;s latest heartbeat; read them with
+              their age. Upload retries count since the device software last started.
             </p>
           </div>
         )}

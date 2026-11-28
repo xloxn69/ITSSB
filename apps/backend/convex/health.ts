@@ -1,4 +1,9 @@
-import { type DeviceHealthReport, POSITION_STALE_AFTER_MS, validateDeviceHealthReport } from "@itssb/contracts";
+import {
+  DEVICE_HEALTH_METRIC_KEYS,
+  type DeviceHealthReport,
+  POSITION_STALE_AFTER_MS,
+  validateDeviceHealthReport,
+} from "@itssb/contracts";
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -50,6 +55,12 @@ export const record = internalMutation({
       lastValidFixAtMs: r.lastValidFixAtMs,
       pendingCount: r.pendingCount,
       oldestPendingCapturedAtMs: r.oldestPendingCapturedAtMs,
+      statusReceivedAtMs: nowMs,
+      // Only what this report carried: an older Pi's report clears them, so
+      // staff never read a previous boot's measurements as current.
+      ...(Object.fromEntries(
+        DEVICE_HEALTH_METRIC_KEYS.filter((k) => r[k] !== undefined).map((k) => [k, r[k]]),
+      ) as Partial<Pick<Doc<"deviceHealth">, (typeof DEVICE_HEALTH_METRIC_KEYS)[number]>>),
     };
     if (existing) await ctx.db.replace(existing._id, row);
     else await ctx.db.insert("deviceHealth", row);

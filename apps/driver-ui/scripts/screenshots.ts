@@ -33,6 +33,8 @@ const STATES = [
   "review-awaiting",
   "review-approved",
   "review-rejected",
+  "diagnostics-measured",
+  "diagnostics-unavailable",
 ];
 
 const outDir = process.argv[2] ?? "build/screenshots";
