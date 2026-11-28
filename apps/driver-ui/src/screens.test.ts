@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ACTIONS, type ActionId, actionAvailability, editBlocked, selectScreen, unlockOfferedWhileStopped } from "./screens.js";
+import { ACTIONS, type ActionId, actionAvailability, editBlocked, selectScreen, unlockOfferedWhileStopped, unlockSubmitAllowed } from "./screens.js";
 import type { CapabilitiesPart, DeviceSnapshot } from "./snapshot.js";
 import { observed, snapshot } from "./testing.js";
 
@@ -115,6 +115,12 @@ describe("moving-view lockout", () => {
     expect(unlockOfferedWhileStopped(at(4_000, 1_001))).toBe(false);
     expect(selectScreen(at(4_000, 1_001), "D04")).toBe("D13");
     expect(unlockOfferedWhileStopped(at(5_001))).toBe(false);
+    // The same rule at the moment the PIN is submitted (render and tap differ).
+    expect(unlockSubmitAllowed(at(4_000, 1_000))).toBe(true);
+    expect(unlockSubmitAllowed(at(4_000, 1_001))).toBe(false);
+    // No run, or parked: unlocking is unaffected.
+    expect(unlockSubmitAllowed(observed(ready({ session: locked, motion: { state: "unknown", parked: false } })))).toBe(true);
+    expect(unlockSubmitAllowed(observed(ready({ run: activeRun, session: locked })))).toBe(true);
     // No valid fix at all: never.
     expect(unlockOfferedWhileStopped(at(400, 0, { ...fix(400), status: "no_fix" as const }))).toBe(false);
   });

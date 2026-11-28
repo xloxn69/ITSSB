@@ -221,6 +221,28 @@ def test_unlock_refused_while_moving(env):
     )
 
 
+def test_unlock_during_a_run_needs_a_fresh_stopped_fix(env):
+    db = Database(env.db_path)
+    db.save_run("demo_run_001", "active")
+    db.close()
+    k = Kiosk(env.api)
+    env.gps(0.0)
+    env.clock.t += 10  # the stopped fix goes stale: motion unknown
+    assert (
+        k.post("/api/session/unlock", {"driverId": "drv_demo", "pin": PIN}, expect=409)["error"]
+        == "MOTION_UNKNOWN"
+    )
+    env.gps(0.0)  # a fresh stopped fix
+    k.post("/api/session/unlock", {"driverId": "drv_demo", "pin": PIN})
+    assert k.get("/api/status")["session"]["unlocked"] is True
+
+
+def test_unlock_without_a_run_is_allowed_with_no_fix(env):
+    k = Kiosk(env.api)  # indoors, before any run: no fix at all
+    k.post("/api/session/unlock", {"driverId": "drv_demo", "pin": PIN})
+    assert k.get("/api/status")["session"]["unlocked"] is True
+
+
 def test_reload_keeps_the_session_and_lock_ends_it(env):
     k = unlocked_parked(env)
     r = env.api.handle("GET", "/", {"Cookie": k.cookie}, b"")

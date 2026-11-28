@@ -374,8 +374,20 @@ class DriverApi:
 
     def _post(self, path: str, session: KioskSession, data: dict[str, Any]) -> Response:
         if path == "/api/session/unlock":
-            if self.judge.state() == "moving":
+            state = self.judge.state()
+            if state == "moving":
                 return _error(HTTPStatus.CONFLICT, "MOVING", "Unlock when the bus is stopped.")
+            # During a run, unknown motion (no fix, or a stale one) is not a
+            # stop: the bus may be moving. Before a run, unknown is allowed so
+            # a driver can unlock indoors without a fix.
+            if state != "stopped":
+                with self._db() as db:
+                    if db.active_run_id() is not None:
+                        return _error(
+                            HTTPStatus.CONFLICT,
+                            "MOTION_UNKNOWN",
+                            "Unlock when the bus is stopped and GPS has a current fix.",
+                        )
             result = self.sessions.unlock(session, data.get("driverId"), data.get("pin"))
             if result == UnlockResult.OK:
                 return _json(HTTPStatus.OK, {"driver": self._driver_public(session)})

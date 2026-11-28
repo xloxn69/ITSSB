@@ -15,7 +15,7 @@ import {
   type UiState,
   unlockView,
 } from "./flows.js";
-import { type ActionId, parked as parkedNow, STUDENT_SCREENS, type ScreenId, selectScreen } from "./screens.js";
+import { type ActionId, parked as parkedNow, STUDENT_SCREENS, type ScreenId, selectScreen, unlockSubmitAllowed } from "./screens.js";
 import type { DeviceSnapshot, DraftSummary, Observed } from "./snapshot.js";
 import { correctionView, detailView, emptyStudentUi, qrView, rosterView, type StudentController } from "./studentViews.js";
 import { type AttendanceStatus, type QrPurpose, type RosterAction, rosterRows, studentChangeLines, syncLabel } from "./students.js";
@@ -208,6 +208,10 @@ const ctl: Controller & Nav = {
     const pin = ui.pin;
     ui.pin = ""; // never keep the PIN around after one attempt
     if (!driverId) return;
+    if (!unlockSubmitAllowed(observed())) {
+      ctl.go(null); // the stop is no longer current: back to the driving view, PIN dropped
+      return;
+    }
     void run(null, () => api.unlock(driverId, pin)).then(async (ok) => {
       await fetchSession().catch(() => null);
       if (ok) ctl.go(null);

@@ -88,6 +88,16 @@ export function unlockOfferedWhileStopped(o: Observed): boolean {
   );
 }
 
+/**
+ * Checked again when the PIN is submitted, not only when the screen was
+ * drawn: freshness can lapse between render and tap. Outside an unparked
+ * run, unlocking is allowed as before (the device enforces the same rule).
+ */
+export function unlockSubmitAllowed(o: Observed): boolean {
+  if (!runActive(o) || parked(o)) return true;
+  return unlockOfferedWhileStopped(o);
+}
+
 /** The device's own GPS freshness limit (status.py GPS_FRESH_S). */
 export const UNLOCK_FIX_FRESH_MS = 5_000;
 
