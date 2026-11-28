@@ -446,13 +446,17 @@ async function loadStop(): Promise<void> {
       stop = null; // refused or nothing cached: show no names at all
       stopError = err.message;
     } else {
-      stopError = "No answer from the device. This is what the screen last received.";
+      stop = null; // a stop from an earlier answer may no longer be where the bus is
+      stopError = "No answer from the device, so the screen can't say which stop the bus is near.";
     }
   }
 }
 
 function openStop(): void {
   requested = "D14";
+  // Never show the last stop while asking about this one: the bus may have moved.
+  stop = null;
+  stopAt = null;
   stopError = null;
   void loadStop().then(render);
   render();
@@ -633,6 +637,11 @@ function render(): void {
     // A forced change (the bus moved, the service restarted) drops half-typed input.
     if (DETAIL_SCREENS.has(screen) && !DETAIL_SCREENS.has(shown)) void refreshDetail().then(render);
     if (screen === "D04") void fetchSession().then(render, () => undefined);
+    // Leaving D14 drops its answer: the next visit may be at another stop.
+    if (screen !== "D14") {
+      stop = null;
+      stopAt = null;
+    }
     // Leaving the QR screen (or being moved off it) drops the code from memory.
     if (screen !== "D15" && screen !== "D16") {
       sui.qr = null;

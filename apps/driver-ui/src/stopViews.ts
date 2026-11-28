@@ -94,6 +94,7 @@ export function stopView(
     "main",
     { class: "page" },
     h("div", { class: "row" }, back, h("h1", {}, stopHeading(stop))),
+    error ? h("div", { class: "banner lv-problem" }, error) : null,
     h("p", { class: "muted" }, stopExplain(stop)),
     stop.stale
       ? h("div", { class: "banner lv-warn" }, `${stop.staleReason ?? "This roster may be out of date."} Received ${formatAge(age)}.`)
