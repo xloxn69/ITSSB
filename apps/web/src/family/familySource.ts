@@ -15,7 +15,7 @@ export type FamilyQueryName =
   | "tracking:myAssignments"
   | "checkIns:forAssignment";
 
-export type FamilyMutationName = "enrollment:request" | "guardianLinks:request" | "checkIns:record";
+export type FamilyMutationName = "enrollment:request" | "guardianLinks:request" | "checkIns:record" | "staffInvitations:redeem";
 
 export type FamilyArgs = Record<string, string | null>;
 

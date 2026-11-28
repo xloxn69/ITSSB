@@ -2,7 +2,7 @@ import type { ConvexReactClient } from "convex/react";
 import { makeFunctionReference } from "convex/server";
 import type { LiveClient } from "../live/convexSource";
 import { mapError } from "../live/convexSource";
-import type { StaffSource } from "./source";
+import type { StaffArgs, StaffSource } from "./source";
 
 /** Staff functions over the signed-in Convex client, referenced by name. */
 export function convexStaffSource(client: LiveClient & Pick<ConvexReactClient, "action">): StaffSource {
@@ -28,10 +28,10 @@ export function convexStaffSource(client: LiveClient & Pick<ConvexReactClient, "
       };
     },
     mutate(name, args) {
-      return client.mutation(makeFunctionReference<"mutation", Record<string, string | number>, unknown>(name), args);
+      return client.mutation(makeFunctionReference<"mutation", StaffArgs, unknown>(name), args);
     },
     act(name, args) {
-      return client.action(makeFunctionReference<"action", Record<string, string | number>, unknown>(name), args);
+      return client.action(makeFunctionReference<"action", StaffArgs, unknown>(name), args);
     },
   };
 }

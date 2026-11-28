@@ -1,9 +1,12 @@
 import { FIXTURE_SCENARIOS } from "./fixtureSource";
 
 /** Every fictional screen the screenshot script captures. */
-/** Optional steps run before the capture: fill inputs, check boxes, then click. */
+/** Optional steps run before the capture: open, fill inputs, select options, check boxes, then click. */
 export interface ScreenSteps {
+  /** Clicked first, for example to open a collapsed section. */
+  open?: string[];
   fill?: [selector: string, value: string][];
+  select?: [selector: string, value: string][];
   check?: string[];
   click?: string;
 }
@@ -62,6 +65,21 @@ export const FIXTURE_SCREENS: {
     ready: "main input",
     steps: { fill: [["main input >> nth=1", "Jordan Guardian"]], click: "button[type=submit]" },
     after: "text=Request sent",
+  },
+  { name: "family-join-staff", path: "?fixture=family-flows#/join-staff", ready: "main input" },
+  {
+    name: "family-join-staff-joined",
+    path: "?fixture=family-flows#/join-staff",
+    ready: "main input",
+    steps: { fill: [["main input", "JMST-7K2M-9QXR-4TVW-8ZPN"]], click: "button[type=submit]" },
+    after: "text=staff team",
+  },
+  {
+    name: "family-join-staff-refused",
+    path: "?fixture=family-flows#/join-staff",
+    ready: "main input",
+    steps: { fill: [["main input", "BADX-7K2M-9QXR-4TVW-8ZPN"]], click: "button[type=submit]" },
+    after: "text=can't be used",
   },
   { name: "family-checkin", path: "?fixture=family-flows#/checkin", ready: "main section h2" },
   {
@@ -130,6 +148,43 @@ export const FIXTURE_SCREENS: {
     after: ".run-actions [role=status]",
   },
   { name: "staff-drivers", path: "?fixture=staff#/staff/drivers", ready: "main li" },
+  {
+    name: "staff-driver-add",
+    path: "?fixture=staff#/staff/drivers",
+    ready: "main li",
+    click: [".add-driver summary"],
+    after: ".add-driver form",
+  },
+  {
+    name: "staff-driver-grant-form",
+    path: "?fixture=staff#/staff/drivers",
+    ready: "main li",
+    click: [".driver .issue-grant summary >> nth=0"],
+    after: ".issue-grant fieldset",
+  },
+  {
+    name: "staff-driver-grant-issued",
+    path: "?fixture=staff#/staff/drivers",
+    ready: "main li",
+    steps: {
+      open: [".driver .issue-grant summary >> nth=1"],
+      select: [[".issue-grant[open] select >> nth=0", "demo_device_003"]],
+      check: [".issue-grant[open] input[type=checkbox] >> nth=0"],
+      click: ".issue-grant[open] button[type=submit]",
+    },
+    after: ".secret-panel",
+  },
+  { name: "staff-empty-drivers", path: "?fixture=staff-empty#/staff/drivers", ready: "main section p" },
+  { name: "staff-team", path: "?fixture=staff#/staff/team", ready: "table" },
+  {
+    name: "staff-team-code",
+    path: "?fixture=staff#/staff/team",
+    ready: "table",
+    steps: { fill: [["#invite-staff ~ form input", "Jordan Staff"]], click: "#invite-staff ~ form button[type=submit]" },
+    after: ".code-display",
+  },
+  { name: "staff-empty-team", path: "?fixture=staff-empty#/staff/team", ready: "main section p" },
+  { name: "staff-denied-team", path: "?fixture=staff-denied#/staff/team", ready: "main .message h2" },
   { name: "staff-empty-routes", path: "?fixture=staff-empty#/staff/routes", ready: "main p.muted + p, main section p" },
   { name: "staff-empty-review", path: "?fixture=staff-empty#/staff/review", ready: "main section p" },
   { name: "staff-empty-devices", path: "?fixture=staff-empty#/staff/devices", ready: "main section p" },

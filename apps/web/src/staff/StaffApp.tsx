@@ -1,5 +1,9 @@
 import type {
   DeviceSummary,
+  DriverGrantSummary,
+  DriverSummary,
+  GrantableRouteVersion,
+  ListDriverGrantsResult,
   DiagnosticsResult,
   ListMaintenanceResult,
   ListServiceDaysResult,
@@ -18,12 +22,21 @@ import {
   contactStatus,
   DIRECTION_LABEL,
   dateTime,
+  driversFileEntry,
   maintenanceWindow,
   runActionsAvailable,
   serviceDateLabel,
   sweepSummary,
 } from "./format";
-import { type CredentialOutcome, credentialOutcome, type StaffActionName, type StaffSource } from "./source";
+import {
+  type CredentialOutcome,
+  credentialOutcome,
+  type GrantOutcome,
+  grantOutcome,
+  type StaffActionName,
+  type StaffSource,
+} from "./source";
+import { StaffTeamPage } from "./StaffTeamPage";
 import { Empty, Loaded, Outcome, type Ready, useMutation, useNow, useStaffQuery } from "./ui";
 
 /** Staff console (docs/12 §3–4). The server checks the staff role on every call. */
@@ -37,6 +50,7 @@ export function StaffApp({ source }: { source: StaffSource }) {
     ["devices", "Buses & devices"],
     ["calendar", "Service calendar"],
     ["drivers", "Drivers"],
+    ["team", "Staff"],
     ["diagnostics", "Diagnostics"],
     ["enrollment", "Enrollment"],
     ["guardians", "Guardian links"],
@@ -60,6 +74,7 @@ export function StaffApp({ source }: { source: StaffSource }) {
       {page === "devices" && <DevicesPage source={source} />}
       {page === "calendar" && <CalendarPage source={source} />}
       {page === "drivers" && <DriversPage source={source} />}
+      {page === "team" && <StaffTeamPage source={source} />}
       {page === "diagnostics" && <DiagnosticsPage source={source} />}
       {page === "enrollment" && <EnrollmentPage source={source} />}
       {page === "guardians" && <GuardianLinksPage source={source} />}
@@ -492,28 +507,264 @@ function DeviceRow({
   );
 }
 
-// MARK: Drivers
+// MARK: Drivers (docs/12 §3)
+
+const GRANT_HOURS = ["4", "8", "12", "16"] as const;
 
 function DriversPage({ source }: { source: StaffSource }) {
   const { state } = useStaffQuery<Ready<ListDriversResult>>(source, "fleet:listDrivers");
+  const grants = useStaffQuery<Ready<ListDriverGrantsResult>>(source, "driverGrants:listForStaff");
+  const devices = useStaffQuery<Ready<ListDevicesResult>>(source, "fleet:listDevices");
   return (
     <section className="card stack">
       <h1>Drivers</h1>
-      <p className="muted small">People with a driver account. Driving permission comes from a driver grant on the bus.</p>
+      <p className="muted small">
+        Drivers unlock the bus screen with a PIN. Driving permission comes from a driver grant: one driver, one bus, chosen
+        routes, for one school day at most.
+      </p>
+      {state.kind === "ready" && <AddDriver source={source} />}
       <Loaded state={state}>
         {({ drivers }) =>
           drivers.length === 0 ? (
-            <Empty text="No driver accounts yet." />
+            <Empty text="No drivers yet. Add one above." />
           ) : (
-            <ul style={{ margin: 0, paddingLeft: "var(--space-xl)" }}>
-              {drivers.map((d) => (
-                <li key={d.userId}>{d.displayName}</li>
-              ))}
-            </ul>
+            <Loaded state={grants.state}>
+              {(g) => (
+                <div className="stack">
+                  {drivers.map((d) => (
+                    <DriverRow
+                      key={d.userId}
+                      source={source}
+                      driver={d}
+                      grants={g.grants.filter((x) => x.driverUserId === d.userId)}
+                      routeVersions={g.routeVersions}
+                      devices={devices.state.kind === "ready" ? devices.state.value.devices.filter((x) => !x.revoked) : []}
+                    />
+                  ))}
+                </div>
+              )}
+            </Loaded>
           )
         }
       </Loaded>
     </section>
+  );
+}
+
+function AddDriver({ source }: { source: StaffSource }) {
+  const [name, setName] = useState("");
+  const { busy, outcome, run } = useMutation(source);
+  return (
+    <details className="card stack add-driver" style={{ gap: "var(--space-sm)" }}>
+      <summary>
+        <strong>Add a driver</strong>
+      </summary>
+      <p className="muted small">Drivers don&apos;t need an app account. Set their PIN on the bus when you install a grant.</p>
+      <form
+        className="row"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void run("fleet:addDriver", { displayName: name }, "Driver added. Issue a grant to let them drive.");
+        }}
+      >
+        <label style={{ flex: "1 1 12rem" }}>
+          Name
+          <input value={name} maxLength={80} onChange={(e) => setName(e.target.value)} placeholder="Dana Driver" />
+        </label>
+        <button type="submit" className="btn btn-primary" disabled={busy} style={{ alignSelf: "flex-end" }}>
+          Add driver
+        </button>
+      </form>
+      <Outcome outcome={outcome} />
+    </details>
+  );
+}
+
+function DriverRow({
+  source,
+  driver,
+  grants,
+  routeVersions,
+  devices,
+}: {
+  source: StaffSource;
+  driver: DriverSummary;
+  grants: DriverGrantSummary[];
+  routeVersions: GrantableRouteVersion[];
+  devices: DeviceSummary[];
+}) {
+  const revoke = useMutation(source);
+  return (
+    <article className="card stack driver" style={{ gap: "var(--space-sm)" }}>
+      <h2>{driver.displayName}</h2>
+      {grants.length === 0 ? (
+        <p className="muted small">No active grant: this driver can&apos;t start a run.</p>
+      ) : (
+        <ul className="stack" style={{ gap: "var(--space-sm)", margin: 0, paddingLeft: "var(--space-lg)" }}>
+          {grants.map((g) => (
+            <li key={g.grantId}>
+              <strong>{g.deviceLabel}</strong>: {g.routeVersions.map((r) => r.label).join(", ")}
+              <span className="muted small">
+                {" "}
+                · until {dateTime(g.expiresAtMs)}
+                {g.issuedByName ? ` · issued by ${g.issuedByName}` : ""}
+              </span>{" "}
+              <button
+                type="button"
+                className="btn"
+                disabled={revoke.busy}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      `Revoke ${driver.displayName}'s grant on ${g.deviceLabel}? It stops working now. A run it started can't be ended from the bus after this: cancel that run under Buses & devices.`,
+                    )
+                  ) {
+                    void revoke.run("driverGrants:revokeForStaff", { grantId: g.grantId }, "Grant revoked.");
+                  }
+                }}
+              >
+                Revoke grant
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <Outcome outcome={revoke.outcome} />
+      <IssueGrant source={source} driver={driver} routeVersions={routeVersions} devices={devices} />
+    </article>
+  );
+}
+
+function IssueGrant({
+  source,
+  driver,
+  routeVersions,
+  devices,
+}: {
+  source: StaffSource;
+  driver: DriverSummary;
+  routeVersions: GrantableRouteVersion[];
+  devices: DeviceSummary[];
+}) {
+  const [deviceId, setDeviceId] = useState("");
+  const [chosen, setChosen] = useState<string[]>([]);
+  const [hours, setHours] = useState<string>("12");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<GrantOutcome | null>(null);
+  async function issue() {
+    setBusy(true);
+    setResult(null);
+    try {
+      setResult(
+        grantOutcome(
+          await source.act("driverGrants:issueForDriver", {
+            driverUserId: driver.userId,
+            deviceId,
+            routeVersionIds: chosen,
+            ttlMs: Number(hours) * 60 * 60 * 1000,
+          }),
+        ),
+      );
+    } catch {
+      setResult({ kind: "failed", message: "No answer from the server. Reload to see whether a grant was issued." });
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <details className="issue-grant">
+      <summary>Issue a grant</summary>
+      <form
+        className="stack"
+        style={{ gap: "var(--space-sm)", paddingTop: "var(--space-sm)" }}
+        onSubmit={(e) => {
+          e.preventDefault();
+          void issue();
+        }}
+      >
+        <div className="row">
+          <label style={{ flex: "1 1 10rem" }}>
+            Bus device
+            <select value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
+              <option value="">Choose a device</option>
+              {devices.map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label}
+                  {d.busLabel ? ` (${d.busLabel})` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={{ flex: "0 1 8rem" }}>
+            Valid for
+            <select value={hours} onChange={(e) => setHours(e.target.value)}>
+              {GRANT_HOURS.map((h) => (
+                <option key={h} value={h}>
+                  {h} hours
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <fieldset className="stack" style={{ gap: "var(--space-xs)" }}>
+          <legend>Routes this driver may run</legend>
+          {routeVersions.length === 0 ? (
+            <p className="muted small">No approved routes yet. Approve one in Route review.</p>
+          ) : (
+            routeVersions.map((r) => (
+              <label key={r.routeVersionId} className="row" style={{ gap: "var(--space-xs)" }}>
+                <input
+                  type="checkbox"
+                  checked={chosen.includes(r.routeVersionId)}
+                  onChange={(e) =>
+                    setChosen((c) => (e.target.checked ? [...c, r.routeVersionId] : c.filter((x) => x !== r.routeVersionId)))
+                  }
+                />
+                {r.label}
+                {r.versionNumber !== null && <span className="muted small"> v{r.versionNumber}</span>}
+              </label>
+            ))
+          )}
+        </fieldset>
+        <button type="submit" className="btn btn-primary" disabled={busy || !deviceId || chosen.length === 0} style={{ alignSelf: "flex-start" }}>
+          Issue grant
+        </button>
+      </form>
+      {result?.kind === "issued" ? (
+        <GrantPanel issued={result} onDone={() => setResult(null)} />
+      ) : (
+        <Outcome outcome={result} />
+      )}
+    </details>
+  );
+}
+
+/**
+ * The one time a grant is visible. It is not stored anywhere in the browser;
+ * dismissing the panel discards it.
+ */
+function GrantPanel({ issued, onDone }: { issued: Extract<GrantOutcome, { kind: "issued" }>; onDone: () => void }) {
+  return (
+    <div className="card stack secret-panel" role="alert" style={{ gap: "var(--space-sm)" }}>
+      <h3>New grant for {issued.driverName}</h3>
+      <p className="small">
+        Shown once. Valid until {dateTime(issued.expiresAtMs)}. On the Pi, make the PIN hash with <code>hash-pin</code>,
+        then put this entry inside <code>{'{"drivers": [ ... ]}'}</code> in <code>/etc/itssb/drivers.json</code>, replacing
+        any older entry for this driver, and restart the device service. Don&apos;t paste it into chat, email, or a
+        screenshot.
+      </p>
+      <textarea
+        className="secret"
+        readOnly
+        rows={9}
+        value={driversFileEntry(issued)}
+        aria-label="Drivers file entry"
+        onFocus={(e) => e.currentTarget.select()}
+      />
+      <button type="button" className="btn" onClick={onDone} style={{ alignSelf: "flex-start" }}>
+        I&apos;ve installed it, hide it
+      </button>
+    </div>
   );
 }
 

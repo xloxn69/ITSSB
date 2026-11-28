@@ -4,6 +4,7 @@ import {
   MAX_ADDRESS_LENGTH,
   MAX_NOTE_LENGTH,
   MAX_STUDENT_NAME_LENGTH,
+  normalizeToken,
   type MyAssignmentsResult,
   type MyEnrollmentRequestsResult,
   type MyGuardianLinkRequestsResult,
@@ -378,6 +379,61 @@ export function LinkPage({ source, initialCode }: { source: FamilySource; initia
         </label>
         <button type="submit" className="btn btn-primary" disabled={busy || !token || !name.trim()}>
           {busy ? "Sending…" : "Send link request"}
+        </button>
+      </section>
+      {view && <Problem view={view} onRetry={submit} />}
+    </form>
+  );
+}
+
+// MARK: Join as staff (docs/12 §1)
+
+/**
+ * Redeems a staff invitation for the signed-in person. Only a sign-in that
+ * isn't linked to any account can join; the server checks the code.
+ */
+export function StaffInvitePage({ source }: { source: FamilySource }) {
+  const [text, setText] = useState("");
+  const { busy, view, send } = useCommand(source);
+  const token = normalizeToken(text);
+  const submit = () => token && void send("staffInvitations:redeem", { token });
+  if (view?.kind === "sent") {
+    return (
+      <Card title="You're on the staff team">
+        <p>Your staff account is ready.</p>
+        <a className="btn btn-primary" href="#/staff/routes">
+          Open the staff console
+        </a>
+      </Card>
+    );
+  }
+  return (
+    <form
+      className="stack"
+      onSubmit={(e) => {
+        e.preventDefault();
+        submit();
+      }}
+    >
+      <header className="stack" style={{ gap: "var(--space-xs)" }}>
+        <h1>Join as staff</h1>
+        <p className="muted">Enter the staff invitation code a staff member gave you. It works once.</p>
+      </header>
+      <section className="card stack">
+        <label>
+          Staff invitation code
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="ABCD-EFGH-JKMN-PQRS-TVWX"
+            autoCapitalize="characters"
+            autoComplete="off"
+            spellCheck={false}
+          />
+          {text.trim() && !token && <span className="error-text small">That doesn't look like a code. Check it and try again.</span>}
+        </label>
+        <button type="submit" className="btn btn-primary" disabled={busy || !token}>
+          {busy ? "Checking…" : "Join as staff"}
         </button>
       </section>
       {view && <Problem view={view} onRetry={submit} />}

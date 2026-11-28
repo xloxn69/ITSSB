@@ -17,6 +17,12 @@ describe("commandView", () => {
     expect(commandView(enrollmentRequestRefused)).toMatchObject({ kind: "refused", code: "stop_not_eligible" });
   });
 
+  it("shows a staff invitation as joined only when the server says joined", () => {
+    expect(commandView({ schemaVersion: 1, status: "joined", serverNowMs: 1, displayName: "Jamie Staff" })).toMatchObject({ kind: "sent", status: "joined" });
+    expect(commandView({ schemaVersion: 1, status: "refused", serverNowMs: 1, code: "invalid_code", message: "No" })).toMatchObject({ kind: "refused", code: "invalid_code" });
+    expect(commandView({ schemaVersion: 2, status: "joined" })).toEqual({ kind: "unconfirmed" });
+  });
+
   it("a lost or unreadable answer is unconfirmed, never sent", () => {
     for (const raw of [undefined, null, {}, { schemaVersion: 2, status: "submitted" }, { schemaVersion: 1, status: "accepted" }]) {
       expect(commandView(raw).kind).toBe("unconfirmed");

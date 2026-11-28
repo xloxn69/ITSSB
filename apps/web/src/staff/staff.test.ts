@@ -4,12 +4,15 @@ import { staffFixtureSource } from "../dev/staffFixtures";
 import {
   approvalBlocker,
   contactStatus,
+  driversFileEntry,
+  invitationState,
   maintenanceWindow,
+  PIN_HASH_PLACEHOLDER,
   runActionsAvailable,
   serviceDateLabel,
   sweepSummary,
 } from "./format";
-import { credentialOutcome, mutationOutcome, queryState } from "./source";
+import { credentialOutcome, grantOutcome, mutationOutcome, queryState } from "./source";
 
 describe("queryState", () => {
   it("separates ready, not found, denial, and malformed answers", () => {
@@ -193,5 +196,76 @@ describe("runActionsAvailable", () => {
     // Revoking mid-run leaves the run active and the route occupied; staff must be able to clear it.
     expect(runActionsAvailable({ ...device, revoked: true, activeRun: run })).toBe(true);
     expect(runActionsAvailable({ ...device, revoked: false, activeRun: null })).toBe(false);
+  });
+});
+
+describe("grantOutcome", () => {
+  const issued = {
+    schemaVersion: 1,
+    status: "issued",
+    serverNowMs: 1,
+    grantId: "g1",
+    grant: "a".repeat(64),
+    expiresAtMs: 2,
+    driverUserId: "u1",
+    driverName: "Dana Driver",
+    deviceId: "d1",
+    routeVersions: [{ routeVersionId: "rv1", label: "Route 17 Morning" }],
+  };
+  it("shows a grant only for a well-formed issued answer the Pi would accept", () => {
+    expect(grantOutcome(issued)).toEqual({
+      kind: "issued",
+      grant: issued.grant,
+      expiresAtMs: 2,
+      driverUserId: "u1",
+      driverName: "Dana Driver",
+      routeVersions: [{ routeVersionId: "rv1", label: "Route 17 Morning" }],
+    });
+    expect(grantOutcome({ ...issued, grant: "short" }).kind).toBe("failed");
+    expect(grantOutcome({ ...issued, grant: "has spaces ".repeat(4) }).kind).toBe("failed");
+    expect(grantOutcome({ ...issued, routeVersions: [] }).kind).toBe("failed");
+    expect(grantOutcome({ ...issued, routeVersions: [{ routeVersionId: 3 }] }).kind).toBe("failed");
+    expect(grantOutcome({ ...issued, expiresAtMs: undefined }).kind).toBe("failed");
+    expect(grantOutcome({ schemaVersion: 1, status: "ok" }).kind).toBe("failed");
+  });
+  it("passes refusals and denials through without a grant", () => {
+    expect(grantOutcome({ schemaVersion: 1, status: "refused", code: "invalid_ttl", message: "No" })).toEqual({ kind: "refused", message: "No" });
+    expect(grantOutcome({ schemaVersion: 1, status: "access_unavailable", reason: "not_permitted" })).toEqual({
+      kind: "access_unavailable",
+      reason: "not_permitted",
+    });
+  });
+});
+
+describe("driversFileEntry", () => {
+  it("is exactly the Pi's drivers-file entry shape, with the PIN hash left for the Pi", () => {
+    const entry = JSON.parse(
+      driversFileEntry({
+        driverUserId: "u1",
+        driverName: "Dana Driver",
+        grant: "a".repeat(64),
+        routeVersions: [{ routeVersionId: "rv1", label: "Route 17 Morning" }],
+      }),
+    );
+    expect(entry).toEqual({
+      driverId: "u1",
+      displayName: "Dana Driver",
+      pinHash: PIN_HASH_PLACEHOLDER,
+      operatingGrant: "a".repeat(64),
+      routeVersions: [{ routeVersionId: "rv1", label: "Route 17 Morning" }],
+    });
+    // The Pi refuses a drivers file whose pinHash isn't an scrypt hash, so a
+    // forgotten placeholder fails closed instead of unlocking.
+    expect(PIN_HASH_PLACEHOLDER.startsWith("scrypt$")).toBe(false);
+  });
+});
+
+describe("invitationState", () => {
+  const now = 1_000_000;
+  it("offers revoke only while the code is still waiting", () => {
+    expect(invitationState({ revoked: false, usedAtMs: null, expiresAtMs: now + 1 }, now).pending).toBe(true);
+    expect(invitationState({ revoked: false, usedAtMs: null, expiresAtMs: now }, now)).toEqual({ text: "Expired", pending: false });
+    expect(invitationState({ revoked: true, usedAtMs: null, expiresAtMs: now + 1 }, now)).toEqual({ text: "Revoked", pending: false });
+    expect(invitationState({ revoked: true, usedAtMs: now - 5, expiresAtMs: now + 1 }, now).text).toMatch(/^Joined/);
   });
 });

@@ -20,7 +20,9 @@ export type StaffQueryName =
   | "checkIns:runAttendance"
   | "audit:list"
   | "fleet:listMaintenance"
-  | "calendar:listDays";
+  | "calendar:listDays"
+  | "driverGrants:listForStaff"
+  | "staffInvitations:list";
 
 export type StaffMutationName =
   | "routes:approveDraft"
@@ -40,16 +42,21 @@ export type StaffMutationName =
   | "runOps:cancelRun"
   | "runOps:replaceDevice"
   | "calendar:setDay"
-  | "calendar:removeDay";
+  | "calendar:removeDay"
+  | "fleet:addDriver"
+  | "driverGrants:revokeForStaff"
+  | "staffInvitations:revoke";
 
-export type StaffArgs = Record<string, string | number>;
+export type StaffArgs = Record<string, string | number | string[]>;
 
-/** Actions create invitation codes, which need real randomness on the server. */
+/** Actions create invitation codes and secrets, which need real randomness on the server. */
 export type StaffActionName =
   | "enrollment:createRouteInvitation"
   | "guardianLinks:createInvitation"
   | "fleet:provisionDevice"
-  | "fleet:rotateDeviceCredential";
+  | "fleet:rotateDeviceCredential"
+  | "driverGrants:issueForDriver"
+  | "staffInvitations:create";
 
 export interface StaffSource {
   watch(
@@ -125,4 +132,55 @@ export function credentialOutcome(raw: unknown): CredentialOutcome {
   }
   const outcome = mutationOutcome(raw, "");
   return outcome.kind === "done" ? { kind: "failed", message: "The server's answer couldn't be read. Nothing is assumed." } : outcome;
+}
+
+/** A driver operating grant the server just issued, or why it didn't. */
+export type GrantOutcome =
+  | {
+      kind: "issued";
+      grant: string;
+      expiresAtMs: number;
+      driverUserId: string;
+      driverName: string;
+      routeVersions: { routeVersionId: string; label: string }[];
+    }
+  | MutationOutcome;
+
+const UNREADABLE = "The server's answer couldn't be read. Nothing is assumed.";
+
+/**
+ * Reads `driverGrants:issueForDriver`. Only a well-formed `issued` answer
+ * shows a grant, and only one the Pi would accept (docs/08 §6 grant shape).
+ */
+export function grantOutcome(raw: unknown): GrantOutcome {
+  const env = (raw ?? {}) as Record<string, unknown>;
+  if (env.schemaVersion === 1 && env.status === "issued") {
+    const versions = Array.isArray(env.routeVersions) ? env.routeVersions : null;
+    const versionsOk =
+      versions !== null &&
+      versions.length > 0 &&
+      versions.every(
+        (x) => !!x && typeof (x as Record<string, unknown>).routeVersionId === "string" && typeof (x as Record<string, unknown>).label === "string",
+      );
+    if (
+      typeof env.grant === "string" &&
+      /^[A-Za-z0-9_-]{32,512}$/.test(env.grant) &&
+      typeof env.expiresAtMs === "number" &&
+      typeof env.driverUserId === "string" &&
+      typeof env.driverName === "string" &&
+      versionsOk
+    ) {
+      return {
+        kind: "issued",
+        grant: env.grant,
+        expiresAtMs: env.expiresAtMs,
+        driverUserId: env.driverUserId,
+        driverName: env.driverName,
+        routeVersions: (versions as { routeVersionId: string; label: string }[]).map(({ routeVersionId, label }) => ({ routeVersionId, label })),
+      };
+    }
+    return { kind: "failed", message: UNREADABLE };
+  }
+  const outcome = mutationOutcome(raw, "");
+  return outcome.kind === "done" ? { kind: "failed", message: UNREADABLE } : outcome;
 }

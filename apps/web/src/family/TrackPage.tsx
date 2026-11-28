@@ -103,7 +103,11 @@ export function TrackPage({ store, onSignIn }: { store: TrackStore; onSignIn: ()
               <Message
                 title="Tracking not available"
                 detail="Your account isn't linked to an approved route. Your school can approve it."
-              />
+              >
+                <a className="small" href="#/join-staff">
+                  Have a staff invitation code?
+                </a>
+              </Message>
             );
           case "session_expired":
             return (
