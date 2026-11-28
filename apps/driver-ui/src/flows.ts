@@ -7,7 +7,7 @@ import type { DraftDetail, DraftSummary, EndedRun, Observed } from "./snapshot.j
 import { h } from "./views.js";
 
 /**
- * Driver unlock (D04) and route recording (D06-D10). Views only: every
+ * Driver unlock (D04), route recording (D06-D10) and review status (D11). Views only: every
  * button calls the controller, and the device service decides.
  */
 
@@ -36,6 +36,8 @@ export interface Controller {
   startRecording(): void;
   markStop(): void;
   finish(): void;
+  submitDraft(): void;
+  refreshReview(): void;
   renameStop(stopId: string): void;
   moveStop(stopId: string, position: number): void;
   removeStop(stopId: string): void;
@@ -44,6 +46,81 @@ export interface Controller {
 }
 
 const DIRECTION_WORDS = { to_school: "To school", from_school: "From school" } as const;
+
+// ── Review state words (D06, D10, D11) ──────────────────────────────
+
+/** Drafts the server has accepted: their state is shown on D11. */
+export const SENT_STATES: ReadonlySet<DraftSummary["submission"]> = new Set(["submitted", "approved", "rejected", "unknown"]);
+
+/** Content is frozen once Submit is pressed: the server may already hold it. */
+export function draftFrozen(d: DraftSummary): boolean {
+  return d.submission !== "not_submitted";
+}
+
+/** One short line for the route library. Never says submitted before the server accepted it. */
+export function submissionLabel(d: DraftSummary): string {
+  if (d.status === "recording") return "Recording now";
+  switch (d.submission) {
+    case "pending":
+      return "Saved on this device, waiting to send for review";
+    case "refused":
+      return "Not submitted: the school server refused it";
+    case "submitted":
+      return "Awaiting approval";
+    case "approved":
+      return "Approved";
+    case "rejected":
+      return "Rejected by school staff";
+    case "unknown":
+      return "Not found on the school server";
+    default:
+      return "Draft, saved on this device, not submitted";
+  }
+}
+
+export interface StatusLine {
+  level: "ok" | "warn" | "problem";
+  text: string;
+}
+
+/** The full review state with its age, for D10 and D11. `nowMs` is the device clock. */
+export function submissionStatus(d: DraftSummary, nowMs: number): StatusLine {
+  const x = d.submissionDetail ?? null;
+  const checked = x?.reviewCheckedAtMs ?? null;
+  const age = checked === null ? "not checked yet" : `checked ${formatAge(Math.max(0, nowMs - checked))}`;
+  switch (d.submission) {
+    case "pending": {
+      const tries = x && x.attempts > 0 ? ` Tried ${x.attempts} time${x.attempts === 1 ? "" : "s"}.` : "";
+      const why = x?.waitingReason ? ` ${x.waitingReason}` : "";
+      return { level: "warn", text: `Saved on this device. Waiting to send to the school server for review. Not submitted yet.${tries}${why}` };
+    }
+    case "refused":
+      return { level: "problem", text: `Not submitted. ${x?.problem ?? "The school server refused this draft."}` };
+    case "submitted":
+      return { level: "warn", text: `Submitted. Awaiting approval by school staff (${age}). Families don't see this route until it is approved.` };
+    case "approved":
+      return { level: "ok", text: `Approved by school staff (${age}). New runs on this route use it; a run already started keeps its route.` };
+    case "rejected":
+      return {
+        level: "problem",
+        text: `Rejected by school staff (${age}): ${(x?.decisionReason ?? "no reason given").replace(/[.!?\s]+$/, "")}. Record the route again with the changes.`,
+      };
+    case "unknown":
+      return { level: "problem", text: `The school server no longer has this draft (${age}). Ask your transport office.` };
+    default:
+      return { level: "warn", text: "Saved on this device. Not submitted for review." };
+  }
+}
+
+/** Why Submit for review can't be pressed now, or null. */
+export function submitBlocked(o: Observed, d: DraftSummary): string | null {
+  const cap = o.snapshot?.capabilities?.submitRoute;
+  if (cap?.available !== true) return cap?.reason ?? "This device software can't submit routes.";
+  if (d.status !== "finished") return "Finish the recording first.";
+  if (d.pointCount < 2) return "Too few points were recorded to submit. Record the route again.";
+  if (d.stopCount === 0) return "Mark at least one stop to submit.";
+  return editBlocked(o);
+}
 
 function message(ui: UiState): HTMLElement | null {
   if (!ui.message) return null;
@@ -164,8 +241,7 @@ export function libraryView(o: Observed, ui: UiState, c: Controller): HTMLElemen
                 h(
                   "span",
                   { class: "muted" },
-                  `${DIRECTION_WORDS[d.direction]} · ${d.stopCount} stops · ` +
-                    (d.status === "recording" ? "Recording now" : "Draft, saved on this device, not submitted"),
+                  `${DIRECTION_WORDS[d.direction]} · ${d.stopCount} stops · ${submissionLabel(d)}`,
                 ),
               ),
             )),
@@ -288,7 +364,8 @@ export function recordingView(o: Observed, ui: UiState, c: Controller, nowMs: nu
 
 export function editStopsView(o: Observed, ui: UiState, c: Controller): HTMLElement {
   const stops = ui.detail?.stops ?? [];
-  const blocked = editBlocked(o);
+  const blocked =
+    ui.detail && draftFrozen(ui.detail) ? "This draft was submitted for review and can't be changed. Record the route again to change it." : editBlocked(o);
   const renaming = stops.find((s) => s.stopId === ui.renameStopId);
   const back = () => c.go(ui.detail?.status === "recording" ? "D08" : "D10");
   if (renaming) {
@@ -355,36 +432,116 @@ export function editStopsView(o: Observed, ui: UiState, c: Controller): HTMLElem
 
 // ── D10 review ──────────────────────────────────────────────────────
 
-export function reviewView(_o: Observed, ui: UiState, c: Controller): HTMLElement {
+function draftFacts(d: DraftDetail): HTMLElement {
+  const minutes = d.finishedAtMs ? formatDuration(d.finishedAtMs - d.startedAtMs) : "still recording";
+  return h(
+    "dl",
+    { class: "kv" },
+    ...[
+      ["Direction", DIRECTION_WORDS[d.direction]],
+      ["Duration", minutes],
+      ["Points", String(d.pointCount)],
+      ["GPS gaps", d.gapCount === 0 ? "none" : `${d.gapCount} (dashed: not measured travel)`],
+      ["Stops", String(d.stops.length)],
+    ].flatMap(([k, v]) => [h("dt", {}, k ?? ""), h("dd", {}, v ?? "")]),
+  );
+}
+
+function stopList(d: DraftDetail): HTMLElement[] {
+  return [
+    h("ul", { class: "stops" }, ...d.stops.slice(0, 4).map((s) => h("li", { class: "one-line" }, `${s.position}. ${s.name}`))),
+    ...(d.stops.length > 4 ? [h("p", { class: "muted" }, `and ${d.stops.length - 4} more (Edit stops shows all)`)] : []),
+  ];
+}
+
+function draftMap(d: DraftDetail): HTMLElement {
+  return h("div", { class: "card map" }, d.path.length + d.stops.length > 0 ? routeSvg(d.path, d.stops, 720, 400) : h("p", { class: "muted" }, "No points were recorded."));
+}
+
+export function reviewView(o: Observed, ui: UiState, c: Controller, nowMs = Date.now()): HTMLElement {
   const d = ui.detail;
   if (!d) return h("main", { class: "page" }, header("Review route", () => c.go("D06")), h("p", {}, "Loading…"));
-  const minutes = d.finishedAtMs ? formatDuration(d.finishedAtMs - d.startedAtMs) : "still recording";
+  const status = submissionStatus(d, nowMs);
+  const canSubmit = d.submission === "not_submitted" || d.submission === "refused";
+  const blocked = canSubmit ? submitBlocked(o, d) : null;
   return h(
     "main",
     { class: "page" },
     header(`Review: ${d.name}`, () => c.go("D06")),
+    message(ui),
     h(
       "div",
       { class: "drive" },
-      h("div", { class: "card map" }, d.path.length + d.stops.length > 0 ? routeSvg(d.path, d.stops, 720, 400) : h("p", { class: "muted" }, "No points were recorded.")),
+      draftMap(d),
       h(
         "div",
         { class: "card" },
-        h("div", { class: "banner lv-warn" }, "Saved on this device. Not submitted: the school server's route review cannot receive drafts from this device yet."),
+        h("div", { class: `banner lv-${status.level}` }, status.text),
+        draftFacts(d),
+        ...stopList(d),
+        h(
+          "div",
+          { class: "row" },
+          canSubmit
+            ? button(d.submission === "refused" ? "Submit again" : "Submit for review", () => c.submitDraft(), {
+                primary: true,
+                disabled: ui.busy || blocked !== null,
+              })
+            : null,
+          SENT_STATES.has(d.submission) ? button("Review status", () => c.go("D11"), { primary: true }) : null,
+          button(draftFrozen(d) ? "View stops" : "Edit stops", () => c.go("D09")),
+        ),
+        blocked ? h("p", { class: "muted" }, blocked) : null,
+        d.submission === "not_submitted" ? h("p", { class: "muted" }, "Submitting sends this draft to school staff for review. Once submitted, its stops can't be changed.") : null,
+      ),
+    ),
+  );
+}
+
+// ── D11 route awaiting approval ─────────────────────────────────────
+
+const REVIEW_TITLES: Partial<Record<DraftSummary["submission"], string>> = {
+  submitted: "Route awaiting approval",
+  approved: "Route approved",
+  rejected: "Route not approved",
+  unknown: "Route review",
+};
+
+export function awaitingView(_o: Observed, ui: UiState, c: Controller, nowMs = Date.now()): HTMLElement {
+  const d = ui.detail;
+  if (!d) return h("main", { class: "page" }, header("Route review", () => c.go("D06")), h("p", {}, "Loading…"));
+  const status = submissionStatus(d, nowMs);
+  const x = d.submissionDetail ?? null;
+  return h(
+    "main",
+    { class: "page" },
+    header(`${REVIEW_TITLES[d.submission] ?? "Route review"}: ${d.name}`, () => c.go("D06")),
+    message(ui),
+    h(
+      "div",
+      { class: "drive" },
+      draftMap(d),
+      h(
+        "div",
+        { class: "card" },
+        h("div", { class: `banner lv-${status.level}` }, status.text),
         h(
           "dl",
           { class: "kv" },
           ...[
             ["Direction", DIRECTION_WORDS[d.direction]],
-            ["Duration", minutes],
-            ["Points", String(d.pointCount)],
-            ["GPS gaps", d.gapCount === 0 ? "none" : `${d.gapCount} (dashed: not measured travel)`],
-            ["Stops", String(d.stops.length)],
+            ["Stops", String(d.stopCount)],
+            ["Submitted", x ? formatAge(Math.max(0, nowMs - x.queuedAtMs)) : "unknown"],
+            ["Decided", x?.reviewedAtMs ? formatAge(Math.max(0, nowMs - x.reviewedAtMs)) : "not yet"],
           ].flatMap(([k, v]) => [h("dt", {}, k ?? ""), h("dd", {}, v ?? "")]),
         ),
-        h("ul", { class: "stops" }, ...d.stops.slice(0, 4).map((s) => h("li", { class: "one-line" }, `${s.position}. ${s.name}`))),
-        d.stops.length > 4 ? h("p", { class: "muted" }, `and ${d.stops.length - 4} more (Edit stops shows all)`) : null,
-        h("div", { class: "row" }, button("Edit stops", () => c.go("D09"))),
+        ...stopList(d),
+        h(
+          "div",
+          { class: "row" },
+          d.submission === "submitted" ? button("Check again", () => c.refreshReview(), { primary: true, disabled: ui.busy }) : null,
+          button("View stops", () => c.go("D09")),
+        ),
       ),
     ),
   );

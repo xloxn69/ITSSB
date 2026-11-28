@@ -1,9 +1,12 @@
 /**
- * Development-only gallery of the driver screen's student states (D15–D18),
+ * Development-only gallery of the driver screen's student states (D15–D18)
+ * and route review states (D06, D10, D11),
  * rendered from fictional data with the real view functions. Used by
  * `bun run screenshots`; never part of the device build (vite builds
  * index.html only). `gallery.html?state=<name>`.
  */
+import { awaitingView, type Controller, libraryView, reviewView, type UiState } from "../flows.js";
+import type { DraftDetail, DraftSummary, SubmissionDetail } from "../snapshot.js";
 import { css } from "../styles.js";
 import type { ScreenId } from "../screens.js";
 import { correctionView, detailView, emptyStudentUi, qrView, rosterView, type StudentController, type StudentUi } from "../studentViews.js";
@@ -191,7 +194,121 @@ const storageScreen = (level: "warning" | "critical") => {
   const nav = { go: () => {}, action: () => {} };
   return h("div", {}, statusBar(so, nav), drivingView(so, nav));
 };
-const view = name === "dashboard-changes"
+// ── Route review (D06, D10, D11) ──
+const parkedO = observed(
+  snapshot({
+    generatedAtMs: NOW,
+    motion: { state: "stopped", parked: true },
+    session: { unlocked: true, driverName: "Dana Driver" },
+    capabilities: { submitRoute: { available: true } },
+  }),
+);
+const sub = (over: Partial<SubmissionDetail>): SubmissionDetail => ({
+  requestId: "4f1e2d3c-5b6a-4978-8a6b-5c4d3e2f1a0b",
+  queuedAtMs: at(40),
+  attempts: 0,
+  waitingReason: null,
+  code: null,
+  problem: null,
+  decisionReason: null,
+  reviewedAtMs: null,
+  reviewCheckedAtMs: null,
+  ...over,
+});
+const base: DraftDetail = {
+  draftId: "9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d",
+  name: "Maple Loop Morning",
+  direction: "to_school",
+  status: "finished",
+  submission: "not_submitted",
+  submissionDetail: null,
+  startedAtMs: at(75),
+  finishedAtMs: at(50),
+  pointCount: 9,
+  gapCount: 1,
+  lastPointCapturedAtMs: at(50),
+  stopCount: 3,
+  path: [0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => ({
+    capturedAtMs: at(75 - i * 3),
+    latitude: 34.1 + i * 0.0006,
+    longitude: -83.98 + (i > 4 ? (i - 4) * 0.0008 : 0),
+    gapBefore: i === 6,
+  })),
+  stops: [
+    { stopId: "s1", position: 1, name: "Example Oak Corner", latitude: 34.1012, longitude: -83.98, capturedAtMs: at(72) },
+    { stopId: "s2", position: 2, name: "Example Elm Court", latitude: 34.1024, longitude: -83.98, capturedAtMs: at(66) },
+    { stopId: "s3", position: 3, name: "Example School Gate", latitude: 34.1048, longitude: -83.9768, capturedAtMs: at(51) },
+  ],
+};
+const drafts: Record<string, DraftDetail> = {
+  "review-draft": base,
+  "review-pending": { ...base, submission: "pending", submissionDetail: sub({ attempts: 2, queuedAtMs: at(3) }) },
+  "review-refused": {
+    ...base,
+    submission: "refused",
+    submissionDetail: sub({
+      code: "grant_not_authorized",
+      problem: "Your driver authorization had ended or was withdrawn before this reached the school server. Unlock with your PIN and submit again.",
+    }),
+  },
+  "review-awaiting": { ...base, submission: "submitted", submissionDetail: sub({ reviewCheckedAtMs: at(2) }) },
+  "review-approved": { ...base, submission: "approved", submissionDetail: sub({ reviewCheckedAtMs: at(1), reviewedAtMs: at(12) }) },
+  "review-rejected": {
+    ...base,
+    submission: "rejected",
+    submissionDetail: sub({ reviewCheckedAtMs: at(1), reviewedAtMs: at(12), decisionReason: "Stop 2 is on the wrong side of the road." }),
+  },
+};
+const summary = ({ path: _p, stops: _s, ...d }: DraftDetail, over: Partial<DraftSummary> = {}): DraftSummary => ({ ...d, ...over });
+const library: DraftSummary[] = [
+  summary(drafts["review-awaiting"]!, { name: "Maple Loop Morning" }),
+  summary(drafts["review-pending"]!, { draftId: "d2", name: "Maple Loop Afternoon", direction: "from_school" }),
+  summary(drafts["review-rejected"]!, { draftId: "d3", name: "Cedar Hill Morning" }),
+  summary(drafts["review-approved"]!, { draftId: "d4", name: "Birch Road Morning" }),
+  summary(base, { draftId: "d5", name: "Birch Road Afternoon", direction: "from_school" }),
+];
+const draftUi = (detail: DraftDetail | null): UiState => ({
+  draftId: detail?.draftId ?? null,
+  detail,
+  drafts: library,
+  pinDriverId: null,
+  pin: "",
+  name: "",
+  direction: "to_school",
+  renameStopId: null,
+  confirmRemoveStopId: null,
+  message: null,
+  busy: false,
+  routeVersionId: null,
+});
+const draftCtl: Controller = {
+  go: () => {},
+  set: () => {},
+  unlock: () => {},
+  lock: () => {},
+  confirmParked: () => {},
+  openDraft: () => {},
+  startRecording: () => {},
+  markStop: () => {},
+  finish: () => {},
+  submitDraft: () => {},
+  refreshReview: () => {},
+  renameStop: () => {},
+  moveStop: () => {},
+  removeStop: () => {},
+  startRun: () => {},
+  endRun: () => {},
+};
+const reviewState = (): HTMLElement => {
+  if (name === "review-library") return libraryView(parkedO, draftUi(null), draftCtl);
+  const d = drafts[name]!;
+  const sent = d.submission === "submitted" || d.submission === "approved" || d.submission === "rejected";
+  return sent ? awaitingView(parkedO, draftUi(d), draftCtl, NOW) : reviewView(parkedO, draftUi(d), draftCtl, NOW);
+};
+
+const view = name.startsWith("review")
+  ? reviewState()
+  : name === "dashboard-changes"
   ? dashboard()
   : name === "storage-warning" || name === "storage-critical"
   ? storageScreen(name === "storage-warning" ? "warning" : "critical")
@@ -205,4 +322,4 @@ const view = name === "dashboard-changes"
 document.getElementById("app")?.replaceChildren(view);
 document.body.dataset.ready = "true";
 
-export const GALLERY_STATES = Object.keys(states);
+export const GALLERY_STATES = [...Object.keys(states), ...Object.keys(drafts), "review-library"];

@@ -100,15 +100,42 @@ export interface CapabilitiesPart {
   startRoute?: Capability;
   showQr?: Capability;
   showStudents?: Capability;
+  submitRoute?: Capability;
 }
 
-/** The route draft being recorded (device-side only until the server accepts drafts). */
+/**
+ * Where a draft is in review (docs/08 §7.1). Only the school server's answer
+ * moves a draft past `pending`: `submitted` means the server accepted it and
+ * staff have not decided; `refused` means the server refused the upload.
+ */
+export type DraftSubmission = "not_submitted" | "pending" | "refused" | "submitted" | "approved" | "rejected" | "unknown";
+
+export interface SubmissionDetail {
+  requestId: string;
+  /** When Submit was pressed, on the device clock. */
+  queuedAtMs: number;
+  attempts: number;
+  /** Why a pending upload keeps waiting, when the server said so. */
+  waitingReason: string | null;
+  code: string | null;
+  /** Why the server refused the upload, in driver words. */
+  problem: string | null;
+  /** Staff's reason for a rejection. */
+  decisionReason: string | null;
+  reviewedAtMs: number | null;
+  /** When this device last read the review status from the server. */
+  reviewCheckedAtMs: number | null;
+}
+
+/** A route draft on this device and its review state. */
 export interface DraftSummary {
   draftId: string;
   name: string;
   direction: "to_school" | "from_school";
   status: "recording" | "finished";
-  submission: "not_submitted";
+  submission: DraftSubmission;
+  /** Absent on device software older than draft submission. */
+  submissionDetail?: SubmissionDetail | null;
   startedAtMs: number;
   finishedAtMs: number | null;
   pointCount: number;
