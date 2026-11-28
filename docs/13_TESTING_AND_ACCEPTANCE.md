@@ -1,7 +1,7 @@
 # I.T.S.S.B. — Testing and acceptance
 
 **Intelligence Transportation System for School Buses**  
-Status: automated tests for the device, backend, web and iOS run in CI, and bench and development-backend results are recorded in §12 and §14. No real GPS fix, real iPhone, vehicle or field-pilot result is claimed. [Documentation index](README.md).
+Status: automated tests for the device, backend, web and iOS run in CI, and bench and development-backend results are recorded in §11 and §12. No real GPS fix, real iPhone, vehicle or field-pilot result is claimed. [Documentation index](README.md).
 
 ## 1. What testing must establish
 
@@ -14,6 +14,12 @@ Verify the smallest behavior that resolves a real risk. Prefer deterministic eve
 Maintain separate development and pilot/production backend deployments and app configurations. Name them visibly. Never let a GPS replay publisher silently target a live fleet. A test device should have its own credential and synthetic assignments.
 
 Create fixtures for a straight route, a route that loops near a stop twice, two parallel nearby roads, a GPS gap, an out-of-order batch, a lost acknowledgment, and a completed/cancelled trip. Include at least two organizations, two drivers with different scopes, two students, a verified guardian, an unlinked guardian, and an account whose access is revoked during an active subscription.
+
+**Fixture identities.** Every person, route, stop, bus and address in the repository and on the development deployment is fictional, and development rows carry a "(demo)" suffix.
+- `seed:dev` creates one route with stops, a driver, a bus and device, a student and a guardian. It runs only on a deployment with `ITSSB_ALLOW_DEV_SEED=true`, and only into an empty database.
+- Sign-in test accounts use Clerk test addresses (`<name>+clerk_test@example.com`, fixed code `424242`), one per role. A staff test account is created with `users:bootstrapStaff`; every other account joins through the app, as a real person would.
+- Device credentials and driver grants are issued per test device from the staff console and revoked after use.
+- The backend, web and iOS test suites use their own in-memory fixtures (`packages/contracts` fixtures and per-test data), never a deployment.
 
 Use the exact payloads and fields from [08_DATA_CONTRACTS_AND_API.md](08_DATA_CONTRACTS_AND_API.md). A fixture should record input events, expected accepted/rejected outcomes, expected live state, and expected logical alerts. Freeze or control the clock when testing expiration and freshness.
 
