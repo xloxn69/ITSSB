@@ -10,6 +10,7 @@ struct AlertsView: View {
     let tracking: any LiveRunSource
     /// Opened alert IDs (I21).
     @State private var path: [String] = []
+    @State private var readMarks = AlertReadMarks()
 
     init(tracking: any LiveRunSource, notifications: any NotificationSource, registrar: PushRegistrar?) {
         _model = State(initialValue: AlertsViewModel(tracking: tracking, notifications: notifications))
@@ -26,6 +27,7 @@ struct AlertsView: View {
                         AlertDetailView(alert: alert,
                                         assignment: model.assignments.first { $0.assignmentId == alert.assignmentId },
                                         tracking: tracking)
+                            .onAppear { readMarks.markRead(alertId) }
                     }
                 }
         }
@@ -72,7 +74,9 @@ struct AlertsView: View {
                             .foregroundStyle(AppColors.textSecondary)
                     }
                     ForEach(model.alerts) { alert in
-                        NavigationLink(value: alert.alertId) { AlertRow(alert: alert) }
+                        NavigationLink(value: alert.alertId) {
+                            AlertRow(alert: alert, unread: !readMarks.isRead(alert.alertId))
+                        }
                     }
                 }
             }
@@ -154,12 +158,20 @@ private struct PreferenceSection: View {
 
 private struct AlertRow: View {
     let alert: AlertItem
+    var unread = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.xxs) {
-            Text("Bus approaching \(alert.stopLabel)")
-                .font(AppFonts.headline)
-                .foregroundStyle(AppColors.textPrimary)
+            HStack(spacing: AppSpacing.sm) {
+                if unread {
+                    Circle().fill(AppColors.route)
+                        .frame(width: AppSpacing.sm, height: AppSpacing.sm)
+                        .accessibilityLabel("Unread")
+                }
+                Text("Bus approaching \(alert.stopLabel)")
+                    .font(unread ? AppFonts.headline : AppFonts.body)
+                    .foregroundStyle(AppColors.textPrimary)
+            }
             Text("Estimated arrival \(time(alert.predictedArrivalAt)), "
                  + "from an estimate made at \(time(alert.predictionGeneratedAt)).")
                 .font(AppFonts.caption)

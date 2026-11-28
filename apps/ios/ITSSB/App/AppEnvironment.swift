@@ -100,7 +100,8 @@ struct AppEnvironment {
             let tab: AppTab = value(after: "-ITSSBTab", in: arguments) == "alerts" ? .alerts : .track
             return AppEnvironment(session: SessionStore(auth: PreviewAuthSession()),
                                   source: PreviewLiveRunSource(scenario: scenario),
-                                  notifications: PreviewNotificationSource(scenario: scenario), initialTab: tab)
+                                  notifications: PreviewNotificationSource(scenario: scenario), initialTab: tab,
+                                  enrollment: PreviewEnrollmentSource())
         }
         return nil
     }

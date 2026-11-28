@@ -12,17 +12,34 @@ struct TrackView: View {
     let onSignIn: () -> Void
     @Environment(\.scenePhase) private var scenePhase
     @State private var foreground = ForegroundRefresh()
+    /// For the student's own check-in from the trip (I12, I16). Nil hides it.
+    let enrollment: (any EnrollmentSource)?
+    private let source: any LiveRunSource
+    /// I10: a guardian with two or more students starts on the dashboard.
+    @State private var showsDashboard = true
+    @State private var checkingIn = false
 
-    init(source: any LiveRunSource, openAssignmentId: String? = nil, onOpened: @escaping () -> Void = {},
-         onSignIn: @escaping () -> Void = {}) {
+    init(source: any LiveRunSource, enrollment: (any EnrollmentSource)? = nil, openAssignmentId: String? = nil,
+         onOpened: @escaping () -> Void = {}, onSignIn: @escaping () -> Void = {}) {
         _model = State(initialValue: TrackViewModel(source: source))
+        self.source = source
+        self.enrollment = enrollment
         self.openAssignmentId = openAssignmentId
         self.onOpened = onOpened
         self.onSignIn = onSignIn
     }
 
     var body: some View {
-        content
+        Group {
+            if showsDashboard, model.assignments.count > 1 {
+                GuardianDashboardView(source: source, assignments: model.assignments) { id in
+                    model.select(assignmentId: id)
+                    showsDashboard = false
+                }
+            } else {
+                content
+            }
+        }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(AppColors.background)
             .onAppear { model.start() }
@@ -33,6 +50,7 @@ struct TrackView: View {
             // Also runs on first appearance, so a tap that cold-launched the app is kept.
             .task(id: openAssignmentId) {
                 guard let id = openAssignmentId else { return }
+                showsDashboard = false
                 model.open(assignmentId: id)
                 onOpened()
             }
@@ -47,7 +65,21 @@ struct TrackView: View {
                 .foregroundStyle(AppColors.textSecondary)
         case let .tracking(context, run, clock):
             TrackingScreen(context: context, run: run, clock: clock, picker: picker,
-                           connectionLost: model.connectionLost)
+                           connectionLost: model.connectionLost,
+                           checkIn: enrollment == nil ? .none
+                               : CheckInEntry.make(relationship: context.assignment.relationship, run: run),
+                           onCheckIn: { checkingIn = true })
+                .sheet(isPresented: $checkingIn) {
+                    if let enrollment {
+                        NavigationStack {
+                            CheckInView(model: CheckInViewModel(
+                                source: enrollment,
+                                assignment: OwnAssignment(id: context.assignment.assignmentId,
+                                                          routeLabel: context.assignment.routeLabel)))
+                            .toolbar { Button("Done") { checkingIn = false } }
+                        }
+                    }
+                }
         case let .noActiveRun(context, clock):
             NoActiveRunScreen(context: context, clock: clock, picker: picker)
         case .accessUnavailable:
@@ -66,7 +98,8 @@ struct TrackView: View {
 
     /// Student switcher for guardians with more than one linked student.
     private var picker: AssignmentPicker {
-        AssignmentPicker(assignments: model.assignments, selected: model.selectedAssignmentId) {
+        AssignmentPicker(assignments: model.assignments, selected: model.selectedAssignmentId,
+                         onShowAll: { showsDashboard = true }) {
             model.select(assignmentId: $0)
         }
     }
@@ -80,6 +113,8 @@ private struct TrackingScreen: View {
     let clock: ServerClock
     let picker: AssignmentPicker
     let connectionLost: Bool
+    var checkIn: CheckInEntry = .none
+    var onCheckIn: () -> Void = {}
 
     var body: some View {
         // Re-derive every second: age advances and stale arrives with no new update.
@@ -91,14 +126,18 @@ private struct TrackingScreen: View {
                        busLabel: run.busLabel, dimsBus: presentation.dimsMarker)
                 .safeAreaInset(edge: .top) { TripHeader(context: context, picker: picker) }
                 .safeAreaInset(edge: .bottom) {
-                    TripStatusCard(copy: StatusCopy.make(presentation, run: run, clock: clock, now: timeline.date,
-                                                         connectionLost: connectionLost),
-                                   stopLabel: run.assignedStop.label,
-                                   eta: EtaPresentation.make(run: run, clock: clock, now: timeline.date),
-                                   progress: EtaPresentation.stopProgress(run),
-                                   notice: context.notices.current(at: clock.ageClock(at: timeline.date))
-                                       .serviceNotice,
-                                   delay: ReportedDelayPresentation.line(run: run, clock: clock, now: timeline.date))
+                    VStack(spacing: 0) {
+                        CheckInButton(entry: checkIn, action: onCheckIn)
+                        TripStatusCard(copy: StatusCopy.make(presentation, run: run, clock: clock,
+                                                             now: timeline.date, connectionLost: connectionLost),
+                                       stopLabel: run.assignedStop.label,
+                                       eta: EtaPresentation.make(run: run, clock: clock, now: timeline.date),
+                                       progress: EtaPresentation.stopProgress(run),
+                                       notice: context.notices.current(at: clock.ageClock(at: timeline.date))
+                                           .serviceNotice,
+                                       delay: ReportedDelayPresentation.line(run: run, clock: clock,
+                                                                             now: timeline.date))
+                    }
                 }
         }
     }
@@ -162,10 +201,15 @@ private struct TripHeader: View {
 struct AssignmentPicker: View {
     let assignments: [AssignmentSummary]
     let selected: String?
+    /// Opens the I10 dashboard, when there is one.
+    var onShowAll: (() -> Void)?
     let onSelect: (String) -> Void
 
     var body: some View {
         Menu {
+            if let onShowAll {
+                Button("All students", systemImage: "list.bullet", action: onShowAll)
+            }
             ForEach(assignments) { item in
                 Button(item.studentDisplayName) { onSelect(item.assignmentId) }
                     .disabled(item.assignmentId == selected)
@@ -261,6 +305,37 @@ struct TripStatusCard: View {
         case .aging: AppColors.statusAging
         case .stale: AppColors.statusStale
         case .unknown: AppColors.statusUnknown
+        }
+    }
+}
+
+/// I12/I16: the student's own check-in, from the trip. Emphasized at the stop.
+private struct CheckInButton: View {
+    let entry: CheckInEntry
+    let action: () -> Void
+
+    var body: some View {
+        switch entry {
+        case .none:
+            EmptyView()
+        case .available:
+            Button(action: action) { Label("Check in", systemImage: "qrcode.viewfinder") }
+                .font(AppFonts.callout)
+                .buttonStyle(.borderedProminent)
+                .tint(AppColors.surface)
+                .foregroundStyle(AppColors.textPrimary)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.horizontal, AppSpacing.screen)
+        case .atStop:
+            Button(action: action) {
+                Label("The bus is at your stop. Check in", systemImage: "qrcode.viewfinder")
+                    .frame(maxWidth: .infinity, minHeight: AppSpacing.touchTarget)
+            }
+            .font(AppFonts.headline)
+            .buttonStyle(.borderedProminent)
+            .tint(AppColors.brand)
+            .foregroundStyle(AppColors.onBrand)
+            .padding(.horizontal, AppSpacing.screen)
         }
     }
 }
