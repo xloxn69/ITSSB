@@ -7,6 +7,7 @@ import { enrollmentFixtureFiles } from "../src/enrollmentFixtures.ts";
 import { healthFixtureFiles } from "../src/healthFixtures.ts";
 import { notificationFixtureFiles } from "../src/notificationFixtures.ts";
 import { routeDraftFixtureFiles } from "../src/routeDraftFixtures.ts";
+import { runReportFixtureFiles } from "../src/runReportFixtures.ts";
 import { tripEventFixtureFiles } from "../src/tripEventFixtures.ts";
 
 const files = {
@@ -17,6 +18,7 @@ const files = {
   ...checkInFixtureFiles,
   ...notificationFixtureFiles,
   ...routeDraftFixtureFiles,
+  ...runReportFixtureFiles,
 };
 
 for (const [name, value] of Object.entries(files)) {

@@ -17,6 +17,7 @@ import { getTrackableAssignment, getUser, missingUserReason } from "./lib/authz"
 import { isRequestId, tokenProblem } from "./lib/family";
 import { audit, denied, staffCaller } from "./lib/staff";
 import { resolveToken } from "./lib/tokens";
+import { reportsForRun, staffReports } from "./runReports";
 
 /**
  * Trip check-in (docs/09 §6–§8). A student scans the challenge shown on the
@@ -221,6 +222,7 @@ export const runAttendance = query({
       runState: run.state,
       startedAtMs: run.startedAtMs ?? null,
       students,
+      reports: await staffReports(ctx, await reportsForRun(ctx, run._id)),
     };
   },
 });

@@ -7,6 +7,7 @@
  * Every nullable field is sent explicitly as `null`, never omitted.
  */
 import type { SCHEMA_VERSION } from "./index.js";
+import type { StaffRunReport } from "./runReports.js";
 import type { AccessUnavailable, RoutePoint } from "./tracking.js";
 
 export const ROUTE_DIRECTIONS = ["to_school", "from_school"] as const;
@@ -241,6 +242,8 @@ export interface DeviceDiagnostics {
    * A `null` value inside means the device cannot measure it.
    */
   metrics: DeviceMetrics | null;
+  /** The newest driver report on `lastRun`, or null (docs/08 §9.4). Optional for older backends. */
+  lastRunReport?: StaffRunReport | null;
 }
 
 export interface DeviceMetrics {

@@ -101,7 +101,9 @@ describe("tracking.myRun", () => {
     expect(r.run.eta).toBeNull();
     expect(r.run.assignedStop.status).toBe("unknown");
     // Fixture has non-null gpsStatus/eta/nextStopId; compare the rest of the shape.
-    const { gpsStatus: _g, eta: _e, nextStopId: _n, ...run } = r.run;
+    // reportedDelay is optional in the fixture (older backends omit it); covered in runReports.test.ts.
+    expect(r.run.reportedDelay).toBeNull();
+    const { gpsStatus: _g, eta: _e, nextStopId: _n, reportedDelay: _d, ...run } = r.run;
     if (myRunReady.status !== "ready") throw new Error("fixture");
     const { gpsStatus: _fg, eta: _fe, nextStopId: _fn, ...fixtureRun } = myRunReady.run;
     expect(shape({ ...r, run })).toEqual(shape({ ...myRunReady, run: fixtureRun }));

@@ -20,6 +20,7 @@ import { mutation, type QueryCtx, query } from "./_generated/server";
 import { healthForRun } from "./health";
 import { getTrackableAssignment, getUser, listTrackableAssignments, missingUserReason } from "./lib/authz";
 import { getRunProgress } from "./lib/progressStore";
+import { familyReportedDelay } from "./runReports";
 import { runState } from "./schema";
 
 /**
@@ -148,6 +149,21 @@ const endedRun = v.union(
   v.null(),
 );
 
+/** A driver's delay report (docs/08 §9.3): category and minutes only, never text. */
+const reportedDelay = v.object({
+  category: v.union(
+    v.literal("traffic"),
+    v.literal("mechanical"),
+    v.literal("weather"),
+    v.literal("student_incident"),
+    v.literal("other"),
+  ),
+  minutes: v.union(v.number(), v.null()),
+  reportedAtMs: v.number(),
+  validUntilMs: v.number(),
+  source: v.literal("driver"),
+});
+
 /** Generic, honest label when the bus device has no family-facing name yet. */
 const FALLBACK_BUS_LABEL = "School bus";
 
@@ -179,6 +195,7 @@ export const myRun = query({
           ),
         }),
         eta: v.union(eta, v.null()),
+        reportedDelay: v.optional(v.union(reportedDelay, v.null())),
       }),
       serviceNotice,
     }),
@@ -218,7 +235,7 @@ export const myRun = query({
       };
     }
 
-    const [live, device, health, progress] = await Promise.all([
+    const [live, device, health, progress, delay] = await Promise.all([
       ctx.db
         .query("liveState")
         .withIndex("by_run", (q) => q.eq("runId", run._id))
@@ -226,6 +243,7 @@ export const myRun = query({
       ctx.db.get(run.deviceId),
       healthForRun(ctx, run),
       getRunProgress(ctx, run._id),
+      familyReportedDelay(ctx, run, serverNowMs),
     ]);
     // Last time the backend heard from this bus during the run: a health
     // heartbeat or an accepted observation, whichever came later.
@@ -279,6 +297,7 @@ export const myRun = query({
           live && progress?.lastEventId === live.eventId && progress.lastStatus === "on_route" && stopStatus === "upcoming"
             ? await currentEta(ctx, run._id, stop._id, live, serverNowMs)
             : null,
+        reportedDelay: delay,
       },
       serviceNotice: notice,
     };

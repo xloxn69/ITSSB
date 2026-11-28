@@ -7,6 +7,7 @@ import {
   type RosterActionRejection,
   type RosterActionResult,
   type RosterResponse,
+  type RosterStop,
   type RosterStudent,
   SCHEMA_VERSION,
   TOKEN_LINK_PATHS,
@@ -159,9 +160,21 @@ export const roster = internalQuery({
       }
     }
     students.sort((x, y) => x.stopSequence - y.stopSequence || x.studentDisplayName.localeCompare(y.studentDisplayName));
+    // Every approved stop of the run's version, with students or not, so the
+    // driver screen can say which stop the bus is parked near (docs/05 D14).
+    const stops: RosterStop[] = versionId
+      ? (
+          await ctx.db
+            .query("stops")
+            .withIndex("by_route_version", (q) => q.eq("routeVersionId", versionId))
+            .take(200)
+        )
+          .map((s) => ({ stopId: s._id, label: s.label, sequence: s.sequence ?? 0, latitude: s.latitude, longitude: s.longitude }))
+          .toSorted((a, b) => a.sequence - b.sequence)
+      : [];
     return {
       ok: true,
-      body: { schemaVersion: SCHEMA_VERSION, runId: run._id, routeVersionId: run.routeVersionId, students, serverNowMs: nowMs },
+      body: { schemaVersion: SCHEMA_VERSION, runId: run._id, routeVersionId: run.routeVersionId, students, stops, serverNowMs: nowMs },
     };
   },
 });

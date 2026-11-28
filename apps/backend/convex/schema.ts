@@ -92,6 +92,33 @@ export default defineSchema({
     .index("by_replacement_device", ["replacementDeviceId"]),
 
   /**
+   * A driver's delay or issue report on a run (docs/08 §9.3, docs/05 D20),
+   * sent from the Pi with the driver operating grant. A fixed category and
+   * optional minutes only: no free text is stored. One row per device and
+   * `requestId`; a retry returns it.
+   */
+  runReports: defineTable({
+    runId: v.id("runs"),
+    deviceId: v.id("devices"),
+    driverUserId: v.id("users"),
+    grantId: v.id("driverGrants"),
+    requestId: v.string(),
+    category: v.union(
+      v.literal("traffic"),
+      v.literal("mechanical"),
+      v.literal("weather"),
+      v.literal("student_incident"),
+      v.literal("other"),
+    ),
+    expectedDelayMinutes: v.union(v.number(), v.null()),
+    /** On the bus (Pi clock). */
+    capturedAtMs: v.number(),
+    receivedAtMs: v.number(),
+  })
+    .index("by_device_request", ["deviceId", "requestId"])
+    .index("by_run", ["runId"]),
+
+  /**
    * A server-issued driver operating grant (docs/07 §6, docs/08 §6): proof
    * that an authorized driver may operate this device on these route
    * versions until `expiresAtMs`. Only the SHA-256 hash is stored. A device
