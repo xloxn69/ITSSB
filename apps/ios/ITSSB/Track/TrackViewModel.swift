@@ -52,14 +52,23 @@ final class TrackViewModel {
 
     /// Starts (or restarts) the assignment and tracking subscriptions.
     func start() {
-        stop()
+        cancelSubscriptions()
         state = .loading
         assignmentsTask = Task { await observeAssignments() }
         connectionTask = Task { await observeConnection() }
     }
 
-    /// Cancels every subscription and drops protected data.
+    /// Cancels every subscription and drops protected data, back to the neutral
+    /// starting state: after sign-out nothing of this account (assignments, run,
+    /// route, a pending notification tap) is left for the next (docs/13 §5 A10).
     func stop() {
+        cancelSubscriptions()
+        pendingAssignmentId = nil
+        state = .loading
+    }
+
+    /// A restart keeps a pending notification tap; `stop` drops it.
+    private func cancelSubscriptions() {
         assignmentsTask?.cancel()
         assignmentsTask = nil
         connectionTask?.cancel()

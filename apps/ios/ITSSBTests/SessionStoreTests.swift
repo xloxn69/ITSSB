@@ -273,3 +273,56 @@ extension SessionStoreTests {
         XCTAssertTrue(auth.calls.contains("signOut"))
     }
 }
+
+/// docs/13 §5 A10: a notification tap pending for account A never reaches B,
+/// and A's sign-out never erases B's tap.
+extension SessionStoreTests {
+    func testSignOutDropsAPendingTapAndStopsPushes() async {
+        let auth = StubAuth()
+        auth.restoreResult = .success(true)
+        let session = store(auth)
+        await session.restore()
+        let router = NotificationRouter()
+        var deactivated = false
+        NotificationRouter.wireSignOut(session, router: router) { deactivated = true }
+        router.requestedAssignmentId = "a_alex"  // A's tapped notification, not yet opened
+        await session.signOut()
+        XCTAssertNil(router.requestedAssignmentId, "account B must not open on A's tap")
+        XCTAssertTrue(deactivated, "this phone stops receiving A's pushes")
+    }
+
+    func testASlowSignOutCleanupNeverErasesTheNextAccountsTap() async {
+        let auth = StubAuth()
+        auth.restoreResult = .success(true)
+        let session = store(auth)
+        await session.restore()
+        let router = NotificationRouter()
+        var heldCleanup: CheckedContinuation<Void, Never>?
+        var cleanupFinished = false
+        session.signOutCleanupLimit = .milliseconds(50)
+        NotificationRouter.wireSignOut(session, router: router) {
+            // A's push deactivation outlives the sign-out limit (a slow network).
+            await withCheckedContinuation { heldCleanup = $0 }
+            cleanupFinished = true
+        }
+
+        // A signs out; a tap for A lands while the sign-out is still running.
+        let signingOut = Task { await session.signOut() }
+        let started = await eventually { heldCleanup != nil }
+        XCTAssertTrue(started)
+        router.requestedAssignmentId = "a_alex"
+        await signingOut.value
+        XCTAssertNil(router.requestedAssignmentId, "A's late tap is dropped before sign-in unlocks")
+
+        // B signs in and taps its own notification; then A's cleanup finally finishes.
+        await session.submitEmail("riley.sample@example.com")
+        await session.submitCode("123456")
+        XCTAssertEqual(session.state, .signedIn)
+        router.requestedAssignmentId = "a_jordan"
+        heldCleanup?.resume()
+        let finished = await eventually { cleanupFinished }
+        XCTAssertTrue(finished)
+        await Task.yield()
+        XCTAssertEqual(router.requestedAssignmentId, "a_jordan", "B's tap survives A's late cleanup")
+    }
+}

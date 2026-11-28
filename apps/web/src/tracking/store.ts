@@ -103,6 +103,8 @@ export class TrackStore {
   private snapshot: { value: RunSnapshot; receivedAtWallMs: number } | null = null;
   private verified: ServerClock | null = null;
   private clockGeneration = 0;
+  /** Bumped by `stop`; subscription answers from an earlier session are dropped. */
+  private session = 0;
 
   constructor(
     readonly source: TrackingSource,
@@ -117,31 +119,45 @@ export class TrackStore {
   /** Starts (or restarts) the assignment subscription and verifies server time. */
   start(): void {
     this.stop();
-    this.set({ kind: "loading" });
+    const session = this.session;
     this.verifyServerTime();
     this.unsubConnection =
       this.source.connection?.((connected) => {
-        if (this.connectionLost === !connected) return;
+        if (session !== this.session || this.connectionLost === !connected) return;
         this.connectionLost = !connected;
         // Back online: time may have drifted while away, so measure it again.
         if (connected) this.verifyServerTime();
         this.set(this.state);
       }) ?? null;
+    // Answers for a stopped session (a signed-out account) are dropped.
     this.unsubAssignments = this.source.assignments(
-      (raw) => this.applyAssignments(raw),
-      (error) => this.fail(error),
+      (raw) => {
+        if (session === this.session) this.applyAssignments(raw);
+      },
+      (error) => {
+        if (session === this.session) this.fail(error);
+      },
     );
   }
 
-  /** Cancels every subscription and drops protected data. */
+  /**
+   * Cancels every subscription and drops protected data, back to the neutral
+   * starting state: on sign-out nothing of this account (assignments, run,
+   * route, verified time) is left for the next one (docs/13 §5 A10).
+   */
   stop(): void {
     this.unsubAssignments?.();
     this.unsubAssignments = null;
     this.unsubConnection?.();
     this.unsubConnection = null;
+    this.session += 1;
     this.connectionLost = false;
     this.clearSelection();
     this.assignments = [];
+    // A server-time answer still on its way belongs to the stopped session.
+    this.clockGeneration += 1;
+    this.verified = null;
+    this.set({ kind: "loading" });
   }
 
   retry(): void {
@@ -307,4 +323,30 @@ export class TrackStore {
     this.state = { ...state };
     for (const listener of this.listeners) listener();
   }
+}
+
+/** The parts of `document` and `window` the foreground check listens to. */
+export interface ForegroundTarget {
+  addEventListener(type: string, listener: () => void): void;
+  removeEventListener(type: string, listener: () => void): void;
+}
+
+/**
+ * Re-measures server time whenever the page is shown again: a sleeping
+ * device can pause the monotonic clock (docs/08 §8.1). Returns a cleanup.
+ */
+export function reverifyOnForeground(
+  store: Pick<TrackStore, "reverifyServerTime">,
+  doc: ForegroundTarget & { readonly visibilityState: string },
+  win: ForegroundTarget,
+): Unsubscribe {
+  const reverify = () => {
+    if (doc.visibilityState === "visible") store.reverifyServerTime();
+  };
+  doc.addEventListener("visibilitychange", reverify);
+  win.addEventListener("pageshow", reverify);
+  return () => {
+    doc.removeEventListener("visibilitychange", reverify);
+    win.removeEventListener("pageshow", reverify);
+  };
 }

@@ -247,3 +247,48 @@ final class TrackViewModelTests: XCTestCase {
         XCTAssertFalse(model.connectionLost)
     }
 }
+
+/// docs/13 §5 A10: after sign-out nothing of account A reaches account B.
+extension TrackViewModelTests {
+    func testSignOutThenAnotherAccountShowsNothingOfTheFirst() async {
+        let source = MockLiveRunSource()
+        let model = await started(source)
+        // Account A (Alex's guardian) is tracking, with a notification tap still waiting.
+        source.assignmentsContinuation?.yield(.ready([alex]))
+        _ = await eventually { source.runContinuation("a_alex") != nil }
+        source.routeContinuation("a_alex")?.yield(route("a_alex"))
+        source.runContinuation("a_alex")?.yield(ready("a_alex"))
+        let trackingA = await eventually {
+            if case .tracking = model.state { return true }
+            return false
+        }
+        XCTAssertTrue(trackingA)
+        model.open(assignmentId: "a_alex_other")
+
+        // Sign out: A's subscriptions end and the model is back to its neutral start.
+        model.stop()
+        XCTAssertEqual(model.state, .loading)
+        XCTAssertTrue(model.assignments.isEmpty)
+        XCTAssertNil(model.selectedAssignmentId)
+        XCTAssertNil(model.pendingAssignmentId)
+        let released = await eventually { source.cancelledRuns.contains("a_alex") }
+        XCTAssertTrue(released)
+
+        // Account B (Jordan's guardian) signs in.
+        model.start()
+        _ = await eventually { source.assignmentSubscriptionCount == 2 }
+        XCTAssertEqual(model.state, .loading)
+        source.assignmentsContinuation?.yield(.ready([jordan]))
+        _ = await eventually { source.runContinuation("a_jordan") != nil }
+        source.runContinuation("a_jordan")?.yield(ready("a_jordan", busLabel: "Bus 4"))
+        let trackingB = await eventually {
+            if case let .tracking(context, run, _) = model.state {
+                return context.assignment == self.jordan && run.runId == "run_a_jordan" && context.route == nil
+            }
+            return false
+        }
+        XCTAssertTrue(trackingB, "B sees only B's run, and no route of A's")
+        XCTAssertEqual(model.assignments, [jordan])
+        XCTAssertEqual(model.selectedAssignmentId, "a_jordan")
+    }
+}

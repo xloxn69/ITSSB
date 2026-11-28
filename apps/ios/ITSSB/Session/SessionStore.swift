@@ -109,6 +109,10 @@ final class SessionStore {
     /// by `signOutCleanupLimit`, so an offline phone still signs out promptly.
     @ObservationIgnored var beforeSignOut: (@MainActor () async -> Void)?
     @ObservationIgnored var signOutCleanupLimit: Duration = .seconds(3)
+    /// Drops in-memory state bound to the signed-out account (e.g. a pending
+    /// notification tap). Runs when protected screens hide and again before the
+    /// form unlocks, so nothing left from this account reaches the next one.
+    @ObservationIgnored var clearAccountState: (@MainActor () -> Void)?
 
     init(auth: any AuthSession, now: @escaping () -> Date = { Date() }) {
         self.auth = auth
@@ -202,9 +206,12 @@ final class SessionStore {
         message = nil
         resendAvailableAt = nil
         state = auth.isConfigured ? .signedOut(.notSignedIn) : .signedOut(.signInUnavailable)
+        clearAccountState?()
         isWorking = true
         if let cleanup = beforeSignOut { await Self.run(cleanup, atMost: signOutCleanupLimit) }
         await auth.signOut()
+        // Anything that arrived for this account while signing out; the next sign-in can't start yet.
+        clearAccountState?()
         isWorking = false
     }
 

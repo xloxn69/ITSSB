@@ -21,6 +21,8 @@ export class AlertsStore {
   private preference: Preference | null = null;
   private saving = false;
   private saveFailed = false;
+  /** Bumped by `stop`; a save answering after it is dropped. */
+  private generation = 0;
 
   constructor(private readonly source: TrackingSource) {
     this.state = source.alerts ? { kind: "loading" } : { kind: "unavailable" };
@@ -69,19 +71,23 @@ export class AlertsStore {
     }
   }
 
+  /** Cancels the subscriptions and drops this assignment's alerts and preference. */
   stop(): void {
     for (const u of this.unsubs) u();
     this.unsubs = [];
+    this.generation += 1;
     this.alerts = null;
     this.preference = null;
     this.saving = false;
     this.saveFailed = false;
+    this.set(this.source.alerts ? { kind: "loading" } : { kind: "unavailable" });
   }
 
   /** Saves a new choice. The shown value changes only when the server confirms it. */
   async save(approachingEnabled: boolean, approachingMinutes: number): Promise<void> {
     const current = this.preference;
     if (!current || !this.source.setPreference || this.saving) return;
+    const started = this.generation;
     this.saving = true;
     this.saveFailed = false;
     this.render();
@@ -92,15 +98,16 @@ export class AlertsStore {
         approachingEnabled,
         approachingMinutes,
       });
+      if (started !== this.generation) return;
       const snap = preferenceSnapshot(raw);
       if (snap.kind === "ready") this.preference = snap.preference;
       else this.saveFailed = true;
     } catch {
+      if (started !== this.generation) return;
       this.saveFailed = true;
-    } finally {
-      this.saving = false;
-      this.render();
     }
+    this.saving = false;
+    this.render();
   }
 
   private render(): void {
