@@ -67,11 +67,31 @@ class RosterStudent:
 
 
 @dataclass(frozen=True, slots=True)
+class RosterStop:
+    """One approved stop of the run's route version (docs/05 D14)."""
+
+    stop_id: str
+    label: str
+    sequence: int
+    latitude: float
+    longitude: float
+
+    @staticmethod
+    def from_wire(d: dict[str, Any]) -> RosterStop:
+        lat, lon = float(d["latitude"]), float(d["longitude"])
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            raise ValueError("stop coordinates")
+        return RosterStop(str(d["stopId"]), str(d["label"]), int(d["sequence"]), lat, lon)
+
+
+@dataclass(frozen=True, slots=True)
 class Roster:
     run_id: str
     route_version_id: str
     students: tuple[RosterStudent, ...]
     server_now_ms: int
+    # Optional on the wire: an older server sends none.
+    stops: tuple[RosterStop, ...] = ()
 
     @staticmethod
     def from_wire(d: dict[str, Any]) -> Roster:
@@ -80,6 +100,7 @@ class Roster:
             route_version_id=str(d["routeVersionId"]),
             students=tuple(RosterStudent.from_wire(s) for s in d["students"]),
             server_now_ms=int(d["serverNowMs"]),
+            stops=tuple(RosterStop.from_wire(s) for s in d.get("stops") or ()),
         )
 
 

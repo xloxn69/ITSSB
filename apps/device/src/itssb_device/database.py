@@ -90,6 +90,26 @@ MIGRATIONS: list[str] = [
         source TEXT NOT NULL CHECK (source IN ('health','telemetry','end_answer'))
     );
     """,
+    # 9: driver delay and issue reports, queued until the server answers (run_reports.py)
+    """
+    CREATE TABLE run_reports (
+        request_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        category TEXT NOT NULL,
+        minutes INTEGER,
+        payload TEXT NOT NULL,
+        sync TEXT NOT NULL DEFAULT 'pending' CHECK (sync IN ('pending','accepted','rejected')),
+        code TEXT,
+        message TEXT,
+        server_report_id TEXT,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at_ms INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
+        captured_at_ms INTEGER NOT NULL,
+        resolved_at_ms INTEGER
+    );
+    CREATE INDEX run_reports_pending ON run_reports(sync, next_attempt_at_ms);
+    """,
 ]
 
 # The most recently ended run, by driver end or school cancellation. Runs are

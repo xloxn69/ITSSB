@@ -35,6 +35,7 @@ from .local_auth import SessionManager, allowed_origins, load_drivers
 from .metrics import SystemProbe
 from .motion import MotionJudge, ObservedFixHolder
 from .recorder import Recorder, RecorderThread
+from .run_reports import RunReportDesk, RunReportSyncThread
 from .status import StatusBoard
 from .storage import StorageGuard
 from .students import DeviceGrantClient, RosterSyncThread, StudentDesk
@@ -113,8 +114,10 @@ class Service:
         trip_events = None
         students = None
         draft_desk = None
+        run_reports = None
         roster_wake = threading.Event()
         draft_wake = threading.Event()
+        report_wake = threading.Event()
         if cfg.upload_enabled:
             assert cfg.device_api_origin and cfg.device_token  # noqa: S101 - upload_enabled
             trip_events = HttpTripEvents(
@@ -142,6 +145,7 @@ class Service:
                 ),
                 wake=draft_wake,
             )
+            run_reports = RunReportDesk(wake=report_wake)
         drivers = load_drivers(cfg.drivers_file)
         log.info("driver unlock: %d driver(s) provisioned", len(drivers))
         driver_api = DriverApi(
@@ -156,6 +160,7 @@ class Service:
             service_timezone=cfg.service_timezone,
             students=students,
             draft_desk=draft_desk,
+            run_reports=run_reports,
         )
         if not driver_api.serves_ui:
             log.warning("driver UI not found at %s; serving the status page", cfg.driver_ui_dir)
@@ -203,6 +208,16 @@ class Service:
                     ),
                     self.stop_event,
                     wake=draft_wake,
+                )
+            )
+            self._threads.append(
+                RunReportSyncThread(
+                    cfg.database_path,
+                    DeviceGrantClient(
+                        HttpTransport(cfg.device_api_origin, cfg.http_timeout_s), cfg.device_token
+                    ),
+                    self.stop_event,
+                    wake=report_wake,
                 )
             )
         if cfg.upload_enabled:

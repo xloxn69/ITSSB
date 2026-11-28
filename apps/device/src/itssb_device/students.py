@@ -284,6 +284,9 @@ class _Ctx:
     grant: str = field(repr=False)
 
 
+RunContext = _Ctx
+
+
 def _error(status: int, code: str, message: str, **extra: Any) -> Reply:
     return status, {"error": code, "message": message, **extra}
 
@@ -375,7 +378,10 @@ class StudentDesk:
             }
         return {"available": True}
 
-    def _context(self, session: KioskSession, db: Database) -> _Ctx | Reply:
+    @staticmethod
+    def run_context(session: KioskSession, db: Database) -> _Ctx | Reply:
+        """The active run, the unlocked driver and their grant, or the refusal.
+        Shared with run_reports.py: the same rules guard a delay report."""
         driver = session.driver
         if driver is None:
             return _error(HTTPStatus.FORBIDDEN, "LOCKED", "Unlock with your driver PIN first.")
@@ -395,7 +401,7 @@ class StudentDesk:
         # The run must be on one of this driver's routes. Checked here, not
         # only by the server, because an offline device answers from its
         # cache: another route's driver must never see this run's names.
-        route = self._route_version(db, run_id)
+        route = StudentDesk._route_version(db, run_id)
         if route is None or route not in {r.route_version_id for r in driver.route_versions}:
             return _error(
                 HTTPStatus.FORBIDDEN,
@@ -440,7 +446,7 @@ class StudentDesk:
             )
         db = self._db()
         try:
-            ctx = self._context(session, db)
+            ctx = self.run_context(session, db)
             if not isinstance(ctx, _Ctx):
                 if db.active_run_id() is None:
                     with self._qr_lock:
@@ -539,7 +545,7 @@ class StudentDesk:
     def roster(self, session: KioskSession) -> Reply:
         db = self._db()
         try:
-            ctx = self._context(session, db)
+            ctx = self.run_context(session, db)
             if not isinstance(ctx, _Ctx):
                 return ctx
             with self._roster_lock:
@@ -603,6 +609,9 @@ class StudentDesk:
             "runId": run_id,
             "routeVersionId": data.get("routeVersionId"),
             "students": data.get("students", []),
+            # Every approved stop of the run's route (docs/05 D14); an older
+            # server sends none.
+            "stops": data.get("stops") or [],
             "fetchedAtMs": fetched,
             "ageMs": max(0, now - fetched),
             "stale": stale_reason is not None,
@@ -644,7 +653,7 @@ class StudentDesk:
             return _error(HTTPStatus.BAD_REQUEST, "BAD_INPUT", str(exc))
         db = self._db()
         try:
-            ctx = self._context(session, db)
+            ctx = self.run_context(session, db)
             if not isinstance(ctx, _Ctx):
                 return ctx
             run_id, grant = ctx.run_id, ctx.grant
